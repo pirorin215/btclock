@@ -39,12 +39,14 @@ int getSeconds() {
 // --- Main Functions ---
 void setup() {
     Serial.begin(115200);
-    delay(100); // Wait for serial to stabilize
+
+    // Short delay to let Serial initialize (no blocking wait loop)
+    delay(200);
 
     Serial.println("");
     Serial.println("========================================");
     Serial.println("[BIKECLOCK] BikeClock starting...");
-    Serial.println("[BIKECLOCK] Firmware Version: 1.0.0");
+    Serial.println("[BIKECLOCK] Firmware Version: 1.0.1");
     Serial.println("[BIKECLOCK] Build Date: " __DATE__ " " __TIME__);
     Serial.println("========================================");
 
@@ -99,7 +101,7 @@ void loop() {
 
     // Heartbeat logging every 5 seconds
     if (currentMillis - g_lastHeartbeat >= 5000) {
-        Serial.printf("[HEARTBEAT] Uptime: %lu sec | Loops: %lu | TimeSynced: %s | Timestamp: %lu\n",
+        Serial.printf("[HEARTBEAT v1.0.1] Uptime: %lu sec | Loops: %lu | TimeSynced: %s | Timestamp: %lu\n",
                      currentMillis / 1000,
                      g_loopCount,
                      g_timeSynced ? "YES" : "NO",

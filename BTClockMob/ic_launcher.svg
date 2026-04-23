@@ -1,0 +1,13 @@
+<svg width="512" height="512" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景：濃い青 -->
+  <rect width="512" height="512" fill="#1a1a2e" rx="80"/>
+
+  <!-- 外枠 -->
+  <rect x="56" y="156" width="400" height="200" rx="20" fill="#0f3460" stroke="#00d4ff" stroke-width="8"/>
+
+  <!-- デジタル時計表示 -->
+  <text x="256" y="290" font-family="Arial, sans-serif" font-size="140" font-weight="bold" text-anchor="middle" fill="#00d4ff">88:88</text>
+
+  <!-- 小さい点滅用の点 -->
+  <circle cx="256" cy="340" r="8" fill="#00d4ff"/>
+</svg>

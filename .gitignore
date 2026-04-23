@@ -1,0 +1,53 @@
+# Arduino/ESP32
+*.pyc
+__pycache__/
+*.log
+*.bin
+*.elf
+*.hex
+
+# Build artifacts
+build/
+dist/
+*.o
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDE
+.vscode/
+.sublime-*
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Claude Code
+.claude/
+
+# Temporary files
+*.tmp
+*.temp
+*.cache
+
+# Secrets
+.env
+*.key
+*.pem
+secrets/
+
+# 設定ファイル（テンプレートは除外しない）
+bikeclock/setting.sh
+
+# コード検索インデックス
+.cocoindex_code/

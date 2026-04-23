@@ -66,7 +66,13 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
 
 // --- BLE Setup ---
 void setupBLE() {
-    Serial.println("[BIKECLOCK] Initializing BLE...");
+    Serial.println("[BIKECLOCK] ========================================");
+    Serial.println("[BIKECLOCK] BLE Initialization");
+    Serial.println("[BIKECLOCK] Firmware Version: 1.0.1 (2026-04-23)");
+    Serial.println("[BIKECLOCK] BLE Service UUID: " BLE_SERVICE_UUID);
+    Serial.println("[BIKECLOCK] Command UUID: " BLE_CHAR_COMMAND_UUID);
+    Serial.println("[BIKECLOCK] Response UUID: " BLE_CHAR_RESPONSE_UUID);
+    Serial.println("[BIKECLOCK] ========================================");
 
     // Initialize Bluefruit
     Bluefruit.begin();
@@ -87,36 +93,34 @@ void setupBLE() {
     bleService.setPermission(SECMODE_OPEN, SECMODE_OPEN);
     Serial.println("[BIKECLOCK] Service permission set to OPEN/OPEN");
 
-    // Command characteristic configuration
-    // Use Read + Write only (no Notify for now)
-    bleCommandCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE);
+    // Command characteristic configuration (BIDIRECTIONAL: READ | WRITE | NOTIFY)
+    // This single characteristic handles both command reception and response notification
+    bleCommandCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
     bleCommandCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
-    bleCommandCharacteristic.setFixedLen(32);  // Set FixedLen before begin()
+    bleCommandCharacteristic.setFixedLen(32);
     bleCommandCharacteristic.setWriteCallback(onCommandWritten);
-    // No CCCD callback needed without Notify
+    bleCommandCharacteristic.setCccdWriteCallback(cccd_callback);
 
-    // Response characteristic configuration
-    bleResponseCharacteristic.setProperties(CHR_PROPS_NOTIFY);
-    bleResponseCharacteristic.setPermission(SECMODE_OPEN, SECMODE_OPEN);
-    bleResponseCharacteristic.setFixedLen(512);
-    bleResponseCharacteristic.setCccdWriteCallback(cccd_callback);
+    // Note: Response characteristic is not needed anymore
+    // We use the command characteristic for bidirectional communication
 
-    // NOW call begin() in different order (Response first)
+    // NOW call begin() for service and single characteristic
     Serial.println("[BIKECLOCK] Starting BLE Service...");
     err_t service_err = bleService.begin();
     Serial.printf("[BIKECLOCK] BLE Service begin() result: %d\n", service_err);
 
-    // Skip Response Characteristic - using Command Characteristic for bidirectional communication
-    Serial.println("[BIKECLOCK] Skipping Response Characteristic - using Command Characteristic for bidirectional communication");
-
-    // Command Characteristic with Read + Write + Notify
-    Serial.println("[BIKECLOCK] Starting Command Characteristic...");
+    // Single Bidirectional Characteristic (READ | WRITE | NOTIFY)
+    Serial.println("[BIKECLOCK] Starting Command Characteristic (READ | WRITE | NOTIFY)...");
     err_t cmd_err = bleCommandCharacteristic.begin();
     Serial.printf("[BIKECLOCK] Command Characteristic begin() result: %d\n", cmd_err);
-
-    // Set initial value for command characteristic (bidirectional)
-    uint8_t initValue[] = "Ready for commands";
-    bleCommandCharacteristic.write(initValue, strlen((char*)initValue));
+    if (cmd_err == 0) {
+        Serial.println("[BIKECLOCK] ✅ Command Characteristic initialized successfully!");
+        Serial.println("[BIKECLOCK] UUID: " BLE_CHAR_COMMAND_UUID);
+    } else {
+        Serial.println("[BIKECLOCK] ❌ Command Characteristic initialization FAILED!");
+    }
+    Serial.flush();
+    delay(100);
 
     // Set up advertising
     Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
@@ -130,9 +134,12 @@ void setupBLE() {
     Bluefruit.Advertising.restartOnDisconnect(true);
     Bluefruit.Advertising.start();
 
-    Serial.printf("[BIKECLOCK] BLE initialized. Device name: %s\n", BLE_DEVICE_NAME);
-    Serial.printf("[BIKECLOCK] Service UUID: %s\n", BLE_SERVICE_UUID);
-    Serial.println("[BIKECLOCK] Advertising started");
+    Serial.println("[BIKECLOCK] ========================================");
+    Serial.println("[BIKECLOCK] ✅ BLE Initialization Complete!");
+    Serial.printf("[BIKECLOCK] Device Name: %s\n", BLE_DEVICE_NAME);
+    Serial.println("[BIKECLOCK] Advertising started successfully!");
+    Serial.println("[BIKECLOCK] Waiting for smartphone connection...");
+    Serial.println("[BIKECLOCK] ========================================");
 }
 
 // --- Time Sync Handler ---
@@ -167,7 +174,7 @@ void handleTimeSync(const char* command) {
 
 // --- Response Helper ---
 void sendResponse(const char* message) {
-    // Write to Command Characteristic (bidirectional)
-    bleCommandCharacteristic.write((uint8_t*)message, strlen(message));
+    // Send notification via Command Characteristic (bidirectional)
+    bleCommandCharacteristic.notify((uint8_t*)message, strlen(message));
     Serial.printf("[BIKECLOCK] Response sent: %s\n", message);
 }
