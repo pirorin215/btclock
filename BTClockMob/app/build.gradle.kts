@@ -21,11 +21,8 @@ android {
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
-        // Explicitly set ndkVersion if not already set, for better compatibility
-        // Replace "25.2.9519653" with a version you have installed or want Gradle to download
-            ndkVersion = "29.0.14206865" // Example NDK version from my environment
-        }
-        
+        ndkVersion = "29.0.14206865"
+    }
         
     buildTypes {
         release {
@@ -49,30 +46,18 @@ android {
         buildConfig = true
     }
 
-        packaging {
-
-            resources {
-
-                excludes += "META-INF/INDEX.LIST"
-
-                excludes += "META-INF/DEPENDENCIES"
-
-                pickFirsts += "META-INF/LICENSE.md"
-
-                pickFirsts += "META-INF/LICENSE.txt"
-
-                pickFirsts += "META-INF/LICENSE"
-
-            }
-
+    packaging {
+        resources {
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/DEPENDENCIES"
+            pickFirsts += "META-INF/LICENSE.md"
+            pickFirsts += "META-INF/LICENSE.txt"
+            pickFirsts += "META-INF/LICENSE"
         }
-
-
-
     }
+}
 
 dependencies {
-
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -85,38 +70,13 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.converter.kotlinx.serialization)
-    implementation(libs.okhttp)
-    implementation(libs.okhttp.logging.interceptor)
 
     // Google Play Services Location
     implementation(libs.google.play.services.location)
-    // Add this for Task.await() extension function
     implementation(libs.kotlinx.coroutines.play.services)
-
-    // Google Sign-In
-    implementation(libs.google.play.services.auth)
-
-    // Google Cloud
-    implementation(platform(libs.google.cloud.libraries.bom))
-    implementation(libs.google.cloud.speech)
-    implementation(libs.kotlinx.coroutines.guava)
-
-    // gRPCトランスポートを追加 (Google Cloud Libraries BOMがバージョンを管理)
-    implementation(libs.grpc.okhttp)
-
-    // Gemini API for AI button feature
-    implementation(libs.generativeai)
 
     // DataStore for persistent settings
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.composereorderable)
-
-    // Vico for charts
-    implementation(libs.vico.compose)
-    implementation(libs.vico.compose.m3)
-    implementation(libs.vico.core)
 
     // Koin for DI
     implementation(libs.koin.android)

@@ -2,7 +2,6 @@ package com.pirorin215.btclockmob.di
 
 import android.content.Context
 import com.pirorin215.btclockmob.LocationTracker
-import com.pirorin215.btclockmob.viewModel.BleSelectionManager
 import com.pirorin215.btclockmob.viewModel.LocationMonitor
 import com.pirorin215.btclockmob.viewModel.LogManager
 import com.pirorin215.btclockmob.data.AppSettingsRepository
@@ -17,11 +16,6 @@ val managerModule = module {
             get<Context>(),
             get<CoroutineScope>(),
             get(),
-            get()
-        )
-    }
-    single {
-        BleSelectionManager(
             get()
         )
     }

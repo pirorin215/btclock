@@ -17,6 +17,3 @@ val DistanceColor3 = Color(0xFFE57373) // ~10km
 val DistanceColor4 = Color(0xFFEF5350) // ~50km
 val DistanceColor5 = Color(0xFFF44336) // ~100km
 val DistanceColor6 = Color(0xFFD32F2F) // >100km
-
-// Color for transcription pending status
-val PendingBackgroundColor = Color(0xFFFFF9C4) // Pale yellow for pending transcription

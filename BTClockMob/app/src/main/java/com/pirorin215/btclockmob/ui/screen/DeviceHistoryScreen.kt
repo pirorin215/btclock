@@ -2,7 +2,6 @@ package com.pirorin215.btclockmob.ui.screen
 
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,10 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import com.pirorin215.btclockmob.R
-import com.pirorin215.btclockmob.battery.BatteryPrediction
 import com.pirorin215.btclockmob.viewModel.DeviceHistoryViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -38,10 +35,6 @@ fun DeviceHistoryScreen(
     val context = LocalContext.current
 
     val listState = rememberLazyListState()
-    val coroutineScope = rememberCoroutineScope()
-
-    // チャートでタッチされている位置に対応するタイムスタンプを保持
-    var highlightedTimestamp by remember { mutableStateOf<Long?>(null) }
 
     BackHandler(onBack = {
         if (isSelectionMode) {
@@ -54,76 +47,14 @@ fun DeviceHistoryScreen(
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
 
-    // 電池残り時間を計算
-    val batteryPrediction = remember(entries) {
-        predictBatteryLifeFromHistory(entries)
-    }
-
-    val predictionText = remember(batteryPrediction) {
-        when (batteryPrediction) {
-            is BatteryPrediction.RemainingTime -> {
-                val totalHours = batteryPrediction.hours
-                val days = totalHours / 24
-                val hours = totalHours % 24
-                if (days > 0) {
-                    "残り${days}日${hours}時間"
-                } else {
-                    "残り${totalHours}時間"
-                }
-            }
-            else -> null
-        }
-    }
-
-    // 最新サイクルの経過時間を計算
-    val currentCycleElapsedHours = remember(entries) {
-        calculateCurrentCycleElapsedTime(entries)
-    }
-
-    val elapsedTimeText = remember(currentCycleElapsedHours) {
-        currentCycleElapsedHours?.let { totalHours ->
-            val days = totalHours / 24
-            val hours = totalHours % 24
-            if (days > 0) {
-                "経過${days}日${hours}時間"
-            } else {
-                "経過${totalHours}時間"
-            }
-        }
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (isSelectionMode) {
-                            Text("${selectedEntries.size} 選択中")
-                        } else {
-                            Column {
-                                Text(stringResource(R.string.device_history_title))
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    elapsedTimeText?.let { text ->
-                                        Text(
-                                            text = text,
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
-                                    predictionText?.let { text ->
-                                        Text(
-                                            text = text,
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                    if (isSelectionMode) {
+                        Text("${selectedEntries.size} 選択中")
+                    } else {
+                        Text(stringResource(R.string.device_history_title))
                     }
                 },
                 navigationIcon = {
@@ -171,35 +102,6 @@ fun DeviceHistoryScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // 固定部分: チャート
-                DeviceHistoryChart(
-                    history = entries,
-                    onDataPointClicked = { timestamp ->
-                        Log.d("DeviceHistoryScreen", "onDataPointClicked received timestamp: $timestamp")
-                        // チャートのデータは正規化されているので、完全に合致しない場合は一つ前のポイントとして処理
-                        val index = entriesForList.indexOfFirst { it.timestamp <= timestamp }
-                        Log.d("DeviceHistoryScreen", "Found index in entriesForList: $index, entriesForList.size: ${entriesForList.size}")
-                        if (index >= 0) {
-                            // ハイライトするタイムスタンプを更新
-                            highlightedTimestamp = entriesForList[index].timestamp
-                            Log.d("DeviceHistoryScreen", "Scrolling to item at position: ${index + 1}")
-                            coroutineScope.launch {
-                                // +1 to account for the header item
-                                // ドラッグ中は即座にスクロール（アニメーションなし）
-                                listState.scrollToItem(index + 1)
-                                Log.d("DeviceHistoryScreen", "Scrolled to item")
-                            }
-                        } else {
-                            highlightedTimestamp = null
-                            Log.d("DeviceHistoryScreen", "Index not found (index < 0)")
-                        }
-                    },
-                    onTouchEnd = {
-                        // タッチが終了したらハイライトを解除
-                        highlightedTimestamp = null
-                    }
-                )
-
                 // スクロール可能部分: リスト
                 LazyColumn(
                     state = listState,
@@ -218,7 +120,7 @@ fun DeviceHistoryScreen(
                         home = homeLocation,
                         isSelectionMode = isSelectionMode,
                         isSelected = selectedEntries.contains(entry.timestamp),
-                        isHighlighted = highlightedTimestamp == entry.timestamp,
+                        isHighlighted = false,
                         onClick = { clickedEntry ->
                             if (isSelectionMode) {
                                 // 選択モード時はトグル

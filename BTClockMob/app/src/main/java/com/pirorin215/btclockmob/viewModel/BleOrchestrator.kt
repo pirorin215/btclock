@@ -27,14 +27,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import com.pirorin215.btclockmob.data.DeviceSettings
-import com.pirorin215.btclockmob.data.DeviceInfoResponse
 import com.pirorin215.btclockmob.constants.TimeConstants
 
 import com.pirorin215.btclockmob.viewModel.LogManager
 import com.pirorin215.btclockmob.LocationTracker
 import com.pirorin215.btclockmob.data.DeviceHistoryRepository
 import com.pirorin215.btclockmob.bluetooth.constants.BleConstants
-import com.pirorin215.btclockmob.bluetooth.notification.BleNotificationManager
 import com.pirorin215.btclockmob.bluetooth.device.BleDeviceManager
 import com.pirorin215.btclockmob.bluetooth.settings.BleSettingsManager
 import com.pirorin215.btclockmob.viewModel.NavigationEvent
@@ -47,7 +45,6 @@ class BleOrchestrator(
     private val onDeviceReadyEvent: SharedFlow<Unit>,
     private val locationMonitor: LocationMonitor,
     private val appSettingsRepository: AppSettingsRepository,
-    private val bleSelectionManager: BleSelectionManager,
     private val logManager: LogManager,
     private val disconnectSignal: SharedFlow<Unit>,
     private val locationTracker: LocationTracker,
@@ -79,15 +76,6 @@ class BleOrchestrator(
     private val _navigationEvent = MutableSharedFlow<NavigationEvent>()
     val navigationEvent = _navigationEvent.asSharedFlow()
 
-    // 通知マネージャーの初期化
-    private val notificationManager by lazy {
-        BleNotificationManager(
-            context = context,
-            appSettingsRepository = appSettingsRepository,
-            logManager = logManager
-        )
-    }
-
     // デバイスマネージャーの初期化
     internal val bleDeviceManager by lazy {
         BleDeviceManager(
@@ -95,12 +83,7 @@ class BleOrchestrator(
             sendCommand = { command -> sendCommand(command) },
             logManager = logManager,
             _currentOperation = _currentOperation,
-            bleMutex = bleMutex,
-            onFileListUpdated = { /* BikeClockはファイル処理を行わない */ },
-            notificationManager = notificationManager,
-            locationTracker = locationTracker,
-            deviceHistoryRepository = deviceHistoryRepository,
-            appSettingsRepository = appSettingsRepository
+            bleMutex = bleMutex
         )
     }
 
@@ -117,24 +100,19 @@ class BleOrchestrator(
     }
 
     // --- マネージャーの委譲プロパティ ---
-    // val fileList: StateFlow<List<com.pirorin215.btclockmob.data.FileEntry>> get() = bleDeviceManager.fileList // File transfer disabled
-    val deviceInfo: StateFlow<com.pirorin215.btclockmob.data.DeviceInfoResponse?> get() = bleDeviceManager.deviceInfo
     val deviceSettings: StateFlow<com.pirorin215.btclockmob.data.DeviceSettings> get() = bleSettingsManager.deviceSettings
 
-
-    // Retry job for file list fetch when device is busy (recording)
-    private var fileListRetryJob: Job? = null
 
     // Periodic time sync job for BikeClock (1 minute interval)
     private var periodicTimeSyncJob: Job? = null
 
     init {
-        // Monitor disconnect signal to cancel ongoing retry
+        // Monitor disconnect signal
         disconnectSignal
             .onEach {
-                addDebugLog("BLE disconnected, canceling file list retry")
-                fileListRetryJob?.cancel()
-                fileListRetryJob = null
+                addDebugLog("BLE disconnected")
+                // 保存: 切断時
+                saveConnectionHistory(isDisconnection = true)
             }
             .launchIn(scope)
 
@@ -144,6 +122,8 @@ class BleOrchestrator(
                 startFullSync()
                 // Start periodic time sync job
                 startPeriodicTimeSync()
+                // 保存: 接続時
+                saveConnectionHistory(isDisconnection = false)
             }
             .launchIn(scope)
 
@@ -159,8 +139,6 @@ class BleOrchestrator(
 
     fun stop() {
         bleDeviceManager.stopTimeSyncJob()
-        fileListRetryJob?.cancel()
-        fileListRetryJob = null
         periodicTimeSyncJob?.cancel()
         periodicTimeSyncJob = null
         addLog("オーケストレーターを停止しました")
@@ -218,50 +196,9 @@ class BleOrchestrator(
         addDebugLog("Periodic time sync job started (interval: ${TimeConstants.TIME_SYNC_INTERVAL_MS}ms)")
     }
 
-    /**
-     * デバイスが録音中の場合、短いインターバルでファイルリスト取得をリトライする
-     * マイクロコントローラは非アクティブ後にディープスリープに入るため、
-     * 録音終了後の短いウィンドウで頻繁にリトライし、ディープスリープ前に試行する
-     * BLE切断時（ディープスリープに入った場合）はリトライを停止
-     */
-    private fun startFileListRetry() {
-        // 既存のリトライジョブをキャンセル
-        fileListRetryJob?.cancel()
-
-        fileListRetryJob = scope.launch {
-            var retryCount = 0
-            val maxRetries = TimeConstants.BLE_MAX_RETRIES // 合計30秒（5秒 * 6）
-            val retryDelay = TimeConstants.BLE_RETRY_DELAY_MS // 5秒
-
-            while (retryCount < maxRetries) {
-                // まだ接続されているか確認（デバイスがディープスリープに入った可能性）
-                if (connectionStateFlow.value !is ConnectionState.Connected) {
-                    addLog("リトライ中にBLE切断を検出、停止します")
-                    break
-                }
-
-                delay(retryDelay)
-                retryCount++
-                addDebugLog("ファイルリスト取得をリトライ中 ($retryCount/$maxRetries)")
-
-                val success = bleDeviceManager.fetchFileList(connectionStateFlow.value)
-                if (success) {
-                    addLog("リトライ $retryCount 回目でファイルリストの取得に成功しました")
-                    break
-                }
-            }
-
-            if (retryCount >= maxRetries && connectionStateFlow.value is ConnectionState.Connected) {
-                addLog("$maxRetries 回のリトライ後にファイルリストの取得に失敗しました", LogLevel.ERROR)
-            }
-
-            fileListRetryJob = null
-        }
-    }
-
     private fun performPostTransferSync() {
         scope.launch {
-            addDebugLog("転送後同期処理...")
+            addDebugLog("同期処理...")
 
             // BikeClockは時刻同期のみサポート
             val timeSyncSuccess = bleDeviceManager.syncTime(connectionStateFlow.value)
@@ -280,7 +217,7 @@ class BleOrchestrator(
         if (characteristic.uuid != UUID.fromString(BleRepository.COMMAND_UUID_STRING)) return
 
         when (_currentOperation.value) {
-            BleOperation.FETCHING_FILE_LIST, BleOperation.FETCHING_DEVICE_INFO, BleOperation.SENDING_TIME -> {
+            BleOperation.SENDING_TIME -> {
                 bleDeviceManager.handleResponse(value, _currentOperation.value)
             }
             BleOperation.FETCHING_SETTINGS, BleOperation.SENDING_SETTINGS -> {
@@ -301,8 +238,6 @@ class BleOrchestrator(
         repository.sendAck(ackValue)
     }
 
-    // fun fetchFileList(extension: String) { /* File transfer feature disabled */ }
-
     suspend fun getSettings() {
         bleSettingsManager.getSettings(connectionStateFlow.value)
     }
@@ -315,12 +250,29 @@ class BleOrchestrator(
         bleSettingsManager.updateSettings(updater)
     }
 
-
-    fun toggleSelection(fileName: String) {
-        bleSelectionManager.toggleSelection(fileName)
-    }
-
-    fun clearSelection() {
-        bleSelectionManager.clearSelection()
+    /**
+     * 現在の位置情報を取得し、接続履歴として保存する
+     */
+    private fun saveConnectionHistory(isDisconnection: Boolean) {
+        scope.launch {
+            try {
+                val type = if (isDisconnection) "Disconnection" else "Connection"
+                addDebugLog("Saving $type history...")
+                val locationResult = locationTracker.getCurrentLocation()
+                val locationData = locationResult.getOrNull()
+                
+                val historyEntry = com.pirorin215.btclockmob.data.DeviceHistoryEntry(
+                    timestamp = System.currentTimeMillis(),
+                    latitude = locationData?.latitude,
+                    longitude = locationData?.longitude,
+                    isDisconnection = isDisconnection
+                )
+                
+                deviceHistoryRepository.addEntry(historyEntry)
+                addDebugLog("$type history saved: Lat=${locationData?.latitude}, Lon=${locationData?.longitude}")
+            } catch (e: Exception) {
+                addLog("履歴保存中にエラーが発生しました: ${e.message}", LogLevel.ERROR)
+            }
+        }
     }
 }

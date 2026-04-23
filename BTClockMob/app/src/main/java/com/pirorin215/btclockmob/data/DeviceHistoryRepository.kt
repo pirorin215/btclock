@@ -40,33 +40,9 @@ class DeviceHistoryRepository(private val context: Context) {
 
     suspend fun addEntry(entry: DeviceHistoryEntry) {
         updateListInDataStore(context.deviceHistoryDataStore, PreferencesKeys.DEVICE_HISTORY_LIST) { currentList ->
-            // Check if currentList is not empty for filtering
-            if (currentList.isNotEmpty()) {
-                val lastEntry: DeviceHistoryEntry = currentList.first()
-
-                val timeDiff = entry.timestamp - lastEntry.timestamp
-
-                val newLat = entry.latitude
-                val newLon = entry.longitude
-                val lastLat = lastEntry.latitude
-                val lastLon = lastEntry.longitude
-
-                val locationIsSimilar = if (newLat != null && newLon != null && lastLat != null && lastLon != null) {
-                    val latDiff: Double = newLat - lastLat
-                    val lonDiff: Double = newLon - lastLon
-                    val distanceSquared: Double = latDiff * latDiff + lonDiff * lonDiff
-                    distanceSquared < LocationConstants.LOCATION_THRESHOLD_SQUARED
-                } else {
-                    false // If location data is incomplete, assume not similar enough to block
-                }
-
-                // Only prevent adding if BOTH time is within threshold AND location is similar
-                if (timeDiff < TimeConstants.DEVICE_HISTORY_TIME_THRESHOLD_MS && locationIsSimilar) {
-                    return@updateListInDataStore // Don't add if within 30 minutes AND location is too similar
-                }
-            }
-
-            // Add new entry to the beginning of the list
+            // BikeClock requires recording all connection/disconnection events
+            // as they represent start and end of bike trips.
+            // Filtering by time or location is no longer needed.
             currentList.add(0, entry)
         }
     }

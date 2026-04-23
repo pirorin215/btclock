@@ -3,22 +3,10 @@
     <string name="device_history_title">@string/menu_device_history</string>
     <string name="main_screen_title">BTClock</string>
     <string name="no_data_message">no data</string>
-    <string name="google_api_key_label">Cloud Speech-to-Text API Key</string>
-    <string name="gemini_api_key_label">Gemini API Key</string>
-    <string name="ble_burst_size_label">BLE Chunk Burst Size</string>
-    <string name="google_todo_list_name_label">Google ToDo List Name</string>
-    <string name="close_button_text">Close</string>
 
     <!-- MainScreen Menu Items -->
     <string name="menu_app_settings">アプリ設定</string>
-    <string name="menu_google_tasks_sync_settings">Google Tasks 同期設定</string>
-    <string name="menu_recorder_settings">レコーダ設定</string>
-    <string name="menu_recorder_log">レコーダログ</string>
-    <string name="menu_device_history">デバイス状態</string>
-    <string name="menu_adpcm_test">ADPCMデコードテスト</string>
-    <string name="menu_wav_save_folder">WAV保存フォルダ</string>
-    <string name="wav_save_folder_title">WAVファイルの保存先</string>
-    <string name="wav_save_folder_path">/storage/emulated/0/Documents/FastRecMob/</string>
+    <string name="menu_device_history">デバイス履歴</string>
     <string name="close">閉じる</string>
     <string name="menu_app_log">アプリログ</string>
     <string name="app_log_title">@string/menu_app_log</string>
@@ -29,39 +17,13 @@
     <string name="status_disconnected">（未接続）</string>
     <string name="stop_app_content_description">Stop App</string>
     <string name="force_reconnect_ble_content_description">Force Reconnect BLE</string>
-    <string name="show_device_history_content_description">Show Device History</string>
-
-    <!-- GoogleTasksSyncSettingsScreen -->
-    <string name="google_tasks_sync_settings_title">@string/menu_google_tasks_sync_settings</string>
-    <string name="sign_in_to_google_tasks">Google Tasks にサインイン</string>
-    <string name="currently_logged_in_account">現在ログイン中のアカウント:</string>
-    <string name="sign_out_content_description">Sign Out</string>
-    <string name="sign_out_button">サインアウト</string>
-    <string name="sync_with_google_tasks_content_description">Sync with Google Tasks</string>
-    <string name="sync_button">同期</string>
-    <string name="google_tasks_sync_interval_minutes">Google Tasks 同期周期: %d 分</string>
-    <string name="save_google_todo_list_name_button">Google ToDo List 名を保存</string>
-    <string name="syncing_with_google_tasks">Google Tasks と同期中...</string>
+    <string name="show_device_history_content_description">デバイス履歴を表示</string>
 
     <!-- AppSettingsScreen -->
     <string name="app_settings_title">@string/menu_app_settings</string>
-    <string name="transcription_retention_count">文字起こし保持数</string>
-    <string name="max_title_characters">タイトルの最大文字数</string>
-    <string name="transcription_font_size">文字起こしフォントサイズ: %d sp</string>
     <string name="theme_mode">テーマモード</string>
     <string name="auto_start_on_boot">OS起動時に自動開始</string>
-    <string name="voltage_retry_count_label">電圧取得回数</string>
-    <string name="voltage_acquisition_interval_label">電圧取得間隔 (ms)</string>
-    <string name="low_voltage_threshold_label">低電圧通知しきい値 (V) ※空欄でOFF</string>
-    <string name="low_voltage_notify_every_time">低電圧を毎回通知</string>
     <string name="save_button">保存</string>
-
-    <!-- Low Voltage Notification -->
-    <string name="low_voltage_notification_title">バッテリー低電圧警告</string>
-    <string name="low_voltage_notification_text">電圧が %1$.2fV に低下しました（しきい値: %2$.2fV）</string>
-
-    <!-- Transcription Notification -->
-    <string name="transcription_notification_enabled">文字起こし完了を通知</string>
 
     <!-- DeviceHistoryScreen -->
     <string name="back_button_content_description">Back</string>
@@ -69,41 +31,7 @@
     <string name="no_device_history_yet">No device history yet.</string>
     <string name="confirm_delete_title">履歴を削除</string>
     <string name="confirm_delete_message">全てのデバイス履歴を削除してもよろしいですか？</string>
-    <string name="chart_type_voltage">電圧</string>
-    <string name="chart_type_battery_level">バッテリーレベル</string>
-
-    <!-- TranscriptionResultPanel -->
-    <string name="transcription_audio_stats">メモ: %1$d 件, WAV: %2$d 件</string>
-    <string name="show_synced_items">同期済表示</string>
-    <string name="delete_selected_content_description">Delete Selected</string>
-    <string name="clear_all_content_description">Clear All</string>
-    <string name="add_manual_transcription_content_description">手動で文字起こしを追加</string>
-    <string name="clear_all_dialog_title">全件クリア</string>
-    <string name="clear_all_dialog_message">全てのメモを削除しますか？</string>
     <string name="delete_button">削除</string>
     <string name="cancel_button">キャンセル</string>
-    <string name="delete_selected_dialog_title">選択した項目を削除</string>
-    <string name="delete_selected_dialog_message">%d 件を削除しますか？</string>
-    <string name="new_creation_dialog_title">新規作成</string>
-    <string name="save_dialog_button">保存</string>
-
-    <!-- TranscriptionDetailBottomSheet -->
-    <string name="retranscribe_content_description">Retranscribe</string>
-    <string name="copy_text_content_description">Copy Text</string>
-    <string name="delete_transcription_content_description">Delete Transcription</string>
-    <string name="google_task_information">Google Task Information</string>
-    <string name="title_label">タイトル</string>
-    <string name="details_label">詳細</string>
-    <string name="unsaved_changes">Unsaved changes</string>
-    <string name="play_button">再生</string>
-    <string name="stop_button">停止</string>
-    <string name="map_content_description">地図</string>
-    <string name="map_button">地図</string>
-    <string name="save_changes_content_description">Save Changes</string>
-
-    <!-- LogDownloadScreen -->
-    <string name="screen_recorder_log">@string/menu_recorder_log</string>
-    <string name="download_button">ダウンロード</string>
-    <string name="no_log_files_message">ログファイルはありません。</string>
 
 </resources>

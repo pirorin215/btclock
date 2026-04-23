@@ -3,7 +3,6 @@ package com.pirorin215.btclockmob.ui.screen
 import android.location.Location
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
@@ -17,7 +16,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,10 +35,9 @@ import java.util.Date
 import java.util.Locale
 
 // Column widths for DeviceHistoryScreen
-private val DATE_TIME_COLUMN_WIDTH = 100.dp
-private val LOCATION_COLUMN_WIDTH = 100.dp
-private val BATTERY_COLUMN_WIDTH = 60.dp
-private val VOLTAGE_COLUMN_WIDTH = 60.dp
+private val DATE_TIME_COLUMN_WIDTH = 110.dp
+private val TYPE_COLUMN_WIDTH = 60.dp
+private val LOCATION_COLUMN_WIDTH = 120.dp
 
 @Composable
 fun DeviceHistoryHeader() {
@@ -47,7 +45,7 @@ fun DeviceHistoryHeader() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.Start, // Use Start for fixed width columns
+        horizontalArrangement = Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
@@ -56,25 +54,18 @@ fun DeviceHistoryHeader() {
             modifier = Modifier.width(DATE_TIME_COLUMN_WIDTH)
         )
         Text(
-            text = "位置情報",
+            text = "種別",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.width(TYPE_COLUMN_WIDTH)
+        )
+        Text(
+            text = "位置情報 (緯度/経度)",
             style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.width(LOCATION_COLUMN_WIDTH),
             textAlign = TextAlign.Start
         )
-        Text(
-            text = "残量",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.width(BATTERY_COLUMN_WIDTH),
-            textAlign = TextAlign.Start
-        )
-        Text(
-            text = "電圧",
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.width(VOLTAGE_COLUMN_WIDTH),
-            textAlign = TextAlign.End
-        )
     }
-    Divider()
+    HorizontalDivider()
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -99,6 +90,9 @@ fun DeviceHistoryCard(
         null
     }
 
+    val typeText = if (entry.isDisconnection) "切断" else "接続"
+    val typeColor = if (entry.isDisconnection) Color(0xFFFF9800) else Color(0xFF4CAF50)
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -119,7 +113,7 @@ fun DeviceHistoryCard(
         )
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // チェックボックス（選択モード時のみ表示）
@@ -127,77 +121,63 @@ fun DeviceHistoryCard(
                 Checkbox(
                     checked = isSelected,
                     onCheckedChange = null, // クリックは親で処理
-                    modifier = Modifier.padding(start = 8.dp)
+                    modifier = Modifier.padding(end = 8.dp)
                 )
             }
 
             Column(modifier = Modifier.weight(1f)) {
-            val date = SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()).format(Date(entry.timestamp))
-            val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(entry.timestamp))
+                val date = SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()).format(Date(entry.timestamp))
+                val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(entry.timestamp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Start // Use Start for fixed width columns
-            ) {
-                Text(
-                    text = date,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.width(DATE_TIME_COLUMN_WIDTH) // Fixed width
-                )
-                entry.latitude?.let { lat ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Start
+                ) {
                     Text(
-                        text = "%.5f".format(lat),
+                        text = date,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.width(LOCATION_COLUMN_WIDTH), // Fixed width
-                        textAlign = TextAlign.Start,
-                        color = locationTextColor ?: MaterialTheme.colorScheme.onSurface
+                        modifier = Modifier.width(DATE_TIME_COLUMN_WIDTH)
                     )
-                } ?: Box(Modifier.width(LOCATION_COLUMN_WIDTH))
-
-                entry.batteryLevel?.let { level ->
                     Text(
-                        text = "${String.format("%.1f", level)}%",
+                        text = typeText,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.width(BATTERY_COLUMN_WIDTH), // Fixed width
-                        textAlign = TextAlign.Start
+                        color = typeColor,
+                        modifier = Modifier.width(TYPE_COLUMN_WIDTH)
                     )
-                } ?: Box(Modifier.width(BATTERY_COLUMN_WIDTH))
+                    entry.latitude?.let { lat ->
+                        Text(
+                            text = "Lat: %.5f".format(lat),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.width(LOCATION_COLUMN_WIDTH),
+                            textAlign = TextAlign.Start,
+                            color = locationTextColor ?: MaterialTheme.colorScheme.onSurface
+                        )
+                    } ?: Box(Modifier.width(LOCATION_COLUMN_WIDTH))
+                }
 
-                entry.batteryVoltage?.let { voltage ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Start
+                ) {
                     Text(
-                        text = "${String.format("%.2f", voltage)}V",
+                        text = time,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.width(VOLTAGE_COLUMN_WIDTH), // Fixed width
-                        textAlign = TextAlign.End // Keep End alignment for voltage
+                        modifier = Modifier.width(DATE_TIME_COLUMN_WIDTH)
                     )
-                } ?: Box(Modifier.width(VOLTAGE_COLUMN_WIDTH))
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Start // Use Start for fixed width columns
-            ) {
-                Text(
-                    text = time,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.width(DATE_TIME_COLUMN_WIDTH) // Fixed width
-                )
-                entry.longitude?.let { lon ->
-                    Text(
-                        text = "%.5f".format(lon),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.width(LOCATION_COLUMN_WIDTH), // Fixed width
-                        textAlign = TextAlign.Start,
-                        color = locationTextColor ?: MaterialTheme.colorScheme.onSurface
-                    )
-                } ?: Box(Modifier.width(LOCATION_COLUMN_WIDTH))
-
-                // Placeholder for battery and voltage for the second row, maintaining fixed width
-                Box(Modifier.width(BATTERY_COLUMN_WIDTH))
-                Box(Modifier.width(VOLTAGE_COLUMN_WIDTH))
-            }
+                    // 下段の種別カラムは空白
+                    Box(Modifier.width(TYPE_COLUMN_WIDTH))
+                    entry.longitude?.let { lon ->
+                        Text(
+                            text = "Lon: %.5f".format(lon),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.width(LOCATION_COLUMN_WIDTH),
+                            textAlign = TextAlign.Start,
+                            color = locationTextColor ?: MaterialTheme.colorScheme.onSurface
+                        )
+                    } ?: Box(Modifier.width(LOCATION_COLUMN_WIDTH))
+                }
             }
         }
     }

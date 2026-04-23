@@ -7,7 +7,6 @@ import com.pirorin215.btclockmob.data.ConnectionState
 import com.pirorin215.btclockmob.data.DeviceHistoryRepository
 import com.pirorin215.btclockmob.viewModel.BleConnectionManager
 import com.pirorin215.btclockmob.viewModel.BleOrchestrator
-import com.pirorin215.btclockmob.viewModel.BleSelectionManager
 import com.pirorin215.btclockmob.viewModel.LocationMonitor
 import com.pirorin215.btclockmob.viewModel.LogManager
 import com.pirorin215.btclockmob.LocationTracker
@@ -55,7 +54,6 @@ val bleModule = module {
             onDeviceReadyEvent = get<MutableSharedFlow<Unit>>(named("onDeviceReadyEvent")).asSharedFlow(),
             locationMonitor = get(),
             appSettingsRepository = get(),
-            bleSelectionManager = get(),
             logManager = get(),
             disconnectSignal = get<MutableSharedFlow<Unit>>(named("disconnectSignal")).asSharedFlow(),
             locationTracker = get(),
