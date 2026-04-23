@@ -189,7 +189,7 @@ class BleScanService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("BTClockMob")
             .setContentText("バックグラウンドでBLEデバイスをスキャン中...")
-            .setSmallIcon(R.drawable.ic_notification_icon) // カスタム通知アイコン
+            .setSmallIcon(R.drawable.ic_notification_alert) // Use existing notification icon
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setOngoing(true) // 通知を削除不可にする（フォアグラウンドサービス維持のため）

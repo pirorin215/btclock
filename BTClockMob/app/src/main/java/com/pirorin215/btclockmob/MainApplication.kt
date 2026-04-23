@@ -5,7 +5,6 @@ import com.pirorin215.btclockmob.di.appModule
 import com.pirorin215.btclockmob.di.bleModule
 import com.pirorin215.btclockmob.di.managerModule
 import com.pirorin215.btclockmob.di.repositoryModule
-import com.pirorin215.btclockmob.di.transcriptionModule
 import com.pirorin215.btclockmob.di.viewModelModule
 import com.pirorin215.btclockmob.viewModel.BleConnectionManager
 import com.pirorin215.btclockmob.viewModel.BleOrchestrator
@@ -35,7 +34,6 @@ class MainApplication : Application(), KoinComponent {
                 appModule,
                 repositoryModule,
                 managerModule,
-                transcriptionModule,
                 bleModule,
                 viewModelModule
             )

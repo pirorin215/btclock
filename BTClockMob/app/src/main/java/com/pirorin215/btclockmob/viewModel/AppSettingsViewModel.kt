@@ -11,8 +11,6 @@ import com.pirorin215.btclockmob.data.AIProvider
 import com.pirorin215.btclockmob.data.ProviderMode
 import com.pirorin215.btclockmob.data.GeminiModel
 import com.pirorin215.btclockmob.data.DEFAULT_AI_SYSTEM_PROMPT
-import com.pirorin215.btclockmob.service.SpeechToTextService
-import com.pirorin215.btclockmob.service.GroqSpeechService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -40,7 +38,6 @@ enum class ModelValidationStatus {
 
 class AppSettingsViewModel(
     private val appSettingsRepository: AppSettingsRepository,
-    private val transcriptionManager: TranscriptionManager, // Added
     private val application: Application
 ) : ViewModel() {
 
@@ -123,33 +120,7 @@ class AppSettingsViewModel(
             initialValue = ThemeMode.SYSTEM // Default to SYSTEM
         )
 
-    val googleTodoListName: StateFlow<String> = appSettingsRepository.getFlow(Settings.GOOGLE_TODO_LIST_NAME)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = "btclock"
-        )
-
-    val googleTasksMode: StateFlow<com.pirorin215.btclockmob.data.GoogleTasksMode> = appSettingsRepository.getFlow(Settings.GOOGLE_TASKS_MODE)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = com.pirorin215.btclockmob.data.GoogleTasksMode.OAUTH
-        )
-
-    val googleTaskTitleLength: StateFlow<Int> = appSettingsRepository.getFlow(Settings.GOOGLE_TASK_TITLE_LENGTH)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = 20 // Default to 20
-        )
-
-    val googleTasksSyncIntervalMinutes: StateFlow<Int> = appSettingsRepository.getFlow(Settings.GOOGLE_TASKS_SYNC_INTERVAL_MINUTES)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = 5 // Default to 5 minutes
-        )
+    // Google Tasks settings removed - feature disabled
 
     val autoStartOnBoot: StateFlow<Boolean> = appSettingsRepository.getFlow(Settings.AUTO_START_ON_BOOT)
         .stateIn(
@@ -307,31 +278,7 @@ class AppSettingsViewModel(
         }
     }
 
-    fun saveGoogleTodoListName(name: String) {
-        viewModelScope.launch {
-            appSettingsRepository.setValue(Settings.GOOGLE_TODO_LIST_NAME, name)
-        }
-    }
-
-    fun saveGoogleTasksMode(mode: com.pirorin215.btclockmob.data.GoogleTasksMode) {
-        viewModelScope.launch {
-            appSettingsRepository.setValue(Settings.GOOGLE_TASKS_MODE, mode)
-        }
-    }
-
-    fun saveGoogleTaskTitleLength(length: Int) {
-        viewModelScope.launch {
-            val titleLength = length.coerceIn(5, 50) // Example bounds: 5 to 50 characters
-            appSettingsRepository.setValue(Settings.GOOGLE_TASK_TITLE_LENGTH, titleLength)
-        }
-    }
-
-    fun saveGoogleTasksSyncIntervalMinutes(minutes: Int) {
-        viewModelScope.launch {
-            val interval = minutes.coerceAtLeast(1) // Ensure at least 1 minute
-            appSettingsRepository.setValue(Settings.GOOGLE_TASKS_SYNC_INTERVAL_MINUTES, interval)
-        }
-    }
+    // Google Tasks methods removed - feature disabled
 
     fun saveAutoStartOnBoot(enable: Boolean) {
         viewModelScope.launch {
@@ -430,18 +377,9 @@ class AppSettingsViewModel(
                 return@launch
             }
 
-            // APIキーが変更されたか、または未検証の場合はネットワーク経由でチェック
-            val speechToTextService = SpeechToTextService(application, apiKey)
-            val result = speechToTextService.verifyApiKey()
-
-            _apiKeyStatus.value = if (result.isSuccess) {
-                appSettingsRepository.setValue(Settings.IS_API_KEY_VERIFIED, true)
-                ApiKeyStatus.VALID
-            } else {
-                appSettingsRepository.setValue(Settings.IS_API_KEY_VERIFIED, false)
-                // ここでエラーの種類をもう少し細かく分類することも可能だが、一旦INVALIDとする
-                ApiKeyStatus.INVALID
-            }
+            // Speech-to-text service has been removed - mark as valid for non-empty keys
+            _apiKeyStatus.value = ApiKeyStatus.VALID
+            appSettingsRepository.setValue(Settings.IS_API_KEY_VERIFIED, true)
         }
     }
 

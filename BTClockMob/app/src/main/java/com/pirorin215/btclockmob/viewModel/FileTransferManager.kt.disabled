@@ -353,18 +353,9 @@ class FileTransferManager(
                 if (fileName.startsWith("log.", ignoreCase = true)) {
                     logManager.addLog("Log downloaded: $fileName")
                 } else if (fileName.endsWith(".wav", ignoreCase = true)) {
-                    // File is saved to Documents/BTClockMob/, use fileName directly
-                    // For MediaStore URIs, we use fileName instead of File object
-                    transcriptionManager.addPendingTranscription(fileName)
-                    logManager.addDebugLog("Queued for transcription: $fileName")
-
-                    // Now trigger transcription processing (record is guaranteed to exist)
-                    transcriptionManager.processPendingTranscriptions()
-
-                    scope.launch { transcriptionManager.cleanupTranscriptionResultsAndAudioFiles() }
-                    transcriptionManager.updateLocalAudioFileCount()
-
-                    // Deletion is now handled by the orchestrator after transcription.
+                    // File is saved to Documents/BTClockMob/
+                    logManager.addDebugLog("Audio file saved: $fileName")
+                    // Transcription feature removed
                 }
             } else {
                 logManager.addLog("Download failed: $fileName", LogLevel.ERROR)

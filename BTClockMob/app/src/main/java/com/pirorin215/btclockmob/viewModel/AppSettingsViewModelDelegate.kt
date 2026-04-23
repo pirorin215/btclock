@@ -50,14 +50,7 @@ class AppSettingsViewModelDelegate(
             initialValue = ThemeMode.SYSTEM // Default to SYSTEM
         )
 
-    override val googleTodoListName: StateFlow<String> = appSettingsRepository.getFlow(Settings.GOOGLE_TODO_LIST_NAME)
-        .stateIn(scope, SharingStarted.Eagerly, "")
-
-    override val googleTaskTitleLength: StateFlow<Int> = appSettingsRepository.getFlow(Settings.GOOGLE_TASK_TITLE_LENGTH)
-        .stateIn(scope, SharingStarted.Eagerly, 20) // Default to 20
-
-    override val googleTasksSyncIntervalMinutes: StateFlow<Int> = appSettingsRepository.getFlow(Settings.GOOGLE_TASKS_SYNC_INTERVAL_MINUTES)
-        .stateIn(scope, SharingStarted.Eagerly, 5) // Default to 5
+    // Google Tasks properties removed - feature disabled
 
     override fun saveApiKey(apiKey: String) {
         scope.launch { appSettingsRepository.setValue(Settings.API_KEY, apiKey) }
@@ -77,17 +70,5 @@ class AppSettingsViewModelDelegate(
 
     override fun saveThemeMode(mode: ThemeMode) {
         scope.launch { appSettingsRepository.setValue(Settings.THEME_MODE, mode) }
-    }
-
-    override fun saveGoogleTodoListName(name: String) {
-        scope.launch { appSettingsRepository.setValue(Settings.GOOGLE_TODO_LIST_NAME, name) }
-    }
-
-    override fun saveGoogleTaskTitleLength(length: Int) {
-        scope.launch { appSettingsRepository.setValue(Settings.GOOGLE_TASK_TITLE_LENGTH, length) }
-    }
-
-    override fun saveGoogleTasksSyncIntervalMinutes(minutes: Int) {
-        scope.launch { appSettingsRepository.setValue(Settings.GOOGLE_TASKS_SYNC_INTERVAL_MINUTES, minutes) }
     }
 }

@@ -9,16 +9,12 @@ interface AppSettingsAccessor {
     val transcriptionFontSize: StateFlow<Int>
     val audioDirName: StateFlow<String>
     val themeMode: StateFlow<ThemeMode>
-    val googleTodoListName: StateFlow<String>
-    val googleTaskTitleLength: StateFlow<Int>
-    val googleTasksSyncIntervalMinutes: StateFlow<Int>
+
+    // Google Tasks properties removed - feature disabled
 
     fun saveApiKey(apiKey: String)
     fun saveTranscriptionCacheLimit(limit: Int)
     fun saveTranscriptionFontSize(size: Int)
     fun saveAudioDirName(name: String)
     fun saveThemeMode(mode: ThemeMode)
-    fun saveGoogleTodoListName(name: String)
-    fun saveGoogleTaskTitleLength(length: Int)
-    fun saveGoogleTasksSyncIntervalMinutes(minutes: Int)
 }

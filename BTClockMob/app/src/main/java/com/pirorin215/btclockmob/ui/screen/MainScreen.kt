@@ -49,57 +49,17 @@ fun MainScreen(
     val connectionState by viewModel.connectionState.collectAsState() // Use viewModel
     val deviceInfo by viewModel.deviceInfo.collectAsState() // Use viewModel
     val logs: List<String> by viewModel.logs.collectAsState()
-    val fileList by viewModel.fileList.collectAsState()
-    val fileTransferState by viewModel.fileTransferState.collectAsState()
-    val downloadProgress by viewModel.downloadProgress.collectAsState()
-    val currentFileTotalSize by viewModel.currentFileTotalSize.collectAsState()
     val currentOperation by viewModel.currentOperation.collectAsState()
-    val transferKbps by viewModel.transferKbps.collectAsState()
-    val transcriptionState by viewModel.transcriptionState.collectAsState()
-    val transcriptionResult by viewModel.transcriptionResult.collectAsState()
 
     var showLogs by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showAppSettings by remember { mutableStateOf(false) }
-    var showTodoDetailScreen by remember { mutableStateOf<String?>(null) } // New state for TodoDetailScreen visibility and todoId
 
-    var showLogDownloadScreen by remember { mutableStateOf(false) }
-    var showAppLogPanel by remember { mutableStateOf(false) } // New state for AppLogCard visibility
-    var showGoogleTasksSyncSettings by remember { mutableStateOf(false) } // New state for GoogleTasksSyncSettingsScreen
+    var showAppLogPanel by remember { mutableStateOf(false) }
     var showDeviceHistoryScreen by remember { mutableStateOf(false) }
-    var showWavSaveFolderDialog by remember { mutableStateOf(false) } // New state for WAV save folder dialog
-    var showAdpcmTestScreen by remember { mutableStateOf(false) } // New state for AdpcmTestScreen
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
-
-    val isRefreshing by viewModel.isLoadingGoogleTasks.collectAsState()
-
-    val googleSignInLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.let { intent ->
-                viewModel.handleSignInResult(intent, onSuccess = {
-                    scope.launch { snackbarHostState.showSnackbar("Google サインイン成功！") }
-                }, onFailure = { e ->
-                    scope.launch { snackbarHostState.showSnackbar("Google サインイン失敗: ${e.message}") }
-                })
-            }
-        } else {
-            scope.launch { snackbarHostState.showSnackbar("Google サインインキャンセルされました。") }
-        }
-    }
-
-    LaunchedEffect(fileTransferState) {
-        if (fileTransferState.startsWith("Success")) {
-            scope.launch {
-                snackbarHostState.showSnackbar("ファイル保存完了: ${fileTransferState.substringAfter("Success: ")}")
-            }
-        } else if (fileTransferState.startsWith("Error")) {
-            scope.launch {
-                snackbarHostState.showSnackbar("エラー: ${fileTransferState.substringAfter("Error: ")}")
-            }
-        }
-    }
 
     // Observe lifecycle events to start/stop low power location updates
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -126,23 +86,8 @@ fun MainScreen(
         showAppSettings -> {
             AppSettingsScreen(appSettingsViewModel = appSettingsViewModel, onBack = { showAppSettings = false })
         }
-
-        showLogDownloadScreen -> {
-            LogDownloadScreen(viewModel = viewModel, onBack = { showLogDownloadScreen = false })
-        }
-        showGoogleTasksSyncSettings -> {
-            GoogleTasksSyncSettingsScreen(
-                viewModel = viewModel,
-                appSettingsViewModel = appSettingsViewModel,
-                onBack = { showGoogleTasksSyncSettings = false },
-                onSignInIntent = { intent -> googleSignInLauncher.launch(intent) } // Provide new callback
-            )
-        }
         showDeviceHistoryScreen -> {
             DeviceHistoryScreen(onBackClick = { showDeviceHistoryScreen = false })
-        }
-        showAdpcmTestScreen -> {
-            AdpcmTestScreen(onBack = { showAdpcmTestScreen = false })
         }
         else -> {
             Scaffold(
@@ -210,6 +155,7 @@ fun MainScreen(
                                         expanded = false
                                     }
                                 )
+                                /* Temporarily disabled
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_google_tasks_sync_settings)) },
                                     onClick = {
@@ -217,6 +163,7 @@ fun MainScreen(
                                         expanded = false
                                     }
                                 )
+                                */
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_recorder_settings)) },
                                     onClick = {
@@ -224,13 +171,6 @@ fun MainScreen(
                                         expanded = false
                                     },
                                     enabled = connectionState is ConnectionState.Connected
-                                )
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.menu_recorder_log)) },
-                                    onClick = {
-                                        showLogDownloadScreen = true
-                                        expanded = false
-                                    }
                                 )
 
                                 DropdownMenuItem(
@@ -241,21 +181,13 @@ fun MainScreen(
                                     }
                                 )
 
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.menu_wav_save_folder)) },
-                                    onClick = {
-                                        showWavSaveFolderDialog = true
-                                        expanded = false
-                                    }
-                                )
-
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.menu_adpcm_test)) },
-                                    onClick = {
-                                        showAdpcmTestScreen = true
-                                        expanded = false
-                                    }
-                                )
+                                // DropdownMenuItem( // WAV Save Folder feature temporarily disabled
+                                //     text = { Text(stringResource(R.string.menu_wav_save_folder)) },
+                                //     onClick = {
+                                //         showWavSaveFolderDialog = true
+                                //         expanded = false
+                                //     }
+                                // )
 
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.menu_app_log)) },
@@ -272,10 +204,17 @@ fun MainScreen(
             ) { innerPadding ->
                 val apiKeyStatus by appSettingsViewModel.apiKeyStatus.collectAsState()
 
+                /* PullToRefreshBox temporarily disabled - Google Tasks integration removed
                 PullToRefreshBox(
                     isRefreshing = isRefreshing,
-                    onRefresh = { viewModel.syncTranscriptionResultsWithGoogleTasks() },
+                    onRefresh = {  },
                     modifier = Modifier.fillMaxSize().padding(innerPadding)
+                ) {
+                */
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
                 ) {
                     Column(
                         modifier = Modifier
@@ -287,25 +226,12 @@ fun MainScreen(
                             onNavigateToSettings = { showAppSettings = true }
                         )
                         SummaryInfoCard(deviceInfo = deviceInfo)
-                        // Move FileDownloadSection above TranscriptionResultPanel
-                        FileDownloadSection(
-                            fileList = fileList,
-                            fileTransferState = fileTransferState,
-                            downloadProgress = downloadProgress,
-                            totalFileSize = currentFileTotalSize,
-                            isBusy = currentOperation != BleOperation.IDLE,
-                            transferKbps = transferKbps,
-                            onDownloadClick = { viewModel.downloadFile(it) }
-                        )
-                        // TranscriptionResultPanel now takes flexible space
-                        TranscriptionResultScreen(viewModel = viewModel, appSettingsViewModel = appSettingsViewModel, onBack = { })
                     }
                     // AppLogCard as an overlay at the bottom
                     if (showAppLogPanel) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .align(Alignment.BottomCenter)
                                 .heightIn(max = 200.dp) // Limit height of the log panel
                         ) {
                             AppLogCard(
@@ -315,39 +241,8 @@ fun MainScreen(
                             )
                         }
                     }
-
-                    // WAV Save Folder Dialog
-                    if (showWavSaveFolderDialog) {
-                        AlertDialog(
-                            onDismissRequest = { showWavSaveFolderDialog = false },
-                            title = {
-                                Text(stringResource(R.string.wav_save_folder_title))
-                            },
-                            text = {
-                                Column {
-                                    Text(
-                                        stringResource(R.string.wav_save_folder_path),
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        "※ファイルマネージャーアプリなどで上記パスを開くとWAVファイルを確認できます。",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                            },
-                            confirmButton = {
-                                TextButton(
-                                    onClick = { showWavSaveFolderDialog = false }
-                                ) {
-                                    Text(stringResource(R.string.close))
-                                }
-                            }
-                        )
-                    }
                 }
             }
         }
     }
 }
-

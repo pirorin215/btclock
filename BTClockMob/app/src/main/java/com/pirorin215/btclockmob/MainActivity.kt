@@ -1,9 +1,7 @@
 package com.pirorin215.btclockmob
 
 import com.pirorin215.btclockmob.viewModel.MainViewModel
-import com.pirorin215.btclockmob.viewModel.TranscriptionViewModel
 import com.pirorin215.btclockmob.viewModel.BleViewModel
-import com.pirorin215.btclockmob.viewModel.GoogleTasksViewModel
 import com.pirorin215.btclockmob.LocationTracker
 import com.pirorin215.btclockmob.viewModel.AppSettingsViewModel
 
@@ -79,7 +77,6 @@ class MainActivity : ComponentActivity() {
             val appSettingsViewModel: AppSettingsViewModel = viewModel(
                 factory = AppSettingsViewModelFactory(
                     application,
-                    get(),
                     get()
                 )
             )

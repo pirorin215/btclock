@@ -102,20 +102,6 @@ enum class ProviderMode {
  * When OAUTH is selected: use Google Sign-In for Tasks API access
  * When GAS is selected: use Google Apps Script webhook for Tasks API access
  */
-enum class GoogleTasksMode {
-    OAUTH,
-    GAS;
-
-    companion object {
-        fun fromString(value: String?): GoogleTasksMode {
-            return try {
-                valueOf(value ?: "OAUTH")
-            } catch (e: IllegalArgumentException) {
-                OAUTH
-            }
-        }
-    }
-}
 
 /**
  * Gemini model configuration for AI response generation
@@ -255,32 +241,7 @@ object Settings {
         false
     )
 
-    val GOOGLE_TODO_LIST_NAME = SettingKey.Direct(
-        stringPreferencesKey("google_todo_list_name"),
-        "btclock"
-    )
-
-    val GOOGLE_TASKS_MODE = SettingKey.Mapped(
-        preferencesKey = stringPreferencesKey("google_tasks_mode"),
-        defaultValue = GoogleTasksMode.OAUTH,
-        toStored = { it.name },
-        fromStored = { GoogleTasksMode.fromString(it) }
-    )
-
-    val GOOGLE_TASK_TITLE_LENGTH = SettingKey.Direct(
-        intPreferencesKey("google_task_title_length"),
-        20
-    )
-
-    val GOOGLE_TASKS_SYNC_INTERVAL_MINUTES = SettingKey.Direct(
-        intPreferencesKey("google_tasks_sync_interval_minutes"),
-        5
-    )
-
-    val SHOW_COMPLETED_GOOGLE_TASKS = SettingKey.Direct(
-        booleanPreferencesKey("show_completed_google_tasks"),
-        false
-    )
+    // Google Tasks settings removed - feature disabled
 
     val AUTO_START_ON_BOOT = SettingKey.Direct(
         booleanPreferencesKey("auto_start_on_boot"),

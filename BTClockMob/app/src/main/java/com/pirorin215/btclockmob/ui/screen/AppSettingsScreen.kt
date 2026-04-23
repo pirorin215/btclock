@@ -82,7 +82,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentTranscriptionCacheLimit by appSettingsViewModel.transcriptionCacheLimit.collectAsState()
     val currentFontSize by appSettingsViewModel.transcriptionFontSize.collectAsState()
     val currentThemeMode by appSettingsViewModel.themeMode.collectAsState()
-    val currentGoogleTaskTitleLength by appSettingsViewModel.googleTaskTitleLength.collectAsState()
+    // Google Tasks removed - feature disabled
     val currentAutoStartOnBoot by appSettingsViewModel.autoStartOnBoot.collectAsState()
     val currentChunkBurstSize by appSettingsViewModel.chunkBurstSize.collectAsState()
     val currentVoltageRetryCount by appSettingsViewModel.voltageRetryCount.collectAsState()
@@ -106,7 +106,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     var transcriptionCacheLimitText by remember(currentTranscriptionCacheLimit) { mutableStateOf(currentTranscriptionCacheLimit.toString()) }
     var fontSizeSliderValue by remember(currentFontSize) { mutableStateOf(currentFontSize.toFloat()) }
     var selectedThemeMode by remember(currentThemeMode) { mutableStateOf(currentThemeMode) }
-    var googleTaskTitleLengthText by remember(currentGoogleTaskTitleLength) { mutableStateOf(currentGoogleTaskTitleLength.toString()) }
+    // Google Tasks TextField removed - feature disabled
     var autoStartOnBootChecked by remember(currentAutoStartOnBoot) { mutableStateOf(currentAutoStartOnBoot) }
     var chunkBurstSizeText by remember(currentChunkBurstSize) { mutableStateOf(currentChunkBurstSize.toString()) }
     var voltageRetryCountText by remember(currentVoltageRetryCount) { mutableStateOf(currentVoltageRetryCount.toString()) }
@@ -132,8 +132,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
         appSettingsViewModel.saveTranscriptionCacheLimit(transcriptionCacheLimit)
         appSettingsViewModel.saveTranscriptionFontSize(fontSizeSliderValue.roundToInt())
         appSettingsViewModel.saveThemeMode(selectedThemeMode)
-        val googleTaskTitleLength = googleTaskTitleLengthText.toIntOrNull() ?: 20
-        appSettingsViewModel.saveGoogleTaskTitleLength(googleTaskTitleLength)
+        // Google Tasks settings removed - feature disabled
         appSettingsViewModel.saveAutoStartOnBoot(autoStartOnBootChecked)
         val chunkBurstSize = chunkBurstSizeText.toIntOrNull() ?: 8
         appSettingsViewModel.saveChunkBurstSize(chunkBurstSize)
@@ -425,14 +424,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedTextField(
-                value = googleTaskTitleLengthText,
-                onValueChange = { googleTaskTitleLengthText = it },
-                label = { Text(stringResource(R.string.max_title_characters)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            // Google Tasks TextField removed - feature disabled
             OutlinedTextField(
                 value = chunkBurstSizeText,
                 onValueChange = { chunkBurstSizeText = it },

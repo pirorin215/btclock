@@ -20,17 +20,12 @@ class BleViewModel(
     val connectionState: StateFlow<ConnectionState> = bleConnectionManager.connectionState
     val currentOperation: StateFlow<BleOperation> = bleOrchestrator.currentOperation
     val navigationEvent: SharedFlow<NavigationEvent> = bleOrchestrator.navigationEvent
-    val fileList: StateFlow<List<FileEntry>> = bleOrchestrator.fileList
     val deviceInfo: StateFlow<DeviceInfoResponse?> = bleOrchestrator.deviceInfo
     val deviceSettings: StateFlow<DeviceSettings> = bleOrchestrator.deviceSettings
-    val downloadProgress: StateFlow<Int> = bleOrchestrator.downloadProgress
-    val currentFileTotalSize: StateFlow<Long> = bleOrchestrator.currentFileTotalSize
-    val fileTransferState: StateFlow<String> = bleOrchestrator.fileTransferState
-    val transferKbps: StateFlow<Float> = bleOrchestrator.transferKbps
     val selectedFileNames = bleSelectionManager.selectedFileNames
 
     // --- BLE Operations ---
-    fun fetchFileList(extension: String = "wav") = bleOrchestrator.fetchFileList(extension)
+    // fun fetchFileList(extension: String = "wav") = bleOrchestrator.fetchFileList(extension) // File transfer feature disabled
 
     suspend fun getSettings() = bleOrchestrator.getSettings()
 
@@ -38,8 +33,6 @@ class BleViewModel(
 
     fun updateSettings(updater: (DeviceSettings) -> DeviceSettings) =
         bleOrchestrator.updateSettings(updater)
-
-    fun downloadFile(fileName: String) = bleOrchestrator.downloadFile(fileName)
 
     fun sendCommand(command: String) = bleOrchestrator.sendCommand(command)
 

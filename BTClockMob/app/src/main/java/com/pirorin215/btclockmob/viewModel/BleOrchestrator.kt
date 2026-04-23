@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.pirorin215.btclockmob.data.BleRepository
 import com.pirorin215.btclockmob.data.ConnectionState
-import com.pirorin215.btclockmob.data.TranscriptionResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -29,7 +28,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
 import com.pirorin215.btclockmob.data.DeviceSettings
 import com.pirorin215.btclockmob.data.DeviceInfoResponse
-import com.pirorin215.btclockmob.data.FileEntry
 import com.pirorin215.btclockmob.constants.TimeConstants
 
 import com.pirorin215.btclockmob.viewModel.LogManager
@@ -47,11 +45,9 @@ class BleOrchestrator(
     private val repository: BleRepository,
     private val connectionStateFlow: StateFlow<ConnectionState>,
     private val onDeviceReadyEvent: SharedFlow<Unit>,
-    private val transcriptionManager: TranscriptionManager,
     private val locationMonitor: LocationMonitor,
     private val appSettingsRepository: AppSettingsRepository,
     private val bleSelectionManager: BleSelectionManager,
-    private val transcriptionResults: StateFlow<List<TranscriptionResult>>,
     private val logManager: LogManager,
     private val disconnectSignal: SharedFlow<Unit>,
     private val locationTracker: LocationTracker,
@@ -76,7 +72,6 @@ class BleOrchestrator(
      *
      * DEADLOCK PREVENTION:
      * - This is the ONLY mutex for BLE operations
-     * - TranscriptionManager uses separate mutexes (independent from BLE)
      * - File processing uses AtomicBoolean (isProcessingFiles) instead of mutex
      */
     internal val bleMutex = Mutex()
@@ -122,42 +117,10 @@ class BleOrchestrator(
     }
 
     // --- マネージャーの委譲プロパティ ---
-    val fileList: StateFlow<List<com.pirorin215.btclockmob.data.FileEntry>> get() = bleDeviceManager.fileList
+    // val fileList: StateFlow<List<com.pirorin215.btclockmob.data.FileEntry>> get() = bleDeviceManager.fileList // File transfer disabled
     val deviceInfo: StateFlow<com.pirorin215.btclockmob.data.DeviceInfoResponse?> get() = bleDeviceManager.deviceInfo
     val deviceSettings: StateFlow<com.pirorin215.btclockmob.data.DeviceSettings> get() = bleSettingsManager.deviceSettings
 
-    private val fileTransferManager by lazy {
-        FileTransferManager(
-            context = context,
-            scope = scope,
-            repository = repository,
-            transcriptionManager = transcriptionManager,
-            audioDirNameFlow = appSettingsRepository.getFlow(Settings.AUDIO_DIR_NAME)
-                .stateIn(
-                    scope = scope,
-                    started = SharingStarted.WhileSubscribed(5000),
-                    initialValue = "BTClockRecordings"
-                ),
-            bleMutex = bleMutex,
-            logManager = logManager,
-            sendCommandCallback = { command -> sendCommand(command) },
-            sendAckCallback = { ackValue -> sendAck(ackValue) },
-            _currentOperation = _currentOperation,
-            bleDeviceManager = bleDeviceManager,
-            _connectionState = connectionStateFlow,
-            disconnectSignal = disconnectSignal,
-            appSettingsRepository = appSettingsRepository
-        )
-    }
-
-    val downloadProgress: StateFlow<Int> get() = fileTransferManager.downloadProgress
-    val currentFileTotalSize: StateFlow<Long> get() = fileTransferManager.currentFileTotalSize
-    val fileTransferState: StateFlow<String> get() = fileTransferManager.fileTransferState
-    val transferKbps: StateFlow<Float> get() = fileTransferManager.transferKbps
-
-    // AtomicBoolean to prevent concurrent file processing
-    // This is safer than Mutex as it avoids potential deadlock with bleMutex
-    private val isProcessingFiles = AtomicBoolean(false)
 
     // Retry job for file list fetch when device is busy (recording)
     private var fileListRetryJob: Job? = null
@@ -311,68 +274,6 @@ class BleOrchestrator(
         }
     }
 
-    private fun checkForNewWavFilesAndProcess() {
-        scope.launch {
-            // 並行実行を防ぐためAtomicBooleanを使用
-            // 内部操作で使用されるbleMutexとのデッドロックリスクを回避
-            if (!isProcessingFiles.compareAndSet(false, true)) {
-                addDebugLog("ファイル処理が既に進行中です")
-                return@launch
-            }
-            try {
-                bleDeviceManager.stopTimeSyncJob()
-
-                val currentWavFilesOnMicrocontroller = bleDeviceManager.fileList.value.filter { it.name.endsWith(".wav", ignoreCase = true) }
-                val transcribedFileNames = this@BleOrchestrator.transcriptionResults.value.map { it.fileName }.toSet()
-
-                // 未文字起こしファイル（ダウンロード対象）
-                val filesToDownload = currentWavFilesOnMicrocontroller.filter { fileEntry ->
-                    !transcribedFileNames.contains(fileEntry.name)
-                }
-
-                // 文字起こし済みだがマイコンに残っているファイル（削除対象）
-                // 前回削除に失敗した可能性があるため、再度削除を試行する
-                val filesToDeleteOnly = currentWavFilesOnMicrocontroller.filter { fileEntry ->
-                    transcribedFileNames.contains(fileEntry.name)
-                }
-
-                if (filesToDeleteOnly.isNotEmpty()) {
-                    addLog("${filesToDeleteOnly.size} 件の文字起こし済みファイルをデバイスから削除中")
-                    for (fileEntry in filesToDeleteOnly) {
-                        addDebugLog("削除中: ${fileEntry.name}")
-                        fileTransferManager.deleteFileAndUpdateList(fileEntry.name)
-                    }
-                }
-
-                if (filesToDownload.isEmpty()) {
-                    addDebugLog("新しいファイルはありません")
-                    performPostTransferSync()
-                    return@launch
-                }
-
-                addLog("${filesToDownload.size} 件の新しいWAVファイルを処理中")
-
-                for (fileEntry in filesToDownload) {
-                    addDebugLog("処理中: ${fileEntry.name}")
-
-                    val downloadSuccess = fileTransferManager.downloadFile(fileEntry.name)
-
-                    if (downloadSuccess) {
-                        addDebugLog("ダウンロード成功、デバイスから削除中")
-                        fileTransferManager.deleteFileAndUpdateList(fileEntry.name)
-                    } else {
-                        addLog("ダウンロード失敗: ${fileEntry.name}", LogLevel.ERROR)
-                    }
-                }
-
-                addDebugLog("ファイル処理完了")
-                performPostTransferSync()
-
-            } finally {
-                isProcessingFiles.set(false)
-            }
-        }
-    }
 
     private fun handleCharacteristicChanged(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
         // Check if this is the command characteristic (bidirectional)
@@ -384,9 +285,6 @@ class BleOrchestrator(
             }
             BleOperation.FETCHING_SETTINGS, BleOperation.SENDING_SETTINGS -> {
                 bleSettingsManager.handleResponse(value, _currentOperation.value)
-            }
-            BleOperation.DOWNLOADING_FILE, BleOperation.DELETING_FILE -> {
-                fileTransferManager.handleCharacteristicChanged(characteristic, value)
             }
             else -> {
                 addLog("Received data in unexpected state (${_currentOperation.value}): ${value.toString(Charsets.UTF_8)}")
@@ -403,11 +301,7 @@ class BleOrchestrator(
         repository.sendAck(ackValue)
     }
 
-    fun fetchFileList(extension: String) {
-        scope.launch {
-            bleDeviceManager.fetchFileList(connectionStateFlow.value, extension)
-        }
-    }
+    // fun fetchFileList(extension: String) { /* File transfer feature disabled */ }
 
     suspend fun getSettings() {
         bleSettingsManager.getSettings(connectionStateFlow.value)
@@ -421,11 +315,6 @@ class BleOrchestrator(
         bleSettingsManager.updateSettings(updater)
     }
 
-    fun downloadFile(fileName: String) {
-        scope.launch {
-            fileTransferManager.downloadFile(fileName)
-        }
-    }
 
     fun toggleSelection(fileName: String) {
         bleSelectionManager.toggleSelection(fileName)

@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.LastKnownLocationRepository
-import com.pirorin215.btclockmob.data.TranscriptionResultRepository
 
 
 // import com.pirorin215.btclockmob.viewModel.LogManager // Import LogManager once -- Keeping this if needed, but removing MainViewModel import
@@ -16,13 +15,12 @@ import com.pirorin215.btclockmob.data.TranscriptionResultRepository
 
 class AppSettingsViewModelFactory(
     private val application: Application,
-    private val appSettingsRepository: AppSettingsRepository,
-    private val transcriptionManager: TranscriptionManager
+    private val appSettingsRepository: AppSettingsRepository
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(AppSettingsViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return AppSettingsViewModel(appSettingsRepository, transcriptionManager, application) as T
+            return AppSettingsViewModel(appSettingsRepository, application) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
