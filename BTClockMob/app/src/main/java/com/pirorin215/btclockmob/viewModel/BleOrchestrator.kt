@@ -106,13 +106,31 @@ class BleOrchestrator(
     // Periodic time sync job for BikeClock (1 minute interval)
     private var periodicTimeSyncJob: Job? = null
 
+    // Periodic history recording job (checks every 1 minute)
+    private var periodicHistoryJob: Job? = null
+    private var lastRecordedLocation: android.location.Location? = null
+    private var lastRecordedTime: Long = System.currentTimeMillis()
+    
+    // 最後に接続が確認された地点（切断時の位置特定用）
+    private var lastActiveLocation: android.location.Location? = null
+
+    // 最後に正常に接続していたかどうかのフラグ（再接続試行中の切断イベントを無視するため）
+    private var wasConnected = false
+
     init {
         // Monitor disconnect signal
         disconnectSignal
             .onEach {
                 addDebugLog("BLE disconnected")
-                // 保存: 切断時
-                saveConnectionHistory(isDisconnection = true)
+                // 停止: 定期履歴記録
+                stopPeriodicHistoryRecording()
+                // 保存: 切断時（直前が接続状態だった場合のみ）
+                if (wasConnected) {
+                    saveConnectionHistory(isDisconnection = true)
+                    wasConnected = false
+                } else {
+                    addDebugLog("Skipping disconnect history: not previously connected")
+                }
             }
             .launchIn(scope)
 
@@ -122,8 +140,12 @@ class BleOrchestrator(
                 startFullSync()
                 // Start periodic time sync job
                 startPeriodicTimeSync()
+                // 接続状態をマーク
+                wasConnected = true
                 // 保存: 接続時
                 saveConnectionHistory(isDisconnection = false)
+                // 開始: 定期履歴記録
+                startPeriodicHistoryRecording()
             }
             .launchIn(scope)
 
@@ -141,6 +163,7 @@ class BleOrchestrator(
         bleDeviceManager.stopTimeSyncJob()
         periodicTimeSyncJob?.cancel()
         periodicTimeSyncJob = null
+        stopPeriodicHistoryRecording()
         addLog("オーケストレーターを停止しました")
     }
 
@@ -187,7 +210,15 @@ class BleOrchestrator(
                 if (connectionStateFlow.value is ConnectionState.Connected) {
                     addDebugLog("Starting periodic time sync")
                     val success = bleDeviceManager.syncTime(connectionStateFlow.value)
-                    if (!success) {
+                    if (success) {
+                        // 通信成功＝生存確認。位置をキャッシュしておく
+                        locationTracker.getCurrentLocation().onSuccess { data ->
+                            lastActiveLocation = android.location.Location("").apply {
+                                latitude = data.latitude
+                                longitude = data.longitude
+                            }
+                        }
+                    } else {
                         addDebugLog("Periodic time sync failed")
                     }
                 }
@@ -251,25 +282,127 @@ class BleOrchestrator(
     }
 
     /**
+     * 定期的な履歴記録を開始する
+     * 接続中、1km移動するか15分経過するごとに履歴を保存する
+     */
+    private fun startPeriodicHistoryRecording() {
+        periodicHistoryJob?.cancel()
+        // 最後に記録した時間を現在時刻でリセット
+        lastRecordedTime = System.currentTimeMillis()
+        
+        periodicHistoryJob = scope.launch {
+            // ジョブが有効かつ、デバイスが接続されている間のみループ
+            while (coroutineContext[Job.Key]?.isActive == true && 
+                   connectionStateFlow.value is ConnectionState.Connected) {
+                
+                delay(60000L) // 1分ごとにチェック
+
+                // delay中に切断された可能性を考慮し、再度チェック
+                if (connectionStateFlow.value !is ConnectionState.Connected) break
+
+                val currentTime = System.currentTimeMillis()
+                val timeElapsedMs = currentTime - lastRecordedTime
+
+                // 設定値を取得
+                val intervalMin = appSettingsRepository.getFlow(Settings.HISTORY_INTERVAL_MIN).first()
+                val distanceM = appSettingsRepository.getFlow(Settings.HISTORY_DISTANCE_M).first()
+
+                val intervalMs = intervalMin.toLong() * 60 * 1000
+
+                val locationResult = locationTracker.getCurrentLocation()
+                val currentLocationData = locationResult.getOrNull()
+
+                var shouldSave = false
+
+                // 経過時間チェック
+                if (timeElapsedMs >= intervalMs) {
+                    addDebugLog("Periodic history: $intervalMin minutes elapsed. Saving...")
+                    shouldSave = true
+                }
+                // 移動距離チェック
+                else if (currentLocationData != null && lastRecordedLocation != null) {
+                    val currentLoc = android.location.Location("").apply {
+                        latitude = currentLocationData.latitude
+                        longitude = currentLocationData.longitude
+                    }
+                    val distance = currentLoc.distanceTo(lastRecordedLocation!!)
+                    if (distance >= distanceM.toFloat()) {
+                        addDebugLog("Periodic history: Moved ${distance}m (>= ${distanceM}m). Saving...")
+                        shouldSave = true
+                    }
+                }
+
+                if (shouldSave) {
+                    saveConnectionHistory(isDisconnection = false, isPeriodic = true)
+                }
+            }
+        }
+        addDebugLog("Periodic history recording job started")
+    }
+
+    private fun stopPeriodicHistoryRecording() {
+        periodicHistoryJob?.cancel()
+        periodicHistoryJob = null
+        lastRecordedLocation = null
+        lastRecordedTime = 0L
+        lastActiveLocation = null
+        addDebugLog("Periodic history recording job stopped")
+    }
+
+    /**
      * 現在の位置情報を取得し、接続履歴として保存する
      */
-    private fun saveConnectionHistory(isDisconnection: Boolean) {
+    private fun saveConnectionHistory(isDisconnection: Boolean, isPeriodic: Boolean = false) {
         scope.launch {
             try {
-                val type = if (isDisconnection) "Disconnection" else "Connection"
+                val type = when {
+                    isPeriodic -> "Periodic"
+                    isDisconnection -> "Disconnection"
+                    else -> "Connection"
+                }
                 addDebugLog("Saving $type history...")
-                val locationResult = locationTracker.getCurrentLocation()
-                val locationData = locationResult.getOrNull()
+
+                // 座標の決定: 切断時は最後に確認された生存地点（バイクの場所）を優先する
+                val (lat, lon) = if (isDisconnection && lastActiveLocation != null) {
+                    addDebugLog("Using cached lastActiveLocation for disconnection")
+                    Pair(lastActiveLocation?.latitude, lastActiveLocation?.longitude)
+                } else {
+                    val locationResult = locationTracker.getCurrentLocation()
+                    val locationData = locationResult.getOrNull()
+                    Pair(locationData?.latitude, locationData?.longitude)
+                }
                 
+                // 住所を取得
+                val address = if (lat != null && lon != null) {
+                    com.pirorin215.btclockmob.data.GeocoderUtil.getAddressFromLocation(
+                        context,
+                        lat,
+                        lon
+                    )
+                } else null
+
+                val currentTime = System.currentTimeMillis()
                 val historyEntry = com.pirorin215.btclockmob.data.DeviceHistoryEntry(
-                    timestamp = System.currentTimeMillis(),
-                    latitude = locationData?.latitude,
-                    longitude = locationData?.longitude,
-                    isDisconnection = isDisconnection
+                    timestamp = currentTime,
+                    latitude = lat,
+                    longitude = lon,
+                    isDisconnection = isDisconnection,
+                    isPeriodic = isPeriodic,
+                    address = address
                 )
                 
                 deviceHistoryRepository.addEntry(historyEntry)
-                addDebugLog("$type history saved: Lat=${locationData?.latitude}, Lon=${locationData?.longitude}")
+                
+                // 最後に保存した位置と時間を更新（定期記録の判定用）
+                if (lat != null && lon != null) {
+                    lastRecordedLocation = android.location.Location("").apply {
+                        latitude = lat
+                        longitude = lon
+                    }
+                }
+                lastRecordedTime = currentTime
+
+                addDebugLog("$type history saved: Lat=$lat, Lon=$lon")
             } catch (e: Exception) {
                 addLog("履歴保存中にエラーが発生しました: ${e.message}", LogLevel.ERROR)
             }

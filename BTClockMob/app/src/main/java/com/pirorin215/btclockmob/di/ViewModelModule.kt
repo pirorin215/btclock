@@ -28,5 +28,5 @@ val viewModelModule = module {
     viewModel { BleViewModel(get<BleConnectionManager>(), get<BleOrchestrator>()) }
 
 
-    viewModel { DeviceHistoryViewModel(get()) }
+    viewModel { DeviceHistoryViewModel(get(), androidApplication()) }
 }

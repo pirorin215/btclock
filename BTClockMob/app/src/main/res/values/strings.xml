@@ -1,12 +1,11 @@
 <resources>
     <string name="app_name">BTClockMob</string>
-    <string name="device_history_title">@string/menu_device_history</string>
     <string name="main_screen_title">BTClock</string>
     <string name="no_data_message">no data</string>
 
     <!-- MainScreen Menu Items -->
     <string name="menu_app_settings">アプリ設定</string>
-    <string name="menu_device_history">デバイス履歴</string>
+    <string name="menu_quit_app">アプリを終了</string>
     <string name="close">閉じる</string>
     <string name="menu_app_log">アプリログ</string>
     <string name="app_log_title">@string/menu_app_log</string>
@@ -17,15 +16,18 @@
     <string name="status_disconnected">（未接続）</string>
     <string name="stop_app_content_description">Stop App</string>
     <string name="force_reconnect_ble_content_description">Force Reconnect BLE</string>
-    <string name="show_device_history_content_description">デバイス履歴を表示</string>
 
     <!-- AppSettingsScreen -->
     <string name="app_settings_title">@string/menu_app_settings</string>
     <string name="theme_mode">テーマモード</string>
     <string name="auto_start_on_boot">OS起動時に自動開始</string>
+    <string name="history_interval">定期記録の間隔（分）</string>
+    <string name="history_distance">定期記録の距離（メートル）</string>
     <string name="save_button">保存</string>
 
-    <!-- DeviceHistoryScreen -->
+    <!-- Device History (Integrated into MainScreen) -->
+    <string name="find_my_bike">バイクを探す</string>
+    <string name="last_parked_label">駐車位置</string>
     <string name="back_button_content_description">Back</string>
     <string name="clear_history_content_description">Clear History</string>
     <string name="no_device_history_yet">No device history yet.</string>

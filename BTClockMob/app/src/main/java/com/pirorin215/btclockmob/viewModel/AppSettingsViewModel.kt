@@ -30,6 +30,20 @@ class AppSettingsViewModel(
             initialValue = false
         )
 
+    val historyIntervalMin: StateFlow<Int> = appSettingsRepository.getFlow(Settings.HISTORY_INTERVAL_MIN)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 15
+        )
+
+    val historyDistanceM: StateFlow<Int> = appSettingsRepository.getFlow(Settings.HISTORY_DISTANCE_M)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 1000
+        )
+
     fun saveThemeMode(themeMode: ThemeMode) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.THEME_MODE, themeMode)
@@ -39,6 +53,18 @@ class AppSettingsViewModel(
     fun saveAutoStartOnBoot(enable: Boolean) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.AUTO_START_ON_BOOT, enable)
+        }
+    }
+
+    fun saveHistoryIntervalMin(minutes: Int) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.HISTORY_INTERVAL_MIN, minutes)
+        }
+    }
+
+    fun saveHistoryDistanceM(meters: Int) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.HISTORY_DISTANCE_M, meters)
         }
     }
 }

@@ -39,7 +39,7 @@ class DeviceHistoryRepository(private val context: Context) {
         }
 
     suspend fun addEntry(entry: DeviceHistoryEntry) {
-        updateListInDataStore(context.deviceHistoryDataStore, PreferencesKeys.DEVICE_HISTORY_LIST) { currentList ->
+        updateListInDataStore<DeviceHistoryEntry>(context.deviceHistoryDataStore, PreferencesKeys.DEVICE_HISTORY_LIST) { currentList ->
             // BikeClock requires recording all connection/disconnection events
             // as they represent start and end of bike trips.
             // Filtering by time or location is no longer needed.
@@ -54,7 +54,7 @@ class DeviceHistoryRepository(private val context: Context) {
     }
 
     suspend fun deleteEntriesByTimestamps(timestamps: List<Long>) {
-        updateListInDataStore(context.deviceHistoryDataStore, PreferencesKeys.DEVICE_HISTORY_LIST) { currentList ->
+        updateListInDataStore<DeviceHistoryEntry>(context.deviceHistoryDataStore, PreferencesKeys.DEVICE_HISTORY_LIST) { currentList ->
             val filteredList = currentList.filterNot { entry: DeviceHistoryEntry ->
                 timestamps.contains(entry.timestamp)
             }.toMutableList()
@@ -64,11 +64,24 @@ class DeviceHistoryRepository(private val context: Context) {
     }
 
     /**
+     * 指定したタイムスタンプのエントリの住所を更新する
+     */
+    suspend fun updateEntryAddress(timestamp: Long, address: String) {
+        updateListInDataStore<DeviceHistoryEntry>(context.deviceHistoryDataStore, PreferencesKeys.DEVICE_HISTORY_LIST) { currentList ->
+            val index = currentList.indexOfFirst { entry: DeviceHistoryEntry -> entry.timestamp == timestamp }
+            if (index != -1) {
+                val entry = currentList[index]
+                currentList[index] = entry.copy(address = address)
+            }
+        }
+    }
+
+    /**
      * 指定した期間より古いエントリを削除する
      * @param retentionPeriodMs 保持期間（ミリ秒）
      */
     suspend fun deleteOldEntries(retentionPeriodMs: Long) {
-        updateListInDataStore(context.deviceHistoryDataStore, PreferencesKeys.DEVICE_HISTORY_LIST) { currentList ->
+        updateListInDataStore<DeviceHistoryEntry>(context.deviceHistoryDataStore, PreferencesKeys.DEVICE_HISTORY_LIST) { currentList ->
             val filteredList: List<DeviceHistoryEntry> = currentList.filterByTimestamp(
                 retentionPeriodMs
             ) { entry: DeviceHistoryEntry ->

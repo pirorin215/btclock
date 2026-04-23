@@ -30,6 +30,8 @@ import com.pirorin215.btclockmob.ui.theme.DistanceColor3
 import com.pirorin215.btclockmob.ui.theme.DistanceColor4
 import com.pirorin215.btclockmob.ui.theme.DistanceColor5
 import com.pirorin215.btclockmob.ui.theme.DistanceColor6
+import androidx.compose.ui.res.stringResource
+import com.pirorin215.btclockmob.R
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -59,7 +61,7 @@ fun DeviceHistoryHeader() {
             modifier = Modifier.width(TYPE_COLUMN_WIDTH)
         )
         Text(
-            text = "位置情報 (緯度/経度)",
+            text = "位置情報",
             style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.width(LOCATION_COLUMN_WIDTH),
             textAlign = TextAlign.Start
@@ -90,8 +92,18 @@ fun DeviceHistoryCard(
         null
     }
 
-    val typeText = if (entry.isDisconnection) "切断" else "接続"
-    val typeColor = if (entry.isDisconnection) Color(0xFFFF9800) else Color(0xFF4CAF50)
+    val typeText = when {
+        isHighlighted && entry.isDisconnection -> stringResource(R.string.last_parked_label)
+        entry.isPeriodic -> "記録"
+        entry.isDisconnection -> "切断"
+        else -> "接続"
+    }
+    val typeColor = when {
+        isHighlighted && entry.isDisconnection -> Color.Red // Special highlight for last parked
+        entry.isPeriodic -> Color(0xFF2196F3) // Blue for periodic
+        entry.isDisconnection -> Color(0xFFFF9800) // Orange for disconnection
+        else -> Color(0xFF4CAF50) // Green for connection
+    }
 
     Card(
         modifier = Modifier
@@ -145,15 +157,28 @@ fun DeviceHistoryCard(
                         color = typeColor,
                         modifier = Modifier.width(TYPE_COLUMN_WIDTH)
                     )
-                    entry.latitude?.let { lat ->
+                    
+                    if (entry.address != null) {
                         Text(
-                            text = "Lat: %.5f".format(lat),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.width(LOCATION_COLUMN_WIDTH),
+                            text = entry.address,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
                             textAlign = TextAlign.Start,
-                            color = locationTextColor ?: MaterialTheme.colorScheme.onSurface
+                            color = locationTextColor ?: MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
-                    } ?: Box(Modifier.width(LOCATION_COLUMN_WIDTH))
+                    } else {
+                        entry.latitude?.let { lat ->
+                            Text(
+                                text = "Lat: %.5f".format(lat),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.width(LOCATION_COLUMN_WIDTH),
+                                textAlign = TextAlign.Start,
+                                color = locationTextColor ?: MaterialTheme.colorScheme.onSurface
+                            )
+                        } ?: Box(Modifier.width(LOCATION_COLUMN_WIDTH))
+                    }
                 }
 
                 Row(
@@ -168,15 +193,18 @@ fun DeviceHistoryCard(
                     )
                     // 下段の種別カラムは空白
                     Box(Modifier.width(TYPE_COLUMN_WIDTH))
-                    entry.longitude?.let { lon ->
-                        Text(
-                            text = "Lon: %.5f".format(lon),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.width(LOCATION_COLUMN_WIDTH),
-                            textAlign = TextAlign.Start,
-                            color = locationTextColor ?: MaterialTheme.colorScheme.onSurface
-                        )
-                    } ?: Box(Modifier.width(LOCATION_COLUMN_WIDTH))
+                    
+                    if (entry.address == null) {
+                        entry.longitude?.let { lon ->
+                            Text(
+                                text = "Lon: %.5f".format(lon),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.width(LOCATION_COLUMN_WIDTH),
+                                textAlign = TextAlign.Start,
+                                color = locationTextColor ?: MaterialTheme.colorScheme.onSurface
+                            )
+                        } ?: Box(Modifier.width(LOCATION_COLUMN_WIDTH))
+                    }
                 }
             }
         }

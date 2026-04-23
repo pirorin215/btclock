@@ -17,7 +17,8 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 
 class DeviceHistoryViewModel(
-    private val deviceHistoryRepository: DeviceHistoryRepository
+    private val deviceHistoryRepository: DeviceHistoryRepository,
+    private val application: android.app.Application
 ) : ViewModel() {
 
     /**
@@ -64,6 +65,29 @@ class DeviceHistoryViewModel(
         viewModelScope.launch {
             val twoWeeksMs = 14L * 24 * 60 * 60 * 1000
             deviceHistoryRepository.deleteOldEntries(twoWeeksMs)
+            
+            // 住所が未取得の最近のエントリに対して住所を補完する
+            fillMissingAddresses()
+        }
+    }
+
+    /**
+     * 住所が未取得の最近のエントリ（最大20件）に対して、住所を取得して更新する
+     */
+    private suspend fun fillMissingAddresses() {
+        val entries = deviceHistoryEntriesForList.value
+        val missingAddressEntries = entries.filter { it.address == null && it.latitude != null && it.longitude != null }
+            .take(20) // 一度に大量にリクエストしないよう制限
+            
+        for (entry in missingAddressEntries) {
+            val address = com.pirorin215.btclockmob.data.GeocoderUtil.getAddressFromLocation(
+                application,
+                entry.latitude!!,
+                entry.longitude!!
+            )
+            if (address != null) {
+                deviceHistoryRepository.updateEntryAddress(entry.timestamp, address)
+            }
         }
     }
 
@@ -158,16 +182,6 @@ class DeviceHistoryViewModel(
         viewModelScope.launch {
             deviceHistoryRepository.deleteEntriesByTimestamps(_selectedEntries.value.toList())
             exitSelectionMode()
-        }
-    }
-
-    class Factory(private val deviceHistoryRepository: DeviceHistoryRepository) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            if (modelClass.isAssignableFrom(DeviceHistoryViewModel::class.java)) {
-                return DeviceHistoryViewModel(deviceHistoryRepository) as T
-            }
-            throw IllegalArgumentException("Unknown ViewModel class")
         }
     }
 }

@@ -56,6 +56,16 @@ object Settings {
         booleanPreferencesKey("auto_start_on_boot"),
         false
     )
+
+    val HISTORY_INTERVAL_MIN = SettingKey.Direct(
+        intPreferencesKey("history_interval_min"),
+        15
+    )
+
+    val HISTORY_DISTANCE_M = SettingKey.Direct(
+        intPreferencesKey("history_distance_m"),
+        1000
+    )
 }
 
 class AppSettingsRepository(private val context: Context) {

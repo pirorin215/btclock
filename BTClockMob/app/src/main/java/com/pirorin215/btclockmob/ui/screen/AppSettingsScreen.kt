@@ -39,6 +39,11 @@ import androidx.compose.material3.SwitchDefaults
 
 import androidx.activity.compose.BackHandler
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.HorizontalDivider
+import kotlin.math.roundToInt
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> Unit) {
@@ -51,14 +56,20 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     // DataStoreから現在の設定値を取得
     val currentThemeMode by appSettingsViewModel.themeMode.collectAsState()
     val currentAutoStartOnBoot by appSettingsViewModel.autoStartOnBoot.collectAsState()
+    val currentInterval by appSettingsViewModel.historyIntervalMin.collectAsState()
+    val currentDistance by appSettingsViewModel.historyDistanceM.collectAsState()
 
     // 状態を管理
     var selectedThemeMode by remember(currentThemeMode) { mutableStateOf(currentThemeMode) }
     var autoStartOnBootChecked by remember(currentAutoStartOnBoot) { mutableStateOf(currentAutoStartOnBoot) }
+    var selectedInterval by remember(currentInterval) { mutableStateOf(currentInterval.toFloat()) }
+    var selectedDistance by remember(currentDistance) { mutableStateOf(currentDistance.toFloat()) }
 
     val saveSettings: () -> Unit = {
         appSettingsViewModel.saveThemeMode(selectedThemeMode)
         appSettingsViewModel.saveAutoStartOnBoot(autoStartOnBootChecked)
+        appSettingsViewModel.saveHistoryIntervalMin(selectedInterval.roundToInt())
+        appSettingsViewModel.saveHistoryDistanceM(selectedDistance.roundToInt())
         onBack()
     }
 
@@ -91,7 +102,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(stringResource(R.string.auto_start_on_boot), fontSize = 16.sp)
+                Text(stringResource(R.string.auto_start_on_boot), style = MaterialTheme.typography.bodyLarge)
                 Switch(
                     checked = autoStartOnBootChecked,
                     onCheckedChange = { autoStartOnBootChecked = it },
@@ -99,10 +110,42 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                 )
             }
             
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Periodic History Interval
+            Text(
+                text = "${stringResource(R.string.history_interval)}: ${selectedInterval.roundToInt()}分",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Slider(
+                value = selectedInterval,
+                onValueChange = { selectedInterval = it },
+                valueRange = 1f..60f,
+                steps = 58
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Periodic History Distance
+            Text(
+                text = "${stringResource(R.string.history_distance)}: ${selectedDistance.roundToInt()}m",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Slider(
+                value = selectedDistance,
+                onValueChange = { selectedDistance = it },
+                valueRange = 100f..5000f,
+                steps = 48
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Theme mode selection
-            Text(stringResource(R.string.theme_mode), fontSize = 16.sp)
+            Text(stringResource(R.string.theme_mode), style = MaterialTheme.typography.bodyLarge)
             Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -118,7 +161,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                             onClick = { selectedThemeMode = themeMode },
                             colors = RadioButtonDefaults.colors()
                         )
-                        Text(themeMode.name, fontSize = 14.sp)
+                        Text(themeMode.name, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
