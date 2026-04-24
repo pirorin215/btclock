@@ -4,7 +4,6 @@ import android.app.Application
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.pirorin215.btclockmob.bluetooth.switch.KeyEventSender
 import com.pirorin215.btclockmob.data.KeyCodeSettings
 import com.pirorin215.btclockmob.data.KeyCodeSettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,33 +78,6 @@ class KeyCodeSettingsViewModel(
             bleOrchestrator.sendCommand(command)
             _testMessage.value = "デバイスに設定を送信しました"
         }
-    }
-
-    /**
-     * キーテスト送信（HID方式では使用しない）
-     *
-     * 注意: HID方式ではデバイス側で直接キーが送信されるため、
-     * アプリからのテスト送信は不要です。
-     */
-    fun sendTestKeyDown(keyCode: Int) {
-        _testMessage.value = "HIDモードではアプリからのテスト送信は不要です。\nスイッチを直接押してください。"
-        Log.w(TAG, "sendTestKeyDown called but HID mode is enabled")
-    }
-
-    /**
-     * キーテスト送信（HID方式では使用しない）
-     */
-    fun sendTestKeyUp(keyCode: Int) {
-        _testMessage.value = "HIDモードではアプリからのテスト送信は不要です。\nスイッチを直接押してください。"
-        Log.w(TAG, "sendTestKeyUp called but HID mode is enabled")
-    }
-
-    /**
-     * キーテスト送信（HID方式では使用しない）
-     */
-    fun sendTestKeyPress(keyCode: Int) {
-        _testMessage.value = "HIDモードではアプリからのテスト送信は不要です。\nスイッチを直接押してください。"
-        Log.w(TAG, "sendTestKeyPress called but HID mode is enabled")
     }
 
     /**

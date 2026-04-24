@@ -1,7 +1,6 @@
 package com.pirorin215.btclockmob
 
 import com.pirorin215.btclockmob.viewModel.MainViewModel
-import com.pirorin215.btclockmob.viewModel.BleViewModel
 import com.pirorin215.btclockmob.LocationTracker
 import com.pirorin215.btclockmob.viewModel.AppSettingsViewModel
 
@@ -47,13 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.LastKnownLocationRepository
 import com.pirorin215.btclockmob.service.BleScanService
 import com.pirorin215.btclockmob.ui.screen.MainScreen
 import com.pirorin215.btclockmob.ui.theme.BTClockMobTheme
-import com.pirorin215.btclockmob.viewModel.AppSettingsViewModelFactory
 import com.pirorin215.btclockmob.viewModel.BleConnectionManager // Add this import
 import org.koin.android.ext.android.get
 import org.koin.android.ext.android.getKoin
@@ -69,23 +66,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         setContent {
-            val context = LocalContext.current
-            val application = context.applicationContext as Application
-
             // KoinでViewModelをインジェクション
             val mainViewModel: MainViewModel by viewModel()
-            val appSettingsViewModel: AppSettingsViewModel = viewModel(
-                factory = AppSettingsViewModelFactory(
-                    application,
-                    get()
-                )
-            )
+            val appSettingsViewModel: AppSettingsViewModel by viewModel()
 
             val themeMode by mainViewModel.themeMode.collectAsState()
 
             BTClockMobTheme(themeMode = themeMode) {
                 BleApp(
                     modifier = Modifier.fillMaxSize(),
+                    mainViewModel = mainViewModel,
                     appSettingsViewModel = appSettingsViewModel
                 )
             }
@@ -103,7 +93,11 @@ class MainActivity : ComponentActivity() {
 private const val TAG = "BleApp"
 
 @Composable
-fun BleApp(modifier: Modifier = Modifier, appSettingsViewModel: AppSettingsViewModel) { // Updated signature
+fun BleApp(
+    modifier: Modifier = Modifier,
+    mainViewModel: MainViewModel,
+    appSettingsViewModel: AppSettingsViewModel
+) { // Updated signature
     val context = LocalContext.current
     val activity = context as Activity
 
@@ -265,7 +259,7 @@ fun BleApp(modifier: Modifier = Modifier, appSettingsViewModel: AppSettingsViewM
     }
 
     // Main Screen Logic
-    MainScreen(appSettingsViewModel = appSettingsViewModel) // Updated call site
+    MainScreen(mainViewModel = mainViewModel, appSettingsViewModel = appSettingsViewModel) // Updated call site
 }
 
 @Composable

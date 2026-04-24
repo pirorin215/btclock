@@ -26,29 +26,14 @@ bool g_timeSynced = false;
 unsigned long g_lastHeartbeat = 0;
 unsigned long g_loopCount = 0;
 
-// Switch state tracking
-enum SwitchState {
-    SWITCH_STATE_IDLE,
-    SWITCH_STATE_PRESS,
-    SWITCH_STATE_REPEAT
+// --- HID Switch Functions ---
+HidSwitch hidSwitches[] = {
+    {SWITCH_SW1_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW1_KEYCODE},
+    {SWITCH_SW2_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW2_KEYCODE},
+    {SWITCH_SW3_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW3_KEYCODE},
+    {SWITCH_SW4_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW4_KEYCODE}
 };
-
-struct Switch {
-    uint8_t gpio;
-    uint8_t pinState;
-    unsigned long lastDebounceTime;
-    unsigned long pressStartTime;
-    SwitchState state;
-    uint8_t switchNum;
-};
-
-Switch switches[] = {
-    {SWITCH_SW1_GPIO, HIGH, 0, 0, SWITCH_STATE_IDLE, 1},
-    {SWITCH_SW2_GPIO, HIGH, 0, 0, SWITCH_STATE_IDLE, 2},
-    {SWITCH_SW3_GPIO, HIGH, 0, 0, SWITCH_STATE_IDLE, 3},
-    {SWITCH_SW4_GPIO, HIGH, 0, 0, SWITCH_STATE_IDLE, 4}
-};
-#define NUM_SWITCHES 4
+#define NUM_HID_SWITCHES 4
 
 // --- Time Helper Functions ---
 int getHours() {
@@ -69,57 +54,32 @@ void setup() {
 
     // Wait for serial console to connect
     // This allows us to see the initialization sequence
-    unsigned long startTime = millis();
-    while (!Serial && (millis() - startTime < 3000)) {
-        ; // Wait for serial port to connect (timeout 3 seconds)
-    }
+    //unsigned long startTime = millis();
+    //while (!Serial && (millis() - startTime < 3000)) {
+    //    ; // Wait for serial port to connect (timeout 3 seconds)
+    //}
 
-    // Additional delay to ensure serial is ready
-    delay(500);
+    Serial.println("[BIKECLOCK v1.0.2] " __DATE__ " " __TIME__);
 
-    Serial.println("");
-    Serial.println("========================================");
-    Serial.println("[BIKECLOCK] BikeClock starting...");
-    Serial.println("[BIKECLOCK] Firmware Version: 1.0.1");
-    Serial.println("[BIKECLOCK] Build Date: " __DATE__ " " __TIME__);
-    Serial.println("========================================");
-
-    // Initialize LED display (max brightness)
-    Serial.println("[BIKECLOCK] Initializing display...");
     g_display = new TM1637Display(LED_CLK_GPIO, LED_DIO_GPIO);
-    g_display->setBrightness(0x0F); // Maximum brightness
-    Serial.println("[BIKECLOCK] Display initialized (CLK=D5, DIO=D4)");
-
-    // Show startup pattern
-    Serial.println("[BIKECLOCK] Showing startup pattern...");
-    g_display->showNumberDec(8888);
-    delay(1000);
+    g_display->setBrightness(0x0F);
     g_display->clear();
+    g_display->showNumberDec(8888);
+    Serial.println("[INIT] Display OK");
 
-    // Initialize BLE
-    Serial.println("[BIKECLOCK] Initializing BLE...");
     setupBLE();
 
-    // Initialize switches with internal pull-up
-    Serial.println("[BIKECLOCK] Initializing switches...");
-    for (int i = 0; i < NUM_SWITCHES; i++) {
-        pinMode(switches[i].gpio, INPUT_PULLUP);
-        switches[i].pinState = HIGH;
-        switches[i].lastDebounceTime = 0;
-        switches[i].state = SWITCH_STATE_IDLE;
-        Serial.printf("[BIKECLOCK]   SW%d: GPIO=%d\n",
-                     i + 1, switches[i].gpio);
+    for (int i = 0; i < NUM_HID_SWITCHES; i++) {
+        pinMode(hidSwitches[i].gpio, INPUT_PULLUP);
+        hidSwitches[i].pinState = HIGH;
+        hidSwitches[i].lastDebounceTime = 0;
+        hidSwitches[i].state = HID_STATE_IDLE;
     }
+    Serial.println("[INIT] Switches OK");
 
     g_lastMillis = millis();
     g_lastHeartbeat = millis();
-
-    Serial.println("[BIKECLOCK] Setup complete.");
-    Serial.println("[BIKECLOCK] Status: Waiting for BLE connection...");
-    Serial.println("[BIKECLOCK] Initial timestamp: 0 (not synced)");
-    Serial.println("========================================");
-    Serial.println("[BIKECLOCK] Starting main loop...");
-    Serial.println("");
+    Serial.println("[INIT] Waiting for BLE...");
 }
 
 void loop() {
@@ -133,28 +93,18 @@ void loop() {
     if (currentMillis - g_lastMillis >= 1000) {
         g_currentTimestamp++;
         g_lastMillis = currentMillis;
-
-        // Log time every 10 seconds
-        if (g_currentTimestamp % 10 == 0) {
-            int hours = getHours();
-            int minutes = getMinutes();
-            int seconds = getSeconds();
-            Serial.printf("[BIKECLOCK] Time: %02d:%02d:%02d (UTC) | JST: %02d:%02d:%02d | Timestamp: %lu | Synced: %s\n",
-                         hours, minutes, seconds,
-                         (hours + 9) % 24, minutes, seconds,
-                         g_currentTimestamp,
-                         g_timeSynced ? "YES" : "NO");
-        }
     }
 
-    // Heartbeat logging every 5 seconds
-    if (currentMillis - g_lastHeartbeat >= 5000) {
-        Serial.printf("[HEARTBEAT v1.0.2] Uptime: %lu sec | Loops: %lu | TimeSynced: %s | Timestamp: %lu\n",
+    // Heartbeat & time log every 10 seconds
+    if (currentMillis - g_lastHeartbeat >= 10000) {
+        int hours = getHours();
+        int minutes = getMinutes();
+        int seconds = getSeconds();
+        Serial.printf("[HB] %02d:%02d:%02d | Up:%lus | L:%lu | %c\n",
+                     (hours + 9) % 24, minutes, seconds,
                      currentMillis / 1000,
                      g_loopCount,
-                     g_timeSynced ? "YES" : "NO",
-                     g_currentTimestamp);
-        Serial.flush();
+                     g_timeSynced ? 'S' : '-');
         g_lastHeartbeat = currentMillis;
     }
 
@@ -201,87 +151,6 @@ void updateTimeDisplay() {
     g_display->setSegments(data);
 }
 
-// --- Switch Functions ---
-void processSwitches() {
-    for (int i = 0; i < NUM_SWITCHES; i++) {
-        uint8_t reading = digitalRead(switches[i].gpio);
-
-        // Check if switch state changed (due to noise or pressing)
-        if (reading != switches[i].pinState) {
-            switches[i].lastDebounceTime = millis();
-            switches[i].pinState = reading;
-        }
-
-        // Check if debounce delay passed
-        if ((millis() - switches[i].lastDebounceTime) > SWITCH_DEBOUNCE_DELAY_MS) {
-            // State machine
-            switch (switches[i].state) {
-                case SWITCH_STATE_IDLE:
-                    // Check if switch is pressed (LOW)
-                    if (reading == LOW) {
-                        Serial.printf("[SWITCH] SW%d: PRESS\n", switches[i].switchNum);
-                        sendSwitchNotification(switches[i].switchNum, "PRESS");
-                        switches[i].state = SWITCH_STATE_PRESS;
-                        switches[i].pressStartTime = millis();
-                    }
-                    break;
-
-                case SWITCH_STATE_PRESS:
-                    // Check for repeat (long press)
-                    if (reading == LOW) {
-                        if ((millis() - switches[i].pressStartTime) > SWITCH_REPEAT_DELAY_MS) {
-                            Serial.printf("[SWITCH] SW%d: REPEAT (start)\n", switches[i].switchNum);
-                            sendSwitchNotification(switches[i].switchNum, "REPEAT");
-                            switches[i].state = SWITCH_STATE_REPEAT;
-                            switches[i].pressStartTime = millis();  // Reset for repeat interval
-                        }
-                    } else {
-                        // Switch released
-                        Serial.printf("[SWITCH] SW%d: RELEASE\n", switches[i].switchNum);
-                        sendSwitchNotification(switches[i].switchNum, "RELEASE");
-                        switches[i].state = SWITCH_STATE_IDLE;
-                    }
-                    break;
-
-                case SWITCH_STATE_REPEAT:
-                    if (reading == LOW) {
-                        // Continue repeating
-                        if ((millis() - switches[i].pressStartTime) > SWITCH_REPEAT_INTERVAL_MS) {
-                            Serial.printf("[SWITCH] SW%d: REPEAT\n", switches[i].switchNum);
-                            sendSwitchNotification(switches[i].switchNum, "REPEAT");
-                            switches[i].pressStartTime = millis();
-                        }
-                    } else {
-                        // Switch released
-                        Serial.printf("[SWITCH] SW%d: RELEASE\n", switches[i].switchNum);
-                        sendSwitchNotification(switches[i].switchNum, "RELEASE");
-                        switches[i].state = SWITCH_STATE_IDLE;
-                    }
-                    break;
-            }
-        }
-    }
-}
-
-void sendSwitchNotification(uint8_t switchNum, const char* action) {
-    // Format: "SWITCH:n:ACTION"
-    // Example: "SWITCH:1:PRESS"
-    char message[32];
-    snprintf(message, sizeof(message), "SWITCH:%d:%s", switchNum, action);
-    bleSwitchNotifyCharacteristic.notify((uint8_t*)message, strlen(message));
-    Serial.printf("[SWITCH] Notification sent: %s\n", message);
-}
-
-// --- HID Switch Functions ---
-
-HidSwitch hidSwitches[] = {
-    {SWITCH_SW1_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW1_KEYCODE},
-    {SWITCH_SW2_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW2_KEYCODE},
-    {SWITCH_SW3_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW3_KEYCODE},
-    {SWITCH_SW4_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW4_KEYCODE}
-};
-#define NUM_HID_SWITCHES 4
-
 void processHidSwitches() {
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
         uint8_t reading = digitalRead(hidSwitches[i].gpio);
@@ -299,10 +168,9 @@ void processHidSwitches() {
                 case HID_STATE_IDLE:
                     // Check if switch is pressed (LOW)
                     if (reading == LOW) {
-                        Serial.printf("[HID] SW%d: PRESS\n", i + 1);
-                        Serial.flush();
+                        Serial.printf("[HID] SW%d P\n", i + 1);
                         sendHidKeyPress(hidSwitches[i].keyCode, NULL);
-                        
+
                         hidSwitches[i].state = HID_STATE_PRESS;
                         hidSwitches[i].pressStartTime = millis();
                     }
@@ -312,21 +180,17 @@ void processHidSwitches() {
                     if (reading == LOW) {
                         // Check for repeat (long press)
                         if ((millis() - hidSwitches[i].pressStartTime) > HID_REPEAT_DELAY_MS) {
-                            Serial.printf("[HID] SW%d: REPEAT (start)\n", i + 1);
-                            Serial.flush();
-                            
                             // OS側のオートリピートに頼らず、マイコン側で一旦離してまた押す
                             sendHidKeyRelease(NULL);
                             delay(10);
                             sendHidKeyPress(hidSwitches[i].keyCode, NULL);
-                            
+
                             hidSwitches[i].state = HID_STATE_REPEAT;
                             hidSwitches[i].pressStartTime = millis();
                         }
                     } else {
                         // Switch released
-                        Serial.printf("[HID] SW%d: RELEASE\n", i + 1);
-                        Serial.flush();
+                        Serial.printf("[HID] SW%d R\n", i + 1);
                         sendHidKeyRelease(NULL);
                         hidSwitches[i].state = HID_STATE_IDLE;
                     }
@@ -336,20 +200,16 @@ void processHidSwitches() {
                     if (reading == LOW) {
                         // Continue repeating
                         if ((millis() - hidSwitches[i].pressStartTime) > HID_REPEAT_INTERVAL_MS) {
-                            Serial.printf("[HID] SW%d: REPEAT\n", i + 1);
-                            Serial.flush();
-                            
                             // 一旦離してまた押すことで、OS側に新しいキー入力として認識させる
                             sendHidKeyRelease(NULL);
                             delay(10);
                             sendHidKeyPress(hidSwitches[i].keyCode, NULL);
-                            
+
                             hidSwitches[i].pressStartTime = millis();
                         }
                     } else {
                         // Switch released
-                        Serial.printf("[HID] SW%d: RELEASE\n", i + 1);
-                        Serial.flush();
+                        Serial.printf("[HID] SW%d R\n", i + 1);
                         sendHidKeyRelease(NULL);
                         hidSwitches[i].state = HID_STATE_IDLE;
                     }

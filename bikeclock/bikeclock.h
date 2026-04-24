@@ -19,11 +19,6 @@ using namespace Adafruit_LittleFS_Namespace;
 #define SWITCH_SW3_GPIO     2   // D2 (P0.04)
 #define SWITCH_SW4_GPIO     3   // D3 (P0.29)
 
-// --- Switch Settings ---
-#define SWITCH_DEBOUNCE_DELAY_MS    50   // Debounce delay
-#define SWITCH_REPEAT_DELAY_MS     300   // Initial repeat delay
-#define SWITCH_REPEAT_INTERVAL_MS  100   // Repeat interval
-
 // --- HID Settings ---
 #define HID_DEBOUNCE_DELAY_MS     50   // Switch debounce delay
 #define HID_REPEAT_DELAY_MS      500   // Time before starting repeat
@@ -85,9 +80,5 @@ int getSeconds();
 void processHidSwitches();
 void sendHidKeyPress(uint16_t keyCode, const char* unused = NULL);
 void sendHidKeyRelease(const char* unused = NULL);
-
-// BLE Switch notification functions (optional, for app feedback)
-void processSwitches();
-void sendSwitchNotification(uint8_t switchNum, const char* action);
 
 #endif // BIKECLOCK_H

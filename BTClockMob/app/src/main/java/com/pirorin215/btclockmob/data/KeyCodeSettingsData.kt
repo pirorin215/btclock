@@ -16,10 +16,10 @@ data class KeyCodeSettings(
 ) {
     companion object {
         // デフォルトのHID Usage ID (Keyboard & Consumer Page)
-        const val DEFAULT_SW1_HID = 0x50   // Arrow Left
-        const val DEFAULT_SW2_HID = 0x4F   // Arrow Right
-        const val DEFAULT_SW3_HID = 0x52   // Arrow Up
-        const val DEFAULT_SW4_HID = 0x51   // Arrow Down
+        const val DEFAULT_SW1_HID = 0xBC   // Media Rewind
+        const val DEFAULT_SW2_HID = 0xB3   // Media Fast Forward
+        const val DEFAULT_SW3_HID = 0xCD   // Media Play/Pause
+        const val DEFAULT_SW4_HID = 0xB5   // Media Next Track
     }
 
     /**

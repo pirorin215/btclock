@@ -103,8 +103,10 @@ class BleConnectionManager(
                 }
                 is com.pirorin215.btclockmob.data.BleEvent.Ready -> {
                     logManager.addLog("Device ready")
+                    logManager.addDebugLog("BleEvent.Ready: Emitting _onDeviceReadyEvent...")
                     repository.requestHighPriorityConnection() // Request faster connection interval
                     _onDeviceReadyEvent.emit(Unit) // Emit event to the external flow
+                    logManager.addDebugLog("BleEvent.Ready: _onDeviceReadyEvent emitted successfully")
                 }
                 // Characteristic changes are handled by the viewmodel that owns the operation (BleOrchestrator)
                 else -> { /* Other events can be handled here if needed */ }

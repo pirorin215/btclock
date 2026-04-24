@@ -11,9 +11,9 @@ val PurpleGrey40 = Color(0xFF625b71)
 val Pink40 = Color(0xFF7D5260)
 
 // Colors for distance gradient
-val DistanceColor1 = Color(0xFFFFCDD2) // ~2km
-val DistanceColor2 = Color(0xFFEF9A9A) // ~5km
-val DistanceColor3 = Color(0xFFE57373) // ~10km
-val DistanceColor4 = Color(0xFFEF5350) // ~50km
-val DistanceColor5 = Color(0xFFF44336) // ~100km
-val DistanceColor6 = Color(0xFFD32F2F) // >100km
+val DistanceColor1 = Color(0xFF90CAF9) // ~2km 薄い青
+val DistanceColor2 = Color(0xFF81C784) // ~5km 緑
+val DistanceColor3 = Color(0xFFFFF176) // ~10km 黄色
+val DistanceColor4 = Color(0xFFFFB74D) // ~50km オレンジ
+val DistanceColor5 = Color(0xFFF06292) // ~100km ピンク
+val DistanceColor6 = Color(0xFFE53935) // >100km 赤

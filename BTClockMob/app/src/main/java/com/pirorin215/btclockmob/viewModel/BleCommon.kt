@@ -6,7 +6,5 @@ sealed class NavigationEvent {
 
 enum class BleOperation {
     IDLE,
-    FETCHING_SETTINGS,
-    SENDING_SETTINGS,
     SENDING_TIME
 }

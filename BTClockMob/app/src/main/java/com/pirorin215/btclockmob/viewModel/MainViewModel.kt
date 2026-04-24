@@ -41,13 +41,9 @@ class MainViewModel(
     val connectionState: StateFlow<ConnectionState> = bleConnectionManager.connectionState
     val currentOperation: StateFlow<BleOperation> = bleOrchestrator.currentOperation
     val navigationEvent: SharedFlow<NavigationEvent> = bleOrchestrator.navigationEvent
-    val deviceSettings: StateFlow<com.pirorin215.btclockmob.data.DeviceSettings> = bleOrchestrator.deviceSettings
     val currentForegroundLocation = locationMonitor.currentForegroundLocation
 
     // --- Methods delegated to orchestrator and managers ---
-    suspend fun getSettings() = bleOrchestrator.getSettings()
-    fun sendSettings() = bleOrchestrator.sendSettings()
-    fun updateSettings(updater: (com.pirorin215.btclockmob.data.DeviceSettings) -> com.pirorin215.btclockmob.data.DeviceSettings) = bleOrchestrator.updateSettings(updater)
     fun sendCommand(command: String) = bleOrchestrator.sendCommand(command)
     fun clearLogs() = logManager.clearLogs()
     fun forceReconnectBle() = bleConnectionManager.forceReconnect()

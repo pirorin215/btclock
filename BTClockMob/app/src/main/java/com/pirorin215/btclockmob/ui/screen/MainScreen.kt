@@ -33,7 +33,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koin.androidx.compose.koinViewModel
 import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
-import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModelFactory
 import com.pirorin215.btclockmob.viewModel.AppSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.DeviceHistoryViewModel
@@ -65,13 +64,13 @@ private fun openMapForEntry(context: android.content.Context, entry: com.pirorin
 @SuppressLint("MissingPermission")
 @Composable
 fun MainScreen(
-    appSettingsViewModel: AppSettingsViewModel,
+    mainViewModel: MainViewModel = koinViewModel(),
+    appSettingsViewModel: AppSettingsViewModel = koinViewModel(),
     historyViewModel: DeviceHistoryViewModel = koinViewModel()
 ) {
     val context = LocalContext.current
-    val viewModel: MainViewModel = viewModel() // ViewModel is already created and provided by compositionLocal in MainActivity's setContent
-    val connectionState by viewModel.connectionState.collectAsState() // Use viewModel
-    val logs: List<String> by viewModel.logs.collectAsState()
+    val connectionState by mainViewModel.connectionState.collectAsState()
+    val logs: List<String> by mainViewModel.logs.collectAsState()
 
     val historyEntries by historyViewModel.deviceHistoryEntries.collectAsState()
     val entriesForList by historyViewModel.deviceHistoryEntriesForList.collectAsState()
@@ -90,15 +89,8 @@ fun MainScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    // KeyCodeSettingsViewModelの初期化
-    val activity = context as Activity
-    val keyCodeSettingsViewModel: KeyCodeSettingsViewModel = viewModel(
-        factory = KeyCodeSettingsViewModelFactory(
-            activity.application,
-            activity.get(),
-            activity.get()
-        )
-    )
+    // KeyCodeSettingsViewModelの初期化 (Koin)
+    val keyCodeSettingsViewModel: KeyCodeSettingsViewModel = koinViewModel()
 
     BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings) {
         if (showAppSettings) {
@@ -116,10 +108,10 @@ fun MainScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 Log.d(TAG, "ON_RESUME: Starting low power location updates.")
-                viewModel.startLowPowerLocationUpdates()
+                mainViewModel.startLowPowerLocationUpdates()
             } else if (event == Lifecycle.Event.ON_PAUSE) {
                 Log.d(TAG, "ON_PAUSE: Stopping low power location updates.")
-                viewModel.stopLowPowerLocationUpdates()
+                mainViewModel.stopLowPowerLocationUpdates()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -183,7 +175,7 @@ fun MainScreen(
                             } else {
                                 IconButton(
                                     onClick = {
-                                        viewModel.forceReconnectBle()
+                                        mainViewModel.forceReconnectBle()
                                     }
                                 ) {
                                     Icon(Icons.Default.Autorenew, contentDescription = stringResource(R.string.force_reconnect_ble_content_description))
@@ -228,7 +220,7 @@ fun MainScreen(
                                         text = { Text(stringResource(R.string.menu_quit_app)) },
                                         leadingIcon = { Icon(Icons.Default.Stop, contentDescription = null) },
                                         onClick = {
-                                            viewModel.stopAppServices()
+                                            mainViewModel.stopAppServices()
                                             (context as? Activity)?.finish()
                                             expanded = false
                                         }
@@ -316,7 +308,7 @@ fun MainScreen(
                             AppLogCard(
                                 logs = logs,
                                 onDismiss = { showAppLogPanel = false },
-                                onClearLogs = { viewModel.clearLogs() }
+                                onClearLogs = { mainViewModel.clearLogs() }
                             )
                         }
                     }

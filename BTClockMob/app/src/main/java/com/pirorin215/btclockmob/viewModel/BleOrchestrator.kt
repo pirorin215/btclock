@@ -26,7 +26,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.first
-import com.pirorin215.btclockmob.data.DeviceSettings
 import com.pirorin215.btclockmob.constants.TimeConstants
 
 import com.pirorin215.btclockmob.viewModel.LogManager
@@ -34,7 +33,6 @@ import com.pirorin215.btclockmob.LocationTracker
 import com.pirorin215.btclockmob.data.DeviceHistoryRepository
 import com.pirorin215.btclockmob.bluetooth.constants.BleConstants
 import com.pirorin215.btclockmob.bluetooth.device.BleDeviceManager
-import com.pirorin215.btclockmob.bluetooth.settings.BleSettingsManager
 import com.pirorin215.btclockmob.viewModel.NavigationEvent
 
 class BleOrchestrator(
@@ -62,14 +60,13 @@ class BleOrchestrator(
      * Primary mutex for all BLE operations
      *
      * USAGE RULES:
-     * - Protects all BLE communication (commands, file transfers, settings)
-     * - Shared with BleDeviceCommandManager and FileTransferManager
+     * - Protects all BLE communication (commands)
+     * - Shared with BleDeviceCommandManager
      * - Always use withLock { } to ensure proper release
      * - NEVER nest with other mutexes to avoid deadlocks
      *
      * DEADLOCK PREVENTION:
      * - This is the ONLY mutex for BLE operations
-     * - File processing uses AtomicBoolean (isProcessingFiles) instead of mutex
      */
     internal val bleMutex = Mutex()
 
@@ -86,21 +83,6 @@ class BleOrchestrator(
             bleMutex = bleMutex
         )
     }
-
-    // 設定マネージャーの初期化
-    private val bleSettingsManager by lazy {
-        BleSettingsManager(
-            scope = scope,
-            sendCommand = { command -> sendCommand(command) },
-            logManager = logManager,
-            _currentOperation = _currentOperation,
-            bleMutex = bleMutex,
-            _navigationEvent = _navigationEvent
-        )
-    }
-
-    // --- マネージャーの委譲プロパティ ---
-    val deviceSettings: StateFlow<com.pirorin215.btclockmob.data.DeviceSettings> get() = bleSettingsManager.deviceSettings
 
 
     // Periodic time sync job for BikeClock (1 minute interval)
@@ -121,31 +103,41 @@ class BleOrchestrator(
         // Monitor disconnect signal
         disconnectSignal
             .onEach {
-                addDebugLog("BLE disconnected")
+                addDebugLog("disconnectSignal: Received - Handling disconnection, wasConnected=$wasConnected")
+                addLog("BLE disconnected")
                 // 停止: 定期履歴記録
                 stopPeriodicHistoryRecording()
                 // 保存: 切断時（直前が接続状態だった場合のみ）
+                addDebugLog("disconnectSignal: Checking wasConnected flag...")
                 if (wasConnected) {
+                    addDebugLog("disconnectSignal: Saving disconnect history")
                     saveConnectionHistory(isDisconnection = true)
                     wasConnected = false
+                    addDebugLog("disconnectSignal: Disconnect history saved, wasConnected=false")
                 } else {
-                    addDebugLog("Skipping disconnect history: not previously connected")
+                    addDebugLog("disconnectSignal: Skipping disconnect history (not previously connected)")
                 }
             }
             .launchIn(scope)
 
         onDeviceReadyEvent
             .onEach {
+                addDebugLog("onDeviceReadyEvent: Received - Starting device initialization")
                 addLog("Starting initial sync")
                 startFullSync()
+                addDebugLog("onDeviceReadyEvent: Initial sync completed")
                 // Start periodic time sync job
                 startPeriodicTimeSync()
+                addDebugLog("onDeviceReadyEvent: Periodic time sync started")
                 // 接続状態をマーク
                 wasConnected = true
+                addDebugLog("onDeviceReadyEvent: wasConnected=true, saving connection history")
                 // 保存: 接続時
                 saveConnectionHistory(isDisconnection = false)
+                addDebugLog("onDeviceReadyEvent: Connection history saved successfully")
                 // 開始: 定期履歴記録
                 startPeriodicHistoryRecording()
+                addDebugLog("onDeviceReadyEvent: Periodic history recording started")
             }
             .launchIn(scope)
 
@@ -244,18 +236,22 @@ class BleOrchestrator(
 
 
     private fun handleCharacteristicChanged(characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-        // Check if this is the command characteristic (bidirectional)
-        if (characteristic.uuid != UUID.fromString(BleRepository.COMMAND_UUID_STRING)) return
+        val uuid = characteristic.uuid
+        val commandUuid = UUID.fromString(BleRepository.COMMAND_UUID_STRING)
 
-        when (_currentOperation.value) {
-            BleOperation.SENDING_TIME -> {
-                bleDeviceManager.handleResponse(value, _currentOperation.value)
-            }
-            BleOperation.FETCHING_SETTINGS, BleOperation.SENDING_SETTINGS -> {
-                bleSettingsManager.handleResponse(value, _currentOperation.value)
+        when (uuid) {
+            commandUuid -> {
+                when (_currentOperation.value) {
+                    BleOperation.SENDING_TIME -> {
+                        bleDeviceManager.handleResponse(value, _currentOperation.value)
+                    }
+                    else -> {
+                        addLog("Received command response in unexpected state (${_currentOperation.value}): ${value.toString(Charsets.UTF_8)}")
+                    }
+                }
             }
             else -> {
-                addLog("Received data in unexpected state (${_currentOperation.value}): ${value.toString(Charsets.UTF_8)}")
+                addLog("Received data from unknown characteristic ($uuid): ${value.toString(Charsets.UTF_8)}")
             }
         }
     }
@@ -267,18 +263,6 @@ class BleOrchestrator(
 
     private fun sendAck(ackValue: ByteArray) {
         repository.sendAck(ackValue)
-    }
-
-    suspend fun getSettings() {
-        bleSettingsManager.getSettings(connectionStateFlow.value)
-    }
-
-    fun sendSettings() {
-        bleSettingsManager.sendSettings(connectionStateFlow.value)
-    }
-
-    fun updateSettings(updater: (com.pirorin215.btclockmob.data.DeviceSettings) -> com.pirorin215.btclockmob.data.DeviceSettings) {
-        bleSettingsManager.updateSettings(updater)
     }
 
     /**
@@ -360,28 +344,45 @@ class BleOrchestrator(
                     isDisconnection -> "Disconnection"
                     else -> "Connection"
                 }
-                addDebugLog("Saving $type history...")
+                addDebugLog("saveConnectionHistory: Saving $type history...")
 
                 // 座標の決定: 切断時は最後に確認された生存地点（バイクの場所）を優先する
                 val (lat, lon) = if (isDisconnection && lastActiveLocation != null) {
-                    addDebugLog("Using cached lastActiveLocation for disconnection")
+                    addDebugLog("saveConnectionHistory: Using cached lastActiveLocation for disconnection")
                     Pair(lastActiveLocation?.latitude, lastActiveLocation?.longitude)
                 } else {
+                    addDebugLog("saveConnectionHistory: Getting current location...")
                     val locationResult = locationTracker.getCurrentLocation()
                     val locationData = locationResult.getOrNull()
+                    if (locationData != null) {
+                        addDebugLog("saveConnectionHistory: Location obtained: Lat=${locationData.latitude}, Lon=${locationData.longitude}")
+                    } else {
+                        addDebugLog("saveConnectionHistory: Location is null (result exception or no location available)")
+                    }
                     Pair(locationData?.latitude, locationData?.longitude)
                 }
-                
+
                 // 住所を取得
                 val address = if (lat != null && lon != null) {
-                    com.pirorin215.btclockmob.data.GeocoderUtil.getAddressFromLocation(
+                    addDebugLog("saveConnectionHistory: Getting address for Lat=$lat, Lon=$lon")
+                    val addr = com.pirorin215.btclockmob.data.GeocoderUtil.getAddressFromLocation(
                         context,
                         lat,
                         lon
                     )
-                } else null
+                    if (addr != null) {
+                        addDebugLog("saveConnectionHistory: Address obtained: $addr")
+                    } else {
+                        addDebugLog("saveConnectionHistory: Address is null")
+                    }
+                    addr
+                } else {
+                    addDebugLog("saveConnectionHistory: Skipping address fetch (lat=$lat, lon=$lon)")
+                    null
+                }
 
                 val currentTime = System.currentTimeMillis()
+                addDebugLog("saveConnectionHistory: Creating history entry: timestamp=$currentTime, lat=$lat, lon=$lon, type=$type, address=$address")
                 val historyEntry = com.pirorin215.btclockmob.data.DeviceHistoryEntry(
                     timestamp = currentTime,
                     latitude = lat,
@@ -390,21 +391,26 @@ class BleOrchestrator(
                     isPeriodic = isPeriodic,
                     address = address
                 )
-                
+
+                addDebugLog("saveConnectionHistory: Adding entry to repository...")
                 deviceHistoryRepository.addEntry(historyEntry)
-                
+                addDebugLog("saveConnectionHistory: Entry added to repository successfully")
+
                 // 最後に保存した位置と時間を更新（定期記録の判定用）
                 if (lat != null && lon != null) {
                     lastRecordedLocation = android.location.Location("").apply {
                         latitude = lat
                         longitude = lon
                     }
+                    addDebugLog("saveConnectionHistory: Updated lastRecordedLocation: Lat=$lat, Lon=$lon")
                 }
                 lastRecordedTime = currentTime
+                addDebugLog("saveConnectionHistory: Updated lastRecordedTime: $currentTime")
 
-                addDebugLog("$type history saved: Lat=$lat, Lon=$lon")
+                addDebugLog("saveConnectionHistory: $type history saved successfully: Lat=$lat, Lon=$lon")
             } catch (e: Exception) {
-                addLog("履歴保存中にエラーが発生しました: ${e.message}", LogLevel.ERROR)
+                addLog("saveConnectionHistory: Error saving history - ${e.javaClass.simpleName}: ${e.message}", LogLevel.ERROR)
+                addDebugLog("saveConnectionHistory: Stack trace: ${e.stackTraceToString()}")
             }
         }
     }
