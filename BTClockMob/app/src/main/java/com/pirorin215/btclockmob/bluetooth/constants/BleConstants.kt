@@ -22,6 +22,13 @@ object BleConstants {
      */
     const val COMMAND_UUID_STRING = "beb5483e-36e1-4688-b7f5-ea07361b26a0"
 
+    /**
+     * スイッチ通知キャラクタリスティックUUID（NOTIFY専用）
+     * スイッチ押下、リピート、リリースの通知に使用
+     * フォーマット: "SWITCH:n:ACTION" (例: "SWITCH:1:PRESS")
+     */
+    const val SWITCH_NOTIFY_UUID_STRING = "beb5483e-36e1-4688-b7f5-ea07361b26a1"
+
     // Note: RESPONSE_UUID_STRING is no longer needed
     // We use a single bidirectional characteristic for both commands and responses
 

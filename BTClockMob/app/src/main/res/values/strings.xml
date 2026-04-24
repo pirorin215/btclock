@@ -36,4 +36,7 @@
     <string name="delete_button">削除</string>
     <string name="cancel_button">キャンセル</string>
 
+    <!-- Key Injector Accessibility Service -->
+    <string name="accessibility_service_description">BikeClockスイッチ操作機能。外部スイッチでメディア再生制御などが可能になります。</string>
+
 </resources>

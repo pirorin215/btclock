@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch // Add this import
 import java.util.UUID
 import com.pirorin215.btclockmob.constants.TimeConstants
 import com.pirorin215.btclockmob.bluetooth.constants.BleConstants
+import kotlinx.coroutines.flow.first
 
 sealed class ConnectionState {
     object Disconnected : ConnectionState()
@@ -34,6 +35,14 @@ sealed class ConnectionState {
     data class Paired(val device: BluetoothDevice) : ConnectionState()
     data class Connected(val device: BluetoothDevice) : ConnectionState()
     data class Error(val message: String) : ConnectionState()
+}
+
+// GATT接続状態（カスタムサービスのみ）
+sealed class GattConnectionState {
+    object Disconnected : GattConnectionState()
+    object Connecting : GattConnectionState()
+    data class Connected(val gatt: BluetoothGatt) : GattConnectionState()
+    data class Error(val message: String) : GattConnectionState()
 }
 
 sealed class BleEvent {
@@ -50,6 +59,7 @@ class BleRepository(private val context: Context) {
     companion object {
         const val SERVICE_UUID_STRING = BleConstants.SERVICE_UUID_STRING
         const val COMMAND_UUID_STRING = BleConstants.COMMAND_UUID_STRING
+        const val SWITCH_NOTIFY_UUID_STRING = BleConstants.SWITCH_NOTIFY_UUID_STRING
     }
 
     private val TAG = "BleRepository"
@@ -60,10 +70,15 @@ class BleRepository(private val context: Context) {
 
     var commandCharacteristic: BluetoothGattCharacteristic? = null
     var responseCharacteristic: BluetoothGattCharacteristic? = null
+    var switchNotifyCharacteristic: BluetoothGattCharacteristic? = null
 
     // --- Flows to expose data to ViewModel ---
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState = _connectionState.asStateFlow()
+
+    // GATT接続状態（カスタムサービス専用）
+    private val _gattConnectionState = MutableStateFlow<GattConnectionState>(GattConnectionState.Disconnected)
+    val gattConnectionState = _gattConnectionState.asStateFlow()
 
     private val _events = MutableSharedFlow<BleEvent>()
     val events = _events.asSharedFlow()
@@ -75,6 +90,7 @@ class BleRepository(private val context: Context) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     Log.d(TAG, "Successfully connected to $deviceAddress")
                     _connectionState.value = ConnectionState.Connected(gatt.device)
+                    _gattConnectionState.value = GattConnectionState.Connected(gatt)
                     // MTU request should be initiated by the ViewModel after connection.
                     // For now, we discover services directly. A delay might be needed.
                     repositoryScope.launch {
@@ -89,11 +105,13 @@ class BleRepository(private val context: Context) {
                     Log.d(TAG, "Successfully disconnected from $deviceAddress")
                     close() // Close the GATT client.
                     _connectionState.value = ConnectionState.Disconnected
+                    _gattConnectionState.value = GattConnectionState.Disconnected
                 }
             } else {
                 Log.e(TAG, "onConnectionStateChange error: status=$status for $deviceAddress")
                 close()
                 _connectionState.value = ConnectionState.Error("GATT Error $status")
+                _gattConnectionState.value = GattConnectionState.Error("GATT Error $status")
             }
         }
 
@@ -146,6 +164,44 @@ class BleRepository(private val context: Context) {
                     Log.w(TAG, "CCCD descriptor not found. Continuing without notification support.")
                     repositoryScope.launch { _events.emit(BleEvent.Ready) }
                 }
+
+                // --- スイッチ通知キャラクタリスティックの設定 ---
+                switchNotifyCharacteristic = service.getCharacteristic(UUID.fromString(SWITCH_NOTIFY_UUID_STRING))
+
+                if (switchNotifyCharacteristic != null) {
+                    Log.d(TAG, "Switch notify characteristic found: ${switchNotifyCharacteristic?.uuid}")
+
+                    // 通知を有効化
+                    gatt.setCharacteristicNotification(switchNotifyCharacteristic, true)
+                    val switchDescriptor = switchNotifyCharacteristic?.getDescriptor(UUID.fromString(BleConstants.CCCD_UUID_STRING))
+
+                    if (switchDescriptor != null) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            gatt.writeDescriptor(switchDescriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                        } else {
+                            switchDescriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                            gatt.writeDescriptor(switchDescriptor)
+                        }
+                        Log.d(TAG, "Switch notify notification enabled")
+                    } else {
+                        Log.w(TAG, "Switch notify CCCD not found")
+                    }
+                } else {
+                    Log.w(TAG, "Switch notify characteristic not found")
+                }
+                if (descriptor != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        gatt.writeDescriptor(descriptor, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                    } else {
+                        descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                        gatt.writeDescriptor(descriptor)
+                    }
+                    Log.d(TAG, "Writing descriptor to enable notifications for command characteristic.")
+                } else {
+                    // CCCDがない場合でも接続を継続
+                    Log.w(TAG, "CCCD descriptor not found. Continuing without notification support.")
+                    repositoryScope.launch { _events.emit(BleEvent.Ready) }
+                }
             } else {
                 Log.w(TAG, "Service discovery failed with status $status")
                 disconnect()
@@ -163,10 +219,19 @@ class BleRepository(private val context: Context) {
         }
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            // Pass the raw data up to the ViewModel to handle
-            // Log.d(TAG, "Characteristic ${characteristic.uuid} changed, value: ${value.toString(Charsets.UTF_8)}")
-            repositoryScope.launch {
-                _events.emit(BleEvent.CharacteristicChanged(characteristic, value))
+            val uuidString = characteristic.uuid.toString()
+
+            // HIDモードではスイッチ通知を使用しない（デバイス側でHID送信）
+            // コマンドキャラクタリスティックのみ処理（時刻同期）
+            if (uuidString.equals(COMMAND_UUID_STRING)) {
+                repositoryScope.launch {
+                    _events.emit(BleEvent.CharacteristicChanged(characteristic, value))
+                }
+            } else {
+                Log.d(TAG, "Characteristic ${characteristic.uuid} changed, value: ${value.toString(Charsets.UTF_8)}")
+                repositoryScope.launch {
+                    _events.emit(BleEvent.CharacteristicChanged(characteristic, value))
+                }
             }
         }
 
@@ -318,4 +383,5 @@ class BleRepository(private val context: Context) {
             bluetoothGatt?.writeCharacteristic(characteristic) ?: false
         }
     }
+
 }

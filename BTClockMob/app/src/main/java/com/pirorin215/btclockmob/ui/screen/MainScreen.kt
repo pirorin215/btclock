@@ -32,11 +32,14 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koin.androidx.compose.koinViewModel
+import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
+import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModelFactory
 import com.pirorin215.btclockmob.viewModel.AppSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.DeviceHistoryViewModel
 import com.pirorin215.btclockmob.R
 import androidx.compose.ui.res.stringResource
+import org.koin.android.ext.android.get
 import kotlinx.coroutines.launch
 
 private const val TAG = "MainScreen"
@@ -78,6 +81,7 @@ fun MainScreen(
 
     var showAppSettings by remember { mutableStateOf(false) }
     var showAppLogPanel by remember { mutableStateOf(false) }
+    var showKeyCodeSettings by remember { mutableStateOf(false) }
 
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
@@ -86,9 +90,21 @@ fun MainScreen(
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
 
-    BackHandler(enabled = isSelectionMode || showAppSettings) {
+    // KeyCodeSettingsViewModelの初期化
+    val activity = context as Activity
+    val keyCodeSettingsViewModel: KeyCodeSettingsViewModel = viewModel(
+        factory = KeyCodeSettingsViewModelFactory(
+            activity.application,
+            activity.get(),
+            activity.get()
+        )
+    )
+
+    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings) {
         if (showAppSettings) {
             showAppSettings = false
+        } else if (showKeyCodeSettings) {
+            showKeyCodeSettings = false
         } else if (isSelectionMode) {
             historyViewModel.exitSelectionMode()
         }
@@ -115,6 +131,12 @@ fun MainScreen(
     when {
         showAppSettings -> {
             AppSettingsScreen(appSettingsViewModel = appSettingsViewModel, onBack = { showAppSettings = false })
+        }
+        showKeyCodeSettings -> {
+            KeyCodeSettingsScreen(
+                viewModel = keyCodeSettingsViewModel,
+                onBack = { showKeyCodeSettings = false }
+            )
         }
         else -> {
             Scaffold(
@@ -180,6 +202,13 @@ fun MainScreen(
                                     expanded = expanded,
                                     onDismissRequest = { expanded = false }
                                 ) {
+                                    DropdownMenuItem(
+                                        text = { Text("キー設定") },
+                                        onClick = {
+                                            showKeyCodeSettings = true
+                                            expanded = false
+                                        }
+                                    )
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.menu_app_settings)) },
                                         onClick = {
