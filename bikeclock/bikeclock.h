@@ -68,7 +68,8 @@ enum DisplayMode {
     DISPLAY_MODE_TIME,      // Time display (HH:MM)
     DISPLAY_MODE_DATE,      // Date display (MMDD)
     DISPLAY_MODE_WEEKDAY,   // Weekday display (MON/TUE/...)
-    DISPLAY_MODE_TEST       // Test mode
+    DISPLAY_MODE_TEST,      // Test mode
+    DISPLAY_MODE_COUNT      // Number of display modes (for bounds checking)
 };
 
 // --- Global Variables ---
@@ -77,6 +78,18 @@ extern volatile uint32_t g_currentTimestamp;  // Unix timestamp
 extern bool g_deviceConnected;               // BLE connection status
 extern LedState g_currentLedState;           // Current LED state
 extern DisplayMode g_displayMode;            // Current display mode
+extern unsigned long g_currentMillis;        // Current time for this loop iteration
+
+// Date cache structure
+struct DateCache {
+    int month;
+    int day;
+    int weekday;
+    uint32_t lastTimestamp;
+    bool valid;
+};
+
+extern DateCache g_dateCache;
 
 struct HidSwitch {
     uint8_t gpio;
@@ -123,5 +136,6 @@ void updateLed();
 void setLedState(LedState state);
 void setLedColor(bool red, bool green, bool blue);
 void setLedError();  // Set LED to error state
+void updateLedStateBasedOnStatus();  // Update LED state based on connection and sync status
 
 #endif // BIKECLOCK_H

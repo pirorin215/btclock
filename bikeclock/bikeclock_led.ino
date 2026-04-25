@@ -1,25 +1,13 @@
 /**
  * LED Control for BikeClock
  *
- * This file handles:
- * - Onboard RGB LED (XIAO nRF52840)
- * - 7-segment LED display (TM1637)
- *
- * Onboard RGB LED:
- * - Red: LED_RED
- * - Green: LED_GREEN
- * - Blue: LED_BLUE
- *
- * LED States:
- * - BOOT: Red solid (startup)
- * - NO_SYNC: Red blinking 1s (not connected + not synced)
- * - SYNCED: Green solid (not connected + synced)
- * - CONNECTED_NO_SYNC: Blue blinking 1s (connected + not synced)
- * - CONNECTED_SYNCED: Blue solid (connected + synced)
- * - ERROR: Red rapid blinking 0.2s (error state)
+ * Handles onboard RGB LED and 7-segment LED display (TM1637).
  */
 
 #include "bikeclock.h"
+
+// Weekday names for display
+static const char* WEEKDAY_NAMES[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
 
 // LED blink timing
 unsigned long g_lastLedBlink = 0;
@@ -67,52 +55,86 @@ void setLedError() {
     setLedState(LED_STATE_ERROR);
 }
 
+// --- Update LED State Based on Connection and Sync Status ---
+void updateLedStateBasedOnStatus() {
+    if (g_deviceConnected) {
+        setLedState(g_timeSynced ? LED_STATE_CONNECTED_SYNCED : LED_STATE_CONNECTED_NO_SYNC);
+    } else {
+        setLedState(g_timeSynced ? LED_STATE_SYNCED : LED_STATE_NO_SYNC);
+    }
+}
+
+// Track last LED color to avoid unnecessary updates
+static bool g_lastLedRed = false;
+static bool g_lastLedGreen = false;
+static bool g_lastLedBlue = false;
+
 // --- Update LED (call in loop) ---
 void updateLed() {
-    unsigned long currentMillis = millis();
+    bool newRed = false;
+    bool newGreen = false;
+    bool newBlue = false;
+    bool needsUpdate = false;
 
     switch (g_currentLedState) {
         case LED_STATE_BOOT:
-            // Red solid during boot
-            setLedColor(true, false, false);
+            newRed = true;
+            newGreen = false;
+            newBlue = false;
             break;
 
         case LED_STATE_NO_SYNC:
-            // Red blinking 1s (not connected + not synced)
-            if (currentMillis - g_lastLedBlink >= 1000) {
+            if (g_currentMillis - g_lastLedBlink >= 1000) {
                 g_ledBlinkState = !g_ledBlinkState;
-                g_lastLedBlink = currentMillis;
+                g_lastLedBlink = g_currentMillis;
+                needsUpdate = true;
             }
-            setLedColor(g_ledBlinkState, false, false);
+            newRed = g_ledBlinkState;
+            newGreen = false;
+            newBlue = false;
             break;
 
         case LED_STATE_SYNCED:
-            // Green solid (not connected + synced)
-            setLedColor(false, true, false);
+            newRed = false;
+            newGreen = true;
+            newBlue = false;
             break;
 
         case LED_STATE_CONNECTED_NO_SYNC:
-            // Blue blinking 1s (connected + not synced)
-            if (currentMillis - g_lastLedBlink >= 1000) {
+            if (g_currentMillis - g_lastLedBlink >= 1000) {
                 g_ledBlinkState = !g_ledBlinkState;
-                g_lastLedBlink = currentMillis;
+                g_lastLedBlink = g_currentMillis;
+                needsUpdate = true;
             }
-            setLedColor(false, false, g_ledBlinkState);
+            newRed = false;
+            newGreen = false;
+            newBlue = g_ledBlinkState;
             break;
 
         case LED_STATE_CONNECTED_SYNCED:
-            // Blue solid (connected + synced)
-            setLedColor(false, false, true);
+            newRed = false;
+            newGreen = false;
+            newBlue = true;
             break;
 
         case LED_STATE_ERROR:
-            // Red rapid blinking 0.2s (error state)
-            if (currentMillis - g_lastLedBlink >= 200) {
+            if (g_currentMillis - g_lastLedBlink >= 200) {
                 g_ledBlinkState = !g_ledBlinkState;
-                g_lastLedBlink = currentMillis;
+                g_lastLedBlink = g_currentMillis;
+                needsUpdate = true;
             }
-            setLedColor(g_ledBlinkState, false, false);
+            newRed = g_ledBlinkState;
+            newGreen = false;
+            newBlue = false;
             break;
+    }
+
+    // Only update if color changed
+    if (needsUpdate || newRed != g_lastLedRed || newGreen != g_lastLedGreen || newBlue != g_lastLedBlue) {
+        setLedColor(newRed, newGreen, newBlue);
+        g_lastLedRed = newRed;
+        g_lastLedGreen = newGreen;
+        g_lastLedBlue = newBlue;
     }
 }
 
@@ -210,10 +232,7 @@ void updateDateDisplay() {
 // --- Weekday Display (MON/TUE/WED...) ---
 void updateWeekdayDisplay() {
     int weekday = getWeekday(); // 0=Sun, 1=Mon, ..., 6=Sat
-
-    // Weekday names: SUN, MON, TUE, WED, THU, FRI, SAT
-    const char* weekday_names[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
-    const char* name = weekday_names[weekday];
+    const char* name = WEEKDAY_NAMES[weekday];
 
     uint8_t data[] = { 0x00, 0x00, 0x00, 0x00 };
 
