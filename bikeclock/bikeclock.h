@@ -18,6 +18,7 @@ using namespace Adafruit_LittleFS_Namespace;
 #define SWITCH_SW2_GPIO     1   // D1 (P0.03)
 #define SWITCH_SW3_GPIO     2   // D2 (P0.04)
 #define SWITCH_SW4_GPIO     3   // D3 (P0.29)
+#define SWITCH_FUNC_GPIO    10  // D10 (P1.15) - Function key for mode switching
 
 // --- HID Settings ---
 #define HID_DEBOUNCE_DELAY_MS     50   // Switch debounce delay
@@ -45,16 +46,37 @@ using namespace Adafruit_LittleFS_Namespace;
 // --- Time Settings ---
 #define DISPLAY_UPDATE_INTERVAL_MS  1000  // Display update interval (1 second)
 
-// --- Global Variables ---
-extern TM1637Display* g_display;
-extern volatile uint32_t g_currentTimestamp;  // Unix timestamp
-
-// HID switch state tracking
+// --- HID switch state tracking ---
 enum HidSwitchState {
     HID_STATE_IDLE,
     HID_STATE_PRESS,
     HID_STATE_REPEAT
 };
+
+// --- Onboard LED state ---
+enum LedState {
+    LED_STATE_BOOT,              // Startup: Red solid
+    LED_STATE_NO_SYNC,           // Not connected + not synced: Red blinking (1s)
+    LED_STATE_SYNCED,            // Not connected + synced: Green solid
+    LED_STATE_CONNECTED_NO_SYNC, // Connected + not synced: Blue blinking (1s)
+    LED_STATE_CONNECTED_SYNCED,  // Connected + synced: Blue solid
+    LED_STATE_ERROR              // Error: Red rapid blinking (0.2s)
+};
+
+// --- Display Mode ---
+enum DisplayMode {
+    DISPLAY_MODE_TIME,      // Time display (HH:MM)
+    DISPLAY_MODE_DATE,      // Date display (MMDD)
+    DISPLAY_MODE_WEEKDAY,   // Weekday display (MON/TUE/...)
+    DISPLAY_MODE_TEST       // Test mode
+};
+
+// --- Global Variables ---
+extern TM1637Display* g_display;
+extern volatile uint32_t g_currentTimestamp;  // Unix timestamp
+extern bool g_deviceConnected;               // BLE connection status
+extern LedState g_currentLedState;           // Current LED state
+extern DisplayMode g_displayMode;            // Current display mode
 
 struct HidSwitch {
     uint8_t gpio;
@@ -72,13 +94,34 @@ void handleKeyConfig(const char* command);
 void loadSettings();
 void saveSettings();
 void updateTimeDisplay();
+void updateDisplayForCurrentMode();
+void updateDateDisplay();
+void updateWeekdayDisplay();
+void updateTestDisplay();
 int getHours();
 int getMinutes();
 int getSeconds();
+int getMonth();
+int getDay();
+int getWeekday();
+
+// Function key processing
+void processFunctionKey();
+
+// System utilities
+void updateTimestamp();
+void updateDisplayAndLedState();
 
 // HID Switch functions
 void processHidSwitches();
 void sendHidKeyPress(uint16_t keyCode, const char* unused = NULL);
 void sendHidKeyRelease(const char* unused = NULL);
+
+// Onboard LED functions
+void setupLed();
+void updateLed();
+void setLedState(LedState state);
+void setLedColor(bool red, bool green, bool blue);
+void setLedError();  // Set LED to error state
 
 #endif // BIKECLOCK_H

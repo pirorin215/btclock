@@ -44,6 +44,13 @@ void ble_central_connect(uint16_t conn_handle) {
     (void)conn_handle; // Unused parameter
     Serial.println("[BIKECLOCK] Device connected");
     g_deviceConnected = true;
+
+    // Update LED state based on time sync status
+    if (g_timeSynced) {
+        setLedState(LED_STATE_CONNECTED_SYNCED);
+    } else {
+        setLedState(LED_STATE_CONNECTED_NO_SYNC);
+    }
 }
 
 void ble_central_disconnect(uint16_t conn_handle, uint8_t reason) {
@@ -51,6 +58,13 @@ void ble_central_disconnect(uint16_t conn_handle, uint8_t reason) {
     (void)reason; // Unused parameter
     Serial.println("[BIKECLOCK] Device disconnected");
     g_deviceConnected = false;
+
+    // Update LED state based on time sync status
+    if (g_timeSynced) {
+        setLedState(LED_STATE_SYNCED);
+    } else {
+        setLedState(LED_STATE_NO_SYNC);
+    }
 }
 
 void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
@@ -187,6 +201,13 @@ void handleTimeSync(const char* command) {
         g_currentTimestamp = timestamp;
         g_timeSynced = true;
 
+        // Update LED state based on connection status
+        if (g_deviceConnected) {
+            setLedState(LED_STATE_CONNECTED_SYNCED);
+        } else {
+            setLedState(LED_STATE_SYNCED);
+        }
+
         int hours = getHours();
         int minutes = getMinutes();
         int seconds = getSeconds();
@@ -202,6 +223,7 @@ void handleTimeSync(const char* command) {
     } else {
         Serial.printf("[BIKECLOCK] Invalid timestamp: %s\n", timestampStr);
         sendResponse("ERROR: Invalid timestamp format");
+        setLedError();
     }
 }
 
