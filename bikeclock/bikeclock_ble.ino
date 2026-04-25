@@ -46,11 +46,7 @@ void ble_central_connect(uint16_t conn_handle) {
     g_deviceConnected = true;
 
     // Update LED state based on time sync status
-    if (g_timeSynced) {
-        setLedState(LED_STATE_CONNECTED_SYNCED);
-    } else {
-        setLedState(LED_STATE_CONNECTED_NO_SYNC);
-    }
+    updateLedStateBasedOnStatus();
 }
 
 void ble_central_disconnect(uint16_t conn_handle, uint8_t reason) {
@@ -60,11 +56,7 @@ void ble_central_disconnect(uint16_t conn_handle, uint8_t reason) {
     g_deviceConnected = false;
 
     // Update LED state based on time sync status
-    if (g_timeSynced) {
-        setLedState(LED_STATE_SYNCED);
-    } else {
-        setLedState(LED_STATE_NO_SYNC);
-    }
+    updateLedStateBasedOnStatus();
 }
 
 void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
@@ -202,11 +194,10 @@ void handleTimeSync(const char* command) {
         g_timeSynced = true;
 
         // Update LED state based on connection status
-        if (g_deviceConnected) {
-            setLedState(LED_STATE_CONNECTED_SYNCED);
-        } else {
-            setLedState(LED_STATE_SYNCED);
-        }
+        updateLedStateBasedOnStatus();
+
+        // Invalidate date cache
+        g_dateCache.valid = false;
 
         int hours = getHours();
         int minutes = getMinutes();

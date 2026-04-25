@@ -68,7 +68,9 @@ class BleDeviceManager(
                 currentCommandCompletion = timeCompletion
 
                 val currentTimestampSec = System.currentTimeMillis() / 1000
-                val timeCommand = "${BleConstants.CMD_TIME_SYNC}:$currentTimestampSec"
+                // マイコンはJST timestamp（+9時間）を期待している
+                val jstTimestampSec = currentTimestampSec + 32400
+                val timeCommand = "${BleConstants.CMD_TIME_SYNC}:$jstTimestampSec"
                 logManager.addLog("時刻同期コマンドを送信中: $timeCommand")
                 sendCommand(timeCommand)
 
@@ -107,7 +109,9 @@ class BleDeviceManager(
                         try {
                             if (_currentOperation.value == BleOperation.IDLE) {
                                 val periodicTimestampSec = System.currentTimeMillis() / 1000
-                                val periodicTimeCommand = "${BleConstants.CMD_TIME_SYNC}:$periodicTimestampSec"
+                                // マイコンはJST timestamp（+9時間）を期待している
+                                val jstTimestampSec = periodicTimestampSec + 32400
+                                val periodicTimeCommand = "${BleConstants.CMD_TIME_SYNC}:$jstTimestampSec"
                                 logManager.addLog("定期時刻同期コマンド送信 (ベストエフォート): $periodicTimeCommand")
                                 sendCommand(periodicTimeCommand)
                             }

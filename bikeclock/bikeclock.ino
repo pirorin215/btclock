@@ -26,6 +26,9 @@ extern BLECharacteristic bleSwitchNotifyCharacteristic;
 unsigned long g_lastScreenMillis = 0;  // Last time screen display was updated
 bool g_timeSynced = false;
 
+// Date caching (to avoid redundant calculations)
+DateCache g_dateCache = {0, 0, 0, 0, false};
+
 // --- HID Switch Functions ---
 HidSwitch hidSwitches[] = {
     {SWITCH_SW1_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW1_KEYCODE},
@@ -36,32 +39,36 @@ HidSwitch hidSwitches[] = {
 #define NUM_HID_SWITCHES 4
 
 // --- Time Helper Functions ---
+// g_currentTimestampは「JSTとしてのUnix timestamp」
+// （アプリ側がJST日時をUnix timestampに変換した値）
 int getHours() {
-    return (g_currentTimestamp % 86400) / 3600;  // UTC hours
+    return (g_currentTimestamp % 86400) / 3600;
 }
 
 int getMinutes() {
-    return (g_currentTimestamp % 3600) / 60;     // UTC minutes
+    return (g_currentTimestamp % 3600) / 60;
 }
 
 int getSeconds() {
-    return g_currentTimestamp % 60;               // UTC seconds
+    return g_currentTimestamp % 60;
 }
 
 // Unix timestamp to date calculation (simplified)
-// Returns: days since 1970-01-01
+// g_currentTimestamp is JST-adjusted (UTC timestamp + 9 hours)
+// Returns: days since 1970-01-01 (JST-based)
 uint32_t getDaysSinceEpoch() {
     return g_currentTimestamp / 86400;
 }
 
-// Calculate weekday (0=Sun, 1=Mon, ..., 6=Sat)
-// 1970-01-01 was Thursday (4)
-int getWeekday() {
-    return (getDaysSinceEpoch() + 4) % 7;
-}
-
 // Calculate month and day from days since epoch
 void getMonthDay(int* month, int* day) {
+    // Check cache first
+    if (g_dateCache.valid && g_dateCache.lastTimestamp == g_currentTimestamp) {
+        *month = g_dateCache.month;
+        *day = g_dateCache.day;
+        return;
+    }
+
     uint32_t days = getDaysSinceEpoch();
 
     // Simplified calculation for years 2020-2099
@@ -94,8 +101,15 @@ void getMonthDay(int* month, int* day) {
         days -= dim;
     }
 
-    *month = m + 1;  // 1-12
-    *day = days + 1; // 1-31
+    // Update cache
+    g_dateCache.month = m + 1;  // 1-12
+    g_dateCache.day = days + 1; // 1-31
+    g_dateCache.weekday = (getDaysSinceEpoch() + 4) % 7;
+    g_dateCache.lastTimestamp = g_currentTimestamp;
+    g_dateCache.valid = true;
+
+    *month = g_dateCache.month;
+    *day = g_dateCache.day;
 }
 
 int getMonth() {
@@ -108,6 +122,17 @@ int getDay() {
     int month, day;
     getMonthDay(&month, &day);
     return day;
+}
+
+int getWeekday() {
+    // Use cache if available
+    if (g_dateCache.valid && g_dateCache.lastTimestamp == g_currentTimestamp) {
+        return g_dateCache.weekday;
+    }
+    // Otherwise calculate and cache
+    int month, day;
+    getMonthDay(&month, &day);
+    return g_dateCache.weekday;
 }
 
 // --- HID Switch Processing ---
@@ -208,8 +233,12 @@ void processFunctionKey() {
                 updateTestDisplay();
                 Serial.printf("[TEST] Display %d\n", g_testDisplayIndex);
             } else {
-                // Normal mode: switch display mode
-                g_displayMode = (DisplayMode)((g_displayMode + 1) % 3);
+                // Normal mode: switch display mode (cycle through TIME, DATE, WEEKDAY)
+                if (g_displayMode >= DISPLAY_MODE_WEEKDAY) {
+                    g_displayMode = DISPLAY_MODE_TIME;
+                } else {
+                    g_displayMode = (DisplayMode)(g_displayMode + 1);
+                }
 
                 // Update display immediately
                 updateDisplayForCurrentMode();
@@ -247,18 +276,10 @@ void updateDisplayAndLedState() {
         }
 
         // Update LED state based on connection status
-        if (g_deviceConnected) {
-            setLedState(LED_STATE_CONNECTED_NO_SYNC);
-        } else {
-            setLedState(LED_STATE_NO_SYNC);
-        }
+        updateLedStateBasedOnStatus();
     } else {
         // Time synced - update LED state based on connection status
-        if (g_deviceConnected) {
-            setLedState(LED_STATE_CONNECTED_SYNCED);
-        } else {
-            setLedState(LED_STATE_SYNCED);
-        }
+        updateLedStateBasedOnStatus();
 
         if (g_currentMillis - g_lastScreenMillis >= DISPLAY_UPDATE_INTERVAL_MS) {
             // Update display according to current mode
