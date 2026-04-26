@@ -39,20 +39,23 @@ HidSwitch hidSwitches[] = {
 #define NUM_HID_SWITCHES 4
 
 // --- Time Helper Functions ---
+// g_currentTimestampは「JSTとしてのUnix timestamp」
+// （アプリ側がJST日時をUnix timestampに変換した値）
 int getHours() {
-    return (g_currentTimestamp % 86400) / 3600;  // UTC hours
+    return (g_currentTimestamp % 86400) / 3600;
 }
 
 int getMinutes() {
-    return (g_currentTimestamp % 3600) / 60;     // UTC minutes
+    return (g_currentTimestamp % 3600) / 60;
 }
 
 int getSeconds() {
-    return g_currentTimestamp % 60;               // UTC seconds
+    return g_currentTimestamp % 60;
 }
 
 // Unix timestamp to date calculation (simplified)
-// Returns: days since 1970-01-01
+// g_currentTimestamp is JST-adjusted (UTC timestamp + 9 hours)
+// Returns: days since 1970-01-01 (JST-based)
 uint32_t getDaysSinceEpoch() {
     return g_currentTimestamp / 86400;
 }

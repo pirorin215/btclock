@@ -191,8 +191,8 @@ void updateDisplayForCurrentMode() {
 
 // --- Time Display (HH:MM) ---
 void updateTimeDisplay() {
-    // Convert to JST (UTC+9)
-    int hours = (getHours() + 9) % 24;
+    // getHours() already returns JST time
+    int hours = getHours();
     int minutes = getMinutes();
     int seconds = getSeconds();
 
