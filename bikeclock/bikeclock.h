@@ -21,6 +21,10 @@ using namespace Adafruit_LittleFS_Namespace;
 #define MCP_SPI_CS_GPIO     D3   // Physical D3 - SPI CS (Keep as is)
 
 // --- MCP23S17 SPI I/O Expander Definitions ---
+// SPI frequency: Lower = more noise immune, Higher = faster response
+// Adjust this value if you experience noise issues (range: 100kHz - 8MHz)
+#define MCP_SPI_FREQ        100000
+
 // MCP23S17 pin assignments (GP0-GP7)
 #define MCP_SW1_PIN         0   // GP0 - HID SW1
 #define MCP_SW2_PIN         1   // GP1 - HID SW2
