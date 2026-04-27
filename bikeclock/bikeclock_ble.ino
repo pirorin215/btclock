@@ -257,7 +257,7 @@ void sendHidKeyRelease(const char* unused) {
 
 // --- Settings Management ---
 extern HidSwitch hidSwitches[];
-#define NUM_HID_SWITCHES 4
+// NUM_HID_SWITCHES is defined in bikeclock.ino
 
 void loadSettings() {
     Serial.println("[BIKECLOCK] Loading settings from InternalFS...");

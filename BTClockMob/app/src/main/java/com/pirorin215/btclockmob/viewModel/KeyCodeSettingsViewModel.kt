@@ -55,7 +55,7 @@ class KeyCodeSettingsViewModel(
     /**
      * スイッチのキーコードを更新
      *
-     * @param switchNum スイッチ番号 (1-4)
+     * @param switchNum スイッチ番号 (1-7)
      * @param keyCode 設定するキーコード
      */
     fun updateKeyCode(switchNum: Int, keyCode: Int) {

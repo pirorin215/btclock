@@ -1,275 +1,368 @@
-# BikeClock - XIAO BLE Bicycle Clock
+# BTClock - バイク搭載用Bluetooth時計システム
 
-BikeClockはXIAO BLEマイコンボードと4桁7セグメントLEDディスプレイを使用した、シンプルな時計デバイスです。
+XIAO BLEマイコンボードを使用したバイク搭載用時計デバイス「BikeClock」と、それに連携するAndroidアプリ「BTClockMob」の統合システムです。
 
-> **🔋 最大の特徴**: 内蔵電池の交換が一切不要！USB給電で動作するため、ノーメンテナンスで使用できます。
+## システム概要
 
-## 特徴
+BTClockはバイクのイグニッション連動で動作する時計システムです。イグニッションONでデバイスが起動し、スマホアプリが自動接続して時刻同期を行います。また、物理スイッチによるHIDキーボード機能を備え、YouTube等の操作が可能です。
+
+### システム構成図
+
+```
+┌─────────────────┐         BLE (HID + GATT)         ┌─────────────────┐
+│  BikeClock      │◄─────────────────────────────────┤  BTClockMob     │
+│  (Arduinoデバイス)│                                 │  (Androidアプリ) │
+└─────────────────┘                                 └─────────────────┘
+        │                                                   │
+        ├─ 4桁LED表示                                       ├─ 自動時刻同期
+        ├─ BLE通信 (HID + Custom GATT)                      ├─ 接続履歴記録
+        ├─ 8つの物理スイッチ (HIDキーボード + FUNC)          ├─ リモートキー設定
+        └─ USB給電                                          └─ バックグラウンド実行
+```
+
+### 主な機能
+
+#### BikeClockデバイス
 
 - ✅ **ノーメンテナンス設計**: 内蔵電池交換不要、USB給電で動作
-- ✅ **BLE時刻同期**: 専用スマホアプリ（開発中）で自動時刻補正
-- ✅ **4桁LED表示**: TM1637使用の明るいディスプレイ（常時最大輝度）
-- ✅ **シンプル接続**: USBケーブルで給電
-- ✅ **常時駆動**: 給電されている間は常に起動・表示
+- ✅ **4桁LED表示**: TM1637使用の明るいディスプレイ（時刻/日付/曜日）
+- ✅ **BLE時刻同期**: スマホアプリで自動時刻補正（JST対応）
+- ✅ **HIDキーボード機能**: 7つの物理スイッチでキー入力
+- ✅ **FUNCキー**: 表示モード切替（TIME/DATE/WEEKDAY）
+- ✅ **キーコード設定**: アプリからスイッチのキー割り当てを変更可能
 
-## ハードウェア構成
+#### BTClockMobアプリ
 
-| コンポーネント | 説明 |
-|--------------|------|
-| マイコン | Seeed Studio XIAO BLE (nRF52840) |
-| 表示 | 4-Digit LED Display (TM1637) |
-| 電源 | USB電源（モバイルバッテリー等） |
+- ✅ **BLE自動接続**: 近接するBikeClockデバイスの自動検出
+- ✅ **時刻同期**: BLE経由でのUnixタイムスタンプ送信
+- ✅ **接続履歴**: イグニッションON/OFF（BLE接続/切断）に連動した位置情報の自動記録
+- ✅ **バックグラウンド実行**: 常駐サービスによるシームレスな体験
+- ✅ **リモートキー設定**: デバイスのスイッチにキーコードを割り当て
 
-### ピン接続
-
-| XIAO BLEピン | TM1637ピン |
-|-------------|-----------|
-| D4 (SDA) | DIO |
-| D5 (SCL) | CLK |
-| 5V | VCC |
-| GND | GND |
-
-### 電源接続
+## プロジェクト構成
 
 ```
-USB電源（モバイルバッテリーやUSBアダプター）
-    ↓
-XIAO BLE (USB-Cポート)
+btclock/
+├── bikeclock/              # Arduinoファームウェア
+│   ├── bikeclock.ino       # メインファイル
+│   ├── bikeclock.h         # ヘッダーファイル
+│   ├── bikeclock_ble.ino   # BLE通信処理
+│   ├── bikeclock_led.ino   # LED制御処理
+│   └── README.md           # ファームウェア詳細ドキュメント
+│
+├── BTClockMob/             # Androidアプリ
+│   ├── app/                # メインアプリケーション
+│   ├── gradle/             # Gradle設定
+│   └── README.md           # アプリ詳細ドキュメント
+│
+└── README.md               # このファイル（システム全体）
 ```
 
-## ソフトウェア構成
+## BLE通信仕様
 
-```
-bikeclock/
-├── bikeclock.ino           # メインファイル（RTC管理 + LED表示制御）
-├── bikeclock.h             # ヘッダーファイル（固定設定）
-├── bikeclock_ble.ino       # BLE通信処理
-├── bikeclock_ble_test.py   # BLE通信テストツール
-├── compile.sh              # コンパイルスクリプト
-├── upload.sh               # アップロードスクリプト
-├── consolelog.sh           # シリアルコンソール監視スクリプト
-├── common.sh               # 共通関数ライブラリ
-├── setting.sh.example      # 設定ファイルテンプレート
-├── README.md               # このファイル
-└── EXTERNAL_LIBRARIES.md   # 必要なライブラリ説明
-```
+### デバイス情報
 
-## 必要なライブラリ
+| 項目 | 値 |
+|------|-----|
+| デバイス名 | `BikeClock-0001` |
+| メーカー | pirorin215 |
+| モデル | BikeClock Dual |
 
-Arduino IDEで以下のライブラリをインストールしてください：
+### サービス構成
 
-1. **Adafruit nRF52 Bluefruit Library** (by Adafruit)
-   - BLE通信用（Seeeduino XIAO BLE / nRF52840対応）
-   - ライブラリマネージャで検索してインストール
+**重要**: このシステムではHIDプロファイルとカスタムGATTサービスを同時に使用します。
 
-2. **TM1637** (by Avishay Orpaz)
-   - LED表示制御用
-   - ライブラリマネージャで検索してインストール
+#### 1. HIDサービス (0x1812) - Android OSが接続管理
 
-## ビルド手順
+- キーボード/メディアキー入力用
+- 物理スイッチ操作でHID信号を送信
+- Androidシステムが自動的にペアリング・接続管理
 
-### Arduino IDE 2.xの場合
-
-1. **Arduino IDE 2.xを開く**
-
-2. **XIAO BLEボードサポートを追加**（初回のみ）
-   - 「File」→「Preferences」を開く
-   - 「Additional Boards Manager URLs」の横にあるアイコンをクリック
-   - 以下のURLを追加：
-     ```
-     https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
-     ```
-   - 「OK」をクリック
-
-3. **ボードをインストール**（初回のみ）
-   - 左側のサイドバーにあるボードマネージャアイコンをクリック
-   - 検索欄に「seeed nrf」または「xiao ble」と入力
-   - 「Seeed nRF52 Boards」をインストール
-
-4. **ライブラリをインストール**（初回のみ）
-   - 左側のサイドバーにあるライブラリマネージャアイコンをクリック
-   - 以下のライブラリを検索してインストール：
-     - `Adafruit nRF52 Bluefruit Library` by Adafruit
-     - `TM1637` by Avishay Orpaz
-
-5. **スケッチを開く**
-   - 「File」→「Open」
-   - `bikeclock/bikeclock.ino` を選択
-
-6. **ボードとポートを選択**
-   - 上部のボード選択で「Seeed XIAO BLE」を選択
-     - または「Seeed XIAO BLE Sense」を選択（同じチップ）
-     - Arduino CLIの場合は `Seeed:nrf52:xiaoble` を使用
-   - ポート選択でXIAO BLEのポートを選択
-
-7. **書き込み**
-   - 左上の右矢印ボタン（→）をクリック
-   - 書き込みが完了するまで待ちます
-
-## 使用方法
-
-### 初回起動
-
-1. **電源接続**: XIAO BLEに5V電源を接続
-2. **確認**: LEDが「8888」を表示してから「----」に変わります
-3. **スマホアプリ**: 専用アプリを起動
-4. **スキャン**: アプリで「スキャン」をタップ
-5. **接続**: `BikeClock-0001` をタップして接続
-6. **時刻同期**: 自動的に時刻が同期されます
-
-### 時刻表示
-
-- **通常時**: `HH:MM` 形式で時刻を表示（12時間または24時間表記）
-- **コロンの点滅**: コロン（中央の2点）は毎秒点滅します
-
-### 再同期方法
-
-時刻がずれている場合は、以下の手順で再同期します：
-
-1. 専用アプリを起動
-2. 「スキャン」をタップ
-3. `BikeClock-0001` をタップして接続
-4. 自動的に時刻が同期されます
-
-### BLEテストツール
-
-開発時にBLE通信をテストするためのPythonツールが含まれています。
-
-**依存ライブラリのインストール**
-```bash
-pip3 install bleak
-```
-
-**テスト実行**
-```bash
-cd bikeclock
-python3 bikeclock_ble_test.py
-```
-
-このツールは以下のテストを実行します：
-- BLEデバイスのスキャン
-- BikeClock-0001 への接続
-- サービスとキャラクタリスティックの確認
-- 時刻同期コマンドの送信
-
-## BLE仕様
-
-### デバイス名
-
-```
-BikeClock-0001
-```
-
-### サービスUUID
-
-```
-4fafc201-1fb5-459e-8fcc-c5c9c331914c
-```
-
-### キャラクタリスティック
+#### 2. カスタムサービス - BTClockMobアプリが接続管理
 
 | UUID | プロパティ | 説明 |
-|-----|----------|------|
-| beb5483e-36e1-4688-b7f5-ea07361b26a0 | Write | 時刻同期コマンド受信 |
-| beb5483e-36e1-4688-b7f5-ea07361b26a1 | Notify | レスポンス送信 |
+|------|----------|------|
+| `4fafc201-1fb5-459e-8fcc-c5c9c331914c` | - | サービスUUID |
+| `beb5483e-36e1-4688-b7f5-ea07361b26a0` | Read/Write/Notify | コマンド受信・レスポンス送信 |
+| `beb5483e-36e1-4688-b7f5-ea07361b26a1` | Notify | スイッチ状態通知（オプション） |
 
 ### コマンドフォーマット
 
-**時刻同期コマンド**
+**時刻同期**
 ```
 SET:time:<unix_timestamp>
 例: SET:time:1234567890
 ```
 
+**キーコード設定**
+```
+SET:keys:HEX1,HEX2,HEX3,HEX4,HEX5,HEX6,HEX7
+例: SET:keys:50,4F,52,51,53,54,55
+```
+
 **成功レスポンス**
 ```
 OK: Time synced
+OK: keys updated
 ```
 
 **エラーレスポンス**
 ```
 ERROR: Invalid timestamp format
+ERROR: Invalid key format
 ```
 
-## 表示形式
+### 2つの独立した接続
 
-24時間表記で時刻を表示します（RTC設定に依存）。
+```
+BikeClock (nRF52840)
+  │
+  ├─ HIDサービス (0x1812)              [Android OSが接続管理]
+  │   └─ スイッチ操作によるキー入力
+  │
+  └─ カスタムサービス                  [BTClockMobアプリが接続管理]
+      └─ 時刻同期、キー設定
+```
+
+**重要**: HID接続とGATT接続は完全に独立しています。
+
+詳細は [BTClockMob/docs/hid-custom-service-dual-implementation.md](./BTClockMob/docs/hid-custom-service-dual-implementation.md) を参照してください。
+
+## ハードウェア構成
+
+### 使用コンポーネント
+
+| コンポーネント | 説明 |
+|--------------|------|
+| マイコン | Seeed Studio XIAO BLE (nRF52840) |
+| 表示 | 4-Digit LED Display (TM1637) |
+| スイッチI/O | MCP23S17 SPI I/Oエキスパンダー |
+| 操作 | 外付けスイッチユニット（8ボタン） |
+| 電源 | USB電源（5V） |
+
+### ピン配線図
+
+#### 1. XIAO BLE と 周辺デバイスの接続
+
+| XIAO BLE ピン | 接続先デバイス | ピン番号/名称 | 役割 |
+|:---|:---|:---|:---|
+| **D10** | MCP23S17 | 13 (SI) | SPI MOSI |
+| **D9** | MCP23S17 | 14 (SO) | SPI MISO |
+| **D8** | MCP23S17 | 12 (SCK) | SPI SCK |
+| **D3** | MCP23S17 | 11 (CS) | SPI CS |
+| **D4** | TM1637 | DIO | LED Data |
+| **D5** | TM1637 | CLK | LED Clock |
+| **3V3** | MCP23S17 | 9 (VDD), 18 (RESET) | **3.3V電源** (重要) |
+| **5V (VCC)** | TM1637 | VCC | 5V電源 (推奨) |
+| **GND** | 全デバイス | GND | 共通グランド |
+
+#### 2. MCP23S17 と スイッチの接続
+
+スイッチは **GPAポート（21〜28番ピン）** を使用し、各スイッチの片側をGNDに接続します。
+
+| MCP23S17 | ボタン | キー初期設定 |
+|:---|:---|:---|
+| 21 (GPA0) | SW1 | 左矢印キー (0x50) |
+| 22 (GPA1) | SW2 | 右矢印キー (0x4F) |
+| 23 (GPA2) | SW3 | 上矢印キー (0x52) |
+| 24 (GPA3) | SW4 | 下矢印キー (0x51) |
+| 25 (GPA4) | SW5 | Enter (0x28) |
+| 26 (GPA5) | SW6 | Back (0x0224) |
+| 27 (GPA6) | SW7 | 再生/一時停止 (0xCD) |
+| **28 (GPA7)** | **SW8** | 表示モード切替（HIDキーではない） |
+
+> **注**: キー設定はBTClockMobアプリから変更可能です。
+
+## セットアップ手順
+
+### 事前準備
+
+#### 必要なもの
+
+1. **BikeClockデバイス**
+   - Seeed Studio XIAO BLEボード
+   - 4桁7セグメントLEDディスプレイ (TM1637)
+   - MCP23S17 I/Oエキスパンダー
+   - 外付けスイッチユニット（8つのタクトスイッチ）
+   - USB電源（モバイルバッテリー等）
+
+2. **開発環境**
+   - Arduino IDE 2.x または Arduino CLI
+   - Android Studio（アプリ開発の場合）
+
+3. **スマホ**
+   - Android 8.0以上
+   - Bluetooth Low Energy対応
+
+### 1. BikeClockデバイスのセットアップ
+
+詳細な手順は [bikeclock/README.md](./bikeclock/README.md) を参照してください。
+
+#### 必要なライブラリ
+
+Arduino IDEで以下のライブラリをインストール：
+
+1. **Adafruit nRF52 Bluefruit Library** (by Adafruit)
+   - BLE通信用（Seeeduino XIAO BLE / nRF52840対応）
+2. **TM1637** (by Avishay Orpaz)
+   - LED表示制御用
+3. **Adafruit MCP23017 Arduino Library** (by Adafruit)
+   - MCP23S17（SPI I/Oエキスパンダー）制御用
+
+#### ボード設定
+
+1. Arduino IDE 2.xを開く
+2. 「File」→「Preferences」で以下のURLを追加：
+   ```
+   https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
+   ```
+3. ボードマネージャで「Seeed nRF52 Boards」をインストール
+4. 「Seeed XIAO BLE」または「Seeed XIAO BLE Sense」を選択
+
+#### ファームウェア書き込み
+
+```bash
+cd bikeclock
+
+# 設定ファイル作成（初回のみ）
+cp setting.sh.example setting.sh
+# setting.shを編集してBIKECLOCK_PORTを設定
+
+# コンパイル
+sh compile.sh
+
+# アップロード
+sh upload.sh
+```
+
+### 2. BTClockMobアプリのセットアップ
+
+詳細な手順は [BTClockMob/README.md](./BTClockMob/README.md) を参照してください。
+
+#### ビルド
+
+```bash
+cd BTClockMob
+./gradlew assembleDebug    # デバッグビルド
+./gradlew assembleRelease  # リリースビルド
+```
+
+#### インストール
+
+生成されたAPKをインストール：
+```bash
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+または、Google Playストアからリリース版をインストール（リリース時）。
+
+### 3. ペアリング設定
+
+1. **AndroidのBluetooth設定**を開く
+2. 「BikeClock」デバイスを探してペアリング
+3. **BTClockMobアプリ**を起動
+4. アプリが自動的にBikeClock-0001を検出・接続
+
+## 使用方法
+
+### 初回起動
+
+1. **BikeClockの電源**: USB電源を接続
+2. **LED表示**: 「8888」→「----」の変化を確認
+3. **BTClockMob起動**: アプリを起動（自動接続）
+4. **時刻同期**: 自動的に時刻が同期されます
+
+### 時刻表示
+
+BikeClockのLEDディスプレイには以下のモードがあります：
+
+- **TIMEモード**: `HH:MM` 形式で時刻表示（24時間表記、JST）
+- **DATEモード**: `MMDD` 形式で日付表示
+- **WEEKDAYモード**: 曜日表示（MON/TUE/WED/THU/FRI/SAT/SUN）
+
+**FUNCキー（SW8）**を押すたびにモードが切り替わります。
+
+### HIDスイッチ操作
+
+外付けスイッチユニットのSW1-SW7で接続先デバイス（スマホ/タブレット/PC）を操作できます。
+
+#### デフォルト設定
+
+外付けスイッチユニットには8つのスイッチがあります：
+- **SW1-SW7**: HIDキーボード機能（矢印、Enter、Back、再生/停止等）
+- **SW8**: FUNCキー（表示モード切替）
+
+> **詳細**: デフォルトキーコード、キー割り当て変更方法、使用例は [bikeclock/README.md](./bikeclock/README.md) を参照してください。
+
+### 接続履歴の確認
+
+BTClockMobアプリの「履歴」タブで確認できます：
+
+1. BLE接続/切断の履歴
+2. 位置情報（いつ、どこから、どこまで走ったか）
+3. バイクの走行履歴として活用可能
+
+## 技術スタック
+
+### BikeClock (Arduino)
+
+- **言語**: C++
+- **フレームワーク**: Arduino + Adafruit nRF52 Bluefruit
+- **BLEライブラリ**: Adafruit Bluefruit
+- **表示ライブラリ**: TM1637
+- **I/Oエキスパンダー**: Adafruit MCP23X17
+
+### BTClockMob (Android)
+
+- **言語**: Kotlin
+- **UI**: Jetpack Compose + Material3
+- **非同期処理**: Kotlin Coroutines + Flow
+- **データ永続化**: DataStore Preferences
+- **DI**: Koin
+- **BLE**: Android BLE API
 
 ## トラブルシューティング
 
-### LEDが表示されない
+### システム全体
 
-1. 電源接続を確認（5V, GND）
-2. TM1637の接続を確認（DIO, CLK）
-3. 明るさ設定を確認
+#### BLE接続できない
 
-### BLE接続できない
+1. BikeClockの電源を入れ直す
+2. AndroidのBluetooth設定でペアリング済みか確認
+3. BTClockMobアプリを再起動
+4. 他のBLEデバイスとの干渉を確認
 
-1. XIAO BLEの電源を入れ直す
-2. 専用アプリを再起動する
-3. 他のBLEデバイスとの干渉を確認
+#### 時刻が正しく表示されない
 
-### 時刻が正しく表示されない
+1. BTClockMobアプリで時刻同期を再実行
+2. スマホの時刻設定を確認（自動設定がONになっているか）
 
-1. 時刻同期を再実行する
-2. スマホの時刻設定を確認する
+### BikeClockデバイス関連
+
+詳細なトラブルシューティングは [bikeclock/README.md](./bikeclock/README.md) を参照してください。
+
+### BTClockMobアプリ関連
+
+詳細なトラブルシューティングは [BTClockMob/README.md](./BTClockMob/README.md) を参照してください。
 
 ## 開発
 
-### ビルドコマンド（CLI）
+### BLEテストツール（Arduino側）
 
-**重要**: 最初に `setting.sh` の設定が必要です
-
-```bash
-# 1. 設定ファイルの作成（初回のみ）
-cp setting.sh.example setting.sh
-
-# 2. 設定ファイルを編集して BIKECLOCK_PORT を設定
-vi setting.sh
-# 設定例: BIKECLOCK_PORT="/dev/cu.usbmodem2101"
-```
+開発時にBLE通信をテストするPythonツールが含まれています。
 
 ```bash
-# コンパイル
-./compile.sh
-
-# アップロード（setting.sh からポートを読み込み）
-./upload.sh
+cd bikeclock
+pip3 install bleak
+python3 bikeclock_ble_test.py
 ```
 
-### シリアルコンソール監視
+### シリアルコンソール監視（Arduino側）
 
-デバイスのログをリアルタイムで監視するには、`consolelog.sh`を使用します：
-
-1. **設定ファイルの作成**（初回のみ）
-   ```bash
-   cp setting.sh.example setting.sh
-   ```
-
-2. **ポート設定**
-   ```bash
-   # setting.shを編集してBIKECLOCK_PORTを設定
-   vi setting.sh
-
-   # 設定例：
-   BIKECLOCK_PORT="/dev/cu.usbmodem2101"
-   ```
-
-3. **コンソール監視開始**
-   ```bash
-   ./consolelog.sh
-   ```
-
-`consolelog.sh`は以下の機能を提供します：
-- デバイスの自動検出（接続/切断を監視）
-- アップロード中は自動的に一時停止
-- 再接続時に自動的にコンソールを再開
-- Ctrl+C で終了
-
-## 関連プロジェクト
-
-- **BTClockMob**: btclock専用スマホアプリ（開発中）
-- **FastRec**: 録音レコーダーデバイス（元プロジェクト）
+```bash
+cd bikeclock
+./consolelog.sh
+```
 
 ## ライセンス
 
@@ -278,10 +371,12 @@ vi setting.sh
 ## 謝辞
 
 - [Adafruit nRF52 Bluefruit Library](https://github.com/adafruit/Adafruit_nRF52_Arduino) - BLEライブラリ
+- [Adafruit MCP23017 Arduino Library](https://github.com/adafruit/Adafruit-MCP23017-Arduino-Library) - MCP23S17制御ライブラリ
 - [TM1637](https://github.com/avishorp/TM1637) - LED表示ライブラリ
 - [Seeed Studio](https://www.seeedstudio.com/) - XIAO BLEマイコンボード
 
 ---
 
 **作成日**: 2026-04-22
-**最終更新**: 2026-04-23
+**最終更新**: 2026-04-26
+**ファームウェアバージョン**: 1.0.2
