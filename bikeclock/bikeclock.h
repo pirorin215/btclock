@@ -101,6 +101,8 @@ extern unsigned long g_currentMillis;        // Current time for this loop itera
 extern bool g_mcp23S17Connected;             // MCP23S17 connection status
 extern bool g_skipBleInit;                   // Skip BLE initialization (for factory reset/test mode)
 extern bool g_displayingKeyCodes;            // Currently displaying key codes (skip time display)
+extern uint16_t g_displayingKeyCode;         // Currently displaying HID key code (0 = none)
+extern unsigned long g_keyCodeDisplayEndTime; // When to stop displaying key code
 
 // Date cache structure
 struct DateCache {

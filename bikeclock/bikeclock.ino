@@ -17,6 +17,8 @@ Adafruit_MCP23X17 mcp;  // MCP23S17 I/O expander (SPI)
 bool g_mcp23S17Connected = false;  // MCP23S17 connection status
 bool g_skipBleInit = false;  // Skip BLE initialization (for factory reset/test mode)
 bool g_displayingKeyCodes = false;  // Currently displaying key codes (skip time display)
+uint16_t g_displayingKeyCode = 0;  // Currently displaying HID key code (0 = none)
+unsigned long g_keyCodeDisplayEndTime = 0;  // When to stop displaying key code
 unsigned long g_lastCounterMillis = 0;  // Last time internal counter was updated
 unsigned long g_currentMillis = 0;  // Current time for this loop iteration
 LedState g_currentLedState = LED_STATE_BOOT;
@@ -233,6 +235,12 @@ void processHidSwitches() {
                         Serial.printf("[HID] SW%d P\n", i + 1);
                         sendHidKeyPress(hidSwitches[i].keyCode, NULL);
 
+                        // Display key code on 7-segment
+                        g_displayingKeyCode = hidSwitches[i].keyCode;
+                        g_keyCodeDisplayEndTime = millis() + 500;  // Display for 500ms
+                        g_display->showNumberDec(hidSwitches[i].keyCode);
+                        Serial.printf("[HID] Displaying key code: %d\n", hidSwitches[i].keyCode);
+
                         hidSwitches[i].state = HID_STATE_PRESS;
                         hidSwitches[i].pressStartTime = millis();
                     }
@@ -246,6 +254,12 @@ void processHidSwitches() {
                             sendHidKeyRelease(NULL);
                             delay(10);
                             sendHidKeyPress(hidSwitches[i].keyCode, NULL);
+
+                            // Display key code on 7-segment
+                            g_displayingKeyCode = hidSwitches[i].keyCode;
+                            g_keyCodeDisplayEndTime = millis() + 500;  // Display for 500ms
+                            g_display->showNumberDec(hidSwitches[i].keyCode);
+                            Serial.printf("[HID] Repeat - Displaying key code: %d\n", hidSwitches[i].keyCode);
 
                             hidSwitches[i].state = HID_STATE_REPEAT;
                             hidSwitches[i].pressStartTime = millis();
@@ -269,6 +283,12 @@ void processHidSwitches() {
                             sendHidKeyRelease(NULL);
                             delay(10);
                             sendHidKeyPress(hidSwitches[i].keyCode, NULL);
+
+                            // Display key code on 7-segment
+                            g_displayingKeyCode = hidSwitches[i].keyCode;
+                            g_keyCodeDisplayEndTime = millis() + 500;  // Display for 500ms
+                            g_display->showNumberDec(hidSwitches[i].keyCode);
+                            Serial.printf("[HID] Repeat - Displaying key code: %d\n", hidSwitches[i].keyCode);
 
                             hidSwitches[i].pressStartTime = millis();
                         }
@@ -472,7 +492,21 @@ void updateTimestamp() {
 
 // Update display and LED state based on time sync and connection status
 void updateDisplayAndLedState() {
-    // Skip display update if currently showing key codes
+    // Check if displaying HID key code
+    if (g_displayingKeyCode != 0) {
+        // Continue displaying key code until timeout
+        if (g_currentMillis < g_keyCodeDisplayEndTime) {
+            // Keep displaying the key code (already set)
+            return;
+        } else {
+            // Timeout - clear key code display
+            g_displayingKeyCode = 0;
+            g_keyCodeDisplayEndTime = 0;
+            Serial.println("[HID] Key code display timeout - resuming normal display");
+        }
+    }
+
+    // Skip display update if currently showing key codes from app
     if (g_displayingKeyCodes) {
         return;
     }
