@@ -325,6 +325,29 @@ void handleKeyConfig(const char* command) {
         saveSettings();
         sendResponse("OK: keys updated");
         Serial.println("[BIKECLOCK] ✅ All 4 keys updated and saved.");
+
+        // Visual feedback on 7-segment display
+        // Show each key code in sequence (300ms each)
+        extern TM1637Display* g_display;
+        extern bool g_displayingKeyCodes;
+
+        if (g_display != nullptr) {
+            Serial.println("[BIKECLOCK] Showing visual feedback on display...");
+
+            // Set flag to skip time display during key code show
+            g_displayingKeyCodes = true;
+
+            for (int j = 0; j < NUM_HID_SWITCHES; j++) {
+                Serial.printf("[BIKECLOCK] Displaying SW%d: 0x%04X (%d)\n", j + 1, hidSwitches[j].keyCode, hidSwitches[j].keyCode);
+                g_display->showNumberDec(hidSwitches[j].keyCode);  // Show key code as decimal
+                delay(300);  // Display for 300ms
+            }
+
+            // Clear flag to resume time display
+            g_displayingKeyCodes = false;
+
+            Serial.println("[BIKECLOCK] Visual feedback complete.");
+        }
     } else {
         Serial.printf("[BIKECLOCK] ❌ Error: Only %d keys parsed. Expected %d.\n", i, NUM_HID_SWITCHES);
         sendResponse("ERROR: Invalid key format");

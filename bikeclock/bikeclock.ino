@@ -15,6 +15,8 @@ TM1637Display* g_display = nullptr;
 volatile uint32_t g_currentTimestamp = 0;  // Unix timestamp
 Adafruit_MCP23X17 mcp;  // MCP23S17 I/O expander (SPI)
 bool g_mcp23S17Connected = false;  // MCP23S17 connection status
+bool g_skipBleInit = false;  // Skip BLE initialization (for factory reset/test mode)
+bool g_displayingKeyCodes = false;  // Currently displaying key codes (skip time display)
 unsigned long g_lastCounterMillis = 0;  // Last time internal counter was updated
 unsigned long g_currentMillis = 0;  // Current time for this loop iteration
 LedState g_currentLedState = LED_STATE_BOOT;
@@ -209,14 +211,20 @@ void processHidSwitches() {
         // Read from MCP23S17
         uint8_t reading = mcp.digitalRead(hidSwitches[i].gpio);
 
-        // Check if switch state changed (due to noise or pressing)
-        if (reading != hidSwitches[i].pinState) {
+        // Only apply debounce when switch is released (LOW->HIGH transition)
+        // This prevents debounce interference during long press repeat
+        if (reading == HIGH && hidSwitches[i].pinState == LOW) {
+            // Switch released - update debounce time
             hidSwitches[i].lastDebounceTime = millis();
-            hidSwitches[i].pinState = reading;
         }
+        // Always update pinState for next comparison
+        hidSwitches[i].pinState = reading;
 
-        // Check if debounce delay passed
-        if ((millis() - hidSwitches[i].lastDebounceTime) > HID_DEBOUNCE_DELAY_MS) {
+        // Skip debounce check during press/repeat to ensure smooth repeat
+        bool skipDebounce = (hidSwitches[i].state == HID_STATE_PRESS ||
+                             hidSwitches[i].state == HID_STATE_REPEAT);
+
+        if (skipDebounce || (millis() - hidSwitches[i].lastDebounceTime) > HID_DEBOUNCE_DELAY_MS) {
             // State machine
             switch (hidSwitches[i].state) {
                 case HID_STATE_IDLE:
@@ -275,6 +283,127 @@ void processHidSwitches() {
                     }
                     break;
             }
+        }
+    }
+}
+
+// --- Settings Reset Function ---
+void resetKeySettingsToDefaults() {
+    Serial.println("[FACTORY_RESET] Resetting key settings to defaults...");
+
+    // Format entire InternalFS to completely erase all settings
+    Serial.println("[FACTORY_RESET] Formatting InternalFS...");
+    InternalFS.format();
+    Serial.println("[FACTORY_RESET] InternalFS formatted successfully.");
+
+    // Reload default settings
+    for (int i = 0; i < NUM_HID_SWITCHES; i++) {
+        uint16_t defaultKey;
+        switch (i) {
+            case 0: defaultKey = DEFAULT_SW1_KEYCODE; break;
+            case 1: defaultKey = DEFAULT_SW2_KEYCODE; break;
+            case 2: defaultKey = DEFAULT_SW3_KEYCODE; break;
+            case 3: defaultKey = DEFAULT_SW4_KEYCODE; break;
+            case 4: defaultKey = DEFAULT_SW5_KEYCODE; break;
+            case 5: defaultKey = DEFAULT_SW6_KEYCODE; break;
+            case 6: defaultKey = DEFAULT_SW7_KEYCODE; break;
+            default: defaultKey = 0; break;
+        }
+        hidSwitches[i].keyCode = defaultKey;
+    }
+
+    Serial.println("[FACTORY_RESET] Key settings reset to defaults:");
+    for (int i = 0; i < NUM_HID_SWITCHES; i++) {
+        Serial.printf("[FACTORY_RESET]   SW%d KeyCode: 0x%04X\n", i + 1, hidSwitches[i].keyCode);
+    }
+}
+
+void resetToFactoryDefaults() {
+    Serial.println("[FACTORY_RESET] Resetting all settings to factory defaults...");
+
+    // Reset key settings
+    resetKeySettingsToDefaults();
+
+    // Add other reset functions here as needed
+    // Example: resetDisplaySettingsToDefaults();
+    //          resetBluetoothSettingsToDefaults();
+
+    Serial.println("[FACTORY_RESET] Factory reset complete.");
+    Serial.println("[FACTORY_RESET] System will restart in 2 seconds...");
+
+    // Give time for serial output to complete
+    delay(2000);
+
+    // System reset
+    NVIC_SystemReset();
+}
+
+// --- Startup FUNC Key Check ---
+void checkStartupFuncKey() {
+    // Check if function key is held down during startup
+    // Only check if MCP23S17 is connected
+    delay(50); // Brief delay for pin to stabilize
+    if (g_mcp23S17Connected && mcp.digitalRead(MCP_FUNC_PIN) == LOW) {
+        // Function key is pressed - skip BLE initialization
+        g_skipBleInit = true;
+        Serial.println("[INIT] FUNC key detected at startup - BLE will be skipped...");
+        unsigned long pressStartTime = millis();
+
+        // LED & Display feedback: Show countdown
+        // 7-segment: 1, 2, 3, 4, 5
+        // LED colors: Red → Green → Blue → Yellow → Magenta
+        while (mcp.digitalRead(MCP_FUNC_PIN) == LOW && (millis() - pressStartTime < 5000)) {
+            unsigned long elapsed = millis() - pressStartTime;
+            int seconds = (int)(elapsed / 1000) + 1;
+
+            // Update 7-segment display with countdown
+            g_display->showNumberDec(seconds);
+
+            // Change LED color every second
+            switch (seconds) {
+                case 1:
+                    setLedColor(true, false, false);  // Red
+                    break;
+                case 2:
+                    setLedColor(false, true, false);  // Green
+                    break;
+                case 3:
+                    setLedColor(false, false, true);  // Blue
+                    break;
+                case 4:
+                    setLedColor(true, true, false);    // Yellow
+                    break;
+                case 5:
+                    setLedColor(true, false, true);   // Magenta (about to reset)
+                    break;
+            }
+            delay(100);
+        }
+
+        unsigned long pressDuration = millis() - pressStartTime;
+
+        if (pressDuration >= 5000) {
+            // Long press (5+ seconds) -> Reset settings to defaults
+            // LED & Display feedback: Show "RESET" pattern
+            Serial.println("[INIT] Factory reset initiated - LED feedback active");
+            g_display->clear();
+            for (int i = 0; i < 10; i++) {
+                setLedColor(true, true, true);  // White
+                g_display->showNumberDec(8888);  // Show "8888" during reset
+                delay(100);
+                setLedColor(false, false, false);  // Off
+                g_display->clear();
+                delay(100);
+            }
+            resetToFactoryDefaults();
+        } else {
+            // Short press -> Enter test mode
+            // Turn off LED and clear display
+            setLedColor(false, false, false);
+            g_display->clear();
+            g_displayMode = DISPLAY_MODE_TEST;
+            g_testDisplayIndex = 1;
+            Serial.println("[INIT] FUNC key short press - TEST MODE ACTIVATED");
         }
     }
 }
@@ -343,7 +472,13 @@ void updateTimestamp() {
 
 // Update display and LED state based on time sync and connection status
 void updateDisplayAndLedState() {
-    if (!g_timeSynced) {
+    // Skip display update if currently showing key codes
+    if (g_displayingKeyCodes) {
+        return;
+    }
+
+    // Skip time sync indicator in test mode
+    if (!g_timeSynced && g_displayMode != DISPLAY_MODE_TEST) {
         // Time not synced yet, show "88:88" (invalid time indicator)
         static unsigned long lastBlink = 0;
         if (g_currentMillis - lastBlink >= 500) {
@@ -377,15 +512,16 @@ void setup() {
 
     // Wait for serial console to connect
     // This allows us to see the initialization sequence
-    unsigned long startTime = millis();
-    while (!Serial && (millis() - startTime < 5000)) {
-    }
+    // NOTE: Commented out for faster startup without USB connection
+    // unsigned long startTime = millis();
+    // while (!Serial && (millis() - startTime < 5000)) {
+    // }
 
     Serial.println("[BIKECLOCK] " __DATE__ " " __TIME__);
 
     // Wait for power to stabilize and MCP23S17 to wake up properly
     // Especially important when power is supplied via USB/Ignition
-    delay(500); 
+    delay(500);
 
     // Initialize MCP23S17 I/O expander (SPI)
     setupMCP23S17();
@@ -398,28 +534,27 @@ void setup() {
     }
     Serial.println("[INIT] Switches OK");
 
-    // Check if function key is held down during startup -> Test mode
-    // Only check if MCP23S17 is connected
-    delay(50); // Brief delay for pin to stabilize
-    if (g_mcp23S17Connected && mcp.digitalRead(MCP_FUNC_PIN) == LOW) {
-        // Function key is pressed -> Enter test mode
-        g_displayMode = DISPLAY_MODE_TEST;
-        g_testDisplayIndex = 1;
-        Serial.println("[INIT] TEST MODE ACTIVATED");
-    }
-
+    // Initialize display BEFORE checking FUNC key (so we can show countdown)
     g_display = new TM1637Display(LED_CLK_GPIO, LED_DIO_GPIO);
     g_display->setBrightness(0x0F);
     g_display->clear();
     g_display->showNumberDec(8888);
     Serial.println("[INIT] Display OK");
 
+    // Check if function key is held down during startup
+    checkStartupFuncKey();
+
     setupLed();
 
-    setupBLE();
-
-    g_lastCounterMillis = millis();
-    Serial.println("[INIT] Waiting for BLE...");
+    // Only initialize BLE if not in factory reset/test mode
+    if (!g_skipBleInit) {
+        setupBLE();
+        g_lastCounterMillis = millis();
+        Serial.println("[INIT] Waiting for BLE...");
+    } else {
+        Serial.println("[INIT] BLE initialization skipped (factory reset/test mode)");
+        g_lastCounterMillis = millis();
+    }
 }
 
 void loop() {
