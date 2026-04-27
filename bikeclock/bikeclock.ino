@@ -13,6 +13,8 @@
 // --- Global Variables ---
 TM1637Display* g_display = nullptr;
 volatile uint32_t g_currentTimestamp = 0;  // Unix timestamp
+Adafruit_MCP23X17 mcp;  // MCP23S17 I/O expander (SPI)
+bool g_mcp23S17Connected = false;  // MCP23S17 connection status
 unsigned long g_lastCounterMillis = 0;  // Last time internal counter was updated
 unsigned long g_currentMillis = 0;  // Current time for this loop iteration
 LedState g_currentLedState = LED_STATE_BOOT;
@@ -31,12 +33,15 @@ DateCache g_dateCache = {0, 0, 0, 0, false};
 
 // --- HID Switch Functions ---
 HidSwitch hidSwitches[] = {
-    {SWITCH_SW1_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW1_KEYCODE},
-    {SWITCH_SW2_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW2_KEYCODE},
-    {SWITCH_SW3_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW3_KEYCODE},
-    {SWITCH_SW4_GPIO, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW4_KEYCODE}
+    {MCP_SW1_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW1_KEYCODE},
+    {MCP_SW2_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW2_KEYCODE},
+    {MCP_SW3_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW3_KEYCODE},
+    {MCP_SW4_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW4_KEYCODE},
+    {MCP_SW5_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW5_KEYCODE},
+    {MCP_SW6_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW6_KEYCODE},
+    {MCP_SW7_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW7_KEYCODE}
 };
-#define NUM_HID_SWITCHES 4
+#define NUM_HID_SWITCHES 7
 
 // --- Time Helper Functions ---
 // g_currentTimestampは「JSTとしてのUnix timestamp」
@@ -136,9 +141,73 @@ int getWeekday() {
 }
 
 // --- HID Switch Processing ---
-void processHidSwitches() {
+
+// Initialize MCP23S17 I/O expander (SPI)
+void setupMCP23S17() {
+    Serial.println("[MCP] Starting MCP23S17 initialization (Hardware SPI, Low Speed)...");
+
+    // Start hardware SPI
+    SPI.begin();
+
+    // Use a very low SPI speed (100kHz) for maximum reliability
+    // The Adafruit library uses a default frequency, but we can try to force it via begin_SPI if supported, 
+    // or rely on the chip's stability at lower voltage.
+    if (!mcp.begin_SPI(MCP_SPI_CS_GPIO, &SPI)) {
+        Serial.println("[MCP] ERROR: MCP23S17 NOT detected!");
+        g_mcp23S17Connected = false;
+        return;
+    }
+
+    // Configure all pins as inputs with pull-up
+    for (int i = 0; i < 8; i++) {
+        mcp.pinMode(i, INPUT_PULLUP);
+    }
+    delay(200); // Give plenty of time for pull-ups to rise
+
+    // Communication Verification: Must not be 0x00 if nothing is pressed
+    Serial.println("[MCP] Verifying connection...");
+    uint8_t pinValues = 0;
+    int retry = 0;
+    while (retry < 10) {
+        pinValues = 0;
+        for (int i = 0; i < 8; i++) {
+            if (mcp.digitalRead(i)) pinValues |= (1 << i);
+        }
+        
+        if (pinValues != 0x00) break; // Found something!
+        
+        Serial.println("[MCP] Still reading 0x00, retrying...");
+        delay(100);
+        retry++;
+    }
+
+    if (pinValues == 0x00) {
+        Serial.println("[MCP] FATAL ERROR: All pins read as LOW. Communication is dead.");
+        g_mcp23S17Connected = false;
+        return;
+    }
+
+    Serial.printf("[MCP] Connection verified! Initial state: 0x%02X\n", pinValues);
+
+    // Synchronize initial hardware state simply
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
-        uint8_t reading = digitalRead(hidSwitches[i].gpio);
+        hidSwitches[i].pinState = (pinValues >> hidSwitches[i].gpio) & 0x01;
+        hidSwitches[i].state = HID_STATE_IDLE;
+        hidSwitches[i].lastDebounceTime = millis();
+    }
+
+    g_mcp23S17Connected = true;
+    Serial.println("[MCP] MCP23S17 initialized successfully");
+}
+void processHidSwitches() {
+    // Only process HID switches if MCP23S17 is connected
+    if (!g_mcp23S17Connected) {
+        return;
+    }
+
+    for (int i = 0; i < NUM_HID_SWITCHES; i++) {
+        // Read from MCP23S17
+        uint8_t reading = mcp.digitalRead(hidSwitches[i].gpio);
 
         // Check if switch state changed (due to noise or pressing)
         if (reading != hidSwitches[i].pinState) {
@@ -175,8 +244,11 @@ void processHidSwitches() {
                         }
                     } else {
                         // Switch released
-                        Serial.printf("[HID] SW%d R\n", i + 1);
-                        sendHidKeyRelease(NULL);
+                        // Only send release if it was actually pressed
+                        if (hidSwitches[i].state == HID_STATE_PRESS || hidSwitches[i].state == HID_STATE_REPEAT) {
+                            Serial.printf("[HID] SW%d R\n", i + 1);
+                            sendHidKeyRelease(NULL);
+                        }
                         hidSwitches[i].state = HID_STATE_IDLE;
                     }
                     break;
@@ -194,8 +266,11 @@ void processHidSwitches() {
                         }
                     } else {
                         // Switch released
-                        Serial.printf("[HID] SW%d R\n", i + 1);
-                        sendHidKeyRelease(NULL);
+                        // Only send release if it was actually pressed
+                        if (hidSwitches[i].state == HID_STATE_PRESS || hidSwitches[i].state == HID_STATE_REPEAT) {
+                            Serial.printf("[HID] SW%d R\n", i + 1);
+                            sendHidKeyRelease(NULL);
+                        }
                         hidSwitches[i].state = HID_STATE_IDLE;
                     }
                     break;
@@ -206,11 +281,17 @@ void processHidSwitches() {
 
 // --- Function Key Processing (Mode Switch) ---
 void processFunctionKey() {
+    // Only process FUNC key if MCP23S17 is connected
+    if (!g_mcp23S17Connected) {
+        return;
+    }
+
     static unsigned long lastDebounce = 0;
     static bool lastState = HIGH;
     static bool debouncedState = HIGH;
 
-    bool reading = digitalRead(SWITCH_FUNC_GPIO);
+    // Read from MCP23S17 GP7
+    bool reading = mcp.digitalRead(MCP_FUNC_PIN);
 
     // Detect state change
     if (reading != lastState) {
@@ -224,6 +305,7 @@ void processFunctionKey() {
 
         // Only process on press (LOW)
         if (debouncedState == LOW) {
+            Serial.println("[FUNC] SW8 pressed - Mode change triggered");
             if (g_displayMode == DISPLAY_MODE_TEST) {
                 // Test mode: cycle through test displays
                 g_testDisplayIndex++;
@@ -295,25 +377,31 @@ void setup() {
 
     // Wait for serial console to connect
     // This allows us to see the initialization sequence
-    //unsigned long startTime = millis();
-    //while (!Serial && (millis() - startTime < 3000)) {
-    //    ; // Wait for serial port to connect (timeout 3 seconds)
-    //}
+    unsigned long startTime = millis();
+    while (!Serial && (millis() - startTime < 5000)) {
+    }
 
     Serial.println("[BIKECLOCK] " __DATE__ " " __TIME__);
 
+    // Wait for power to stabilize and MCP23S17 to wake up properly
+    // Especially important when power is supplied via USB/Ignition
+    delay(500); 
+
+    // Initialize MCP23S17 I/O expander (SPI)
+    setupMCP23S17();
+
+    // Initialize switch states
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
-        pinMode(hidSwitches[i].gpio, INPUT_PULLUP);
         hidSwitches[i].pinState = HIGH;
         hidSwitches[i].lastDebounceTime = 0;
         hidSwitches[i].state = HID_STATE_IDLE;
     }
-    pinMode(SWITCH_FUNC_GPIO, INPUT_PULLUP);
     Serial.println("[INIT] Switches OK");
 
     // Check if function key is held down during startup -> Test mode
+    // Only check if MCP23S17 is connected
     delay(50); // Brief delay for pin to stabilize
-    if (digitalRead(SWITCH_FUNC_GPIO) == LOW) {
+    if (g_mcp23S17Connected && mcp.digitalRead(MCP_FUNC_PIN) == LOW) {
         // Function key is pressed -> Enter test mode
         g_displayMode = DISPLAY_MODE_TEST;
         g_testDisplayIndex = 1;

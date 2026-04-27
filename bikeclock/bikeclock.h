@@ -6,19 +6,34 @@
 #include <TM1637Display.h>
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
+#include <Adafruit_MCP23X17.h>
 
 using namespace Adafruit_LittleFS_Namespace;
 
 // --- GPIO Pin Definitions ---
-#define LED_DIO_GPIO     4   // TM1637 DIO pin (using I2C SDA pin)
-#define LED_CLK_GPIO     5   // TM1637 CLK pin (using I2C SCL pin)
+#define LED_DIO_GPIO     D4   // TM1637 DIO pin (Physical SDA pin)
+#define LED_CLK_GPIO     D5   // TM1637 CLK pin (Physical SCL pin)
 
-// --- GPIO Pin Definitions for Switches ---
-#define SWITCH_SW1_GPIO     0   // D0 (P0.02)
-#define SWITCH_SW2_GPIO     1   // D1 (P0.03)
-#define SWITCH_SW3_GPIO     2   // D2 (P0.04)
-#define SWITCH_SW4_GPIO     3   // D3 (P0.29)
-#define SWITCH_FUNC_GPIO    10  // D10 (P1.15) - Function key for mode switching
+// --- GPIO Pin Definitions for SPI (MCP23S17) ---
+#define MCP_SPI_MOSI_GPIO   D10  // Physical D10 - SPI MOSI (Default)
+#define MCP_SPI_MISO_GPIO   D9   // Physical D9 - SPI MISO (Default)
+#define MCP_SPI_SCK_GPIO    D8   // Physical D8 - SPI SCK (Default)
+#define MCP_SPI_CS_GPIO     D3   // Physical D3 - SPI CS (Keep as is)
+
+// --- MCP23S17 SPI I/O Expander Definitions ---
+// MCP23S17 pin assignments (GP0-GP7)
+#define MCP_SW1_PIN         0   // GP0 - HID SW1
+#define MCP_SW2_PIN         1   // GP1 - HID SW2
+#define MCP_SW3_PIN         2   // GP2 - HID SW3
+#define MCP_SW4_PIN         3   // GP3 - HID SW4
+#define MCP_SW5_PIN         4   // GP4 - HID SW5
+#define MCP_SW6_PIN         5   // GP5 - HID SW6
+#define MCP_SW7_PIN         6   // GP6 - HID SW7
+#define MCP_FUNC_PIN        7   // GP7 - FUNC key (mode switching)
+
+// MCP23S17 Register Addresses (when IOCON.BANK = 0)
+#define MCP23S17_IOCON       0x0A  // I/O Configuration Register
+#define MCP23S17_GPPU        0x0C  // GPIO Pull-up Resistor Register
 
 // --- HID Settings ---
 #define HID_DEBOUNCE_DELAY_MS     50   // Switch debounce delay
@@ -26,10 +41,14 @@ using namespace Adafruit_LittleFS_Namespace;
 #define HID_REPEAT_INTERVAL_MS   300   // Time between repeat key strokes (slower for YouTube)
 
 // --- HID Key Codes (Keyboard Page) ---
-#define DEFAULT_SW1_KEYCODE    0x50
-#define DEFAULT_SW2_KEYCODE    0x4F
-#define DEFAULT_SW3_KEYCODE    0x52
-#define DEFAULT_SW4_KEYCODE    0x51
+#define DEFAULT_SW1_KEYCODE    0x50  // Left Arrow
+#define DEFAULT_SW2_KEYCODE    0x4F  // Right Arrow
+#define DEFAULT_SW3_KEYCODE    0x52  // Up Arrow
+#define DEFAULT_SW4_KEYCODE    0x51  // Down Arrow
+#define DEFAULT_SW5_KEYCODE    0x28  // Enter
+#define DEFAULT_SW6_KEYCODE    0x0224  // Back (Android)
+#define DEFAULT_SW7_KEYCODE    0xCD  // Play/Pause (Consumer Page)
+// Note: SW8 (FUNC) is not an HID key, it's for mode switching
 
 // --- BLE Settings ---
 #define BLE_DEVICE_NAME       "BikeClock-0001"
@@ -79,6 +98,7 @@ extern bool g_deviceConnected;               // BLE connection status
 extern LedState g_currentLedState;           // Current LED state
 extern DisplayMode g_displayMode;            // Current display mode
 extern unsigned long g_currentMillis;        // Current time for this loop iteration
+extern bool g_mcp23S17Connected;             // MCP23S17 connection status
 
 // Date cache structure
 struct DateCache {

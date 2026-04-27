@@ -85,6 +85,33 @@ fun KeyCodeSettingsScreen(
                 }
             )
 
+            // スイッチ5
+            SwitchKeyCodeCard(
+                switchNum = 5,
+                keyCode = keyCodeSettings.sw5KeyCode,
+                onKeyCodeChange = { newKeyCode ->
+                    viewModel.updateKeyCode(5, newKeyCode)
+                }
+            )
+
+            // スイッチ6
+            SwitchKeyCodeCard(
+                switchNum = 6,
+                keyCode = keyCodeSettings.sw6KeyCode,
+                onKeyCodeChange = { newKeyCode ->
+                    viewModel.updateKeyCode(6, newKeyCode)
+                }
+            )
+
+            // スイッチ7
+            SwitchKeyCodeCard(
+                switchNum = 7,
+                keyCode = keyCodeSettings.sw7KeyCode,
+                onKeyCodeChange = { newKeyCode ->
+                    viewModel.updateKeyCode(7, newKeyCode)
+                }
+            )
+
             // デバイスに保存ボタン
             Button(
                 onClick = { viewModel.saveToDevice() },
