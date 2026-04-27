@@ -21,6 +21,10 @@ using namespace Adafruit_LittleFS_Namespace;
 #define MCP_SPI_CS_GPIO     D3   // Physical D3 - SPI CS (Keep as is)
 
 // --- MCP23S17 SPI I/O Expander Definitions ---
+// SPI frequency: Lower = more noise immune, Higher = faster response
+// Adjust this value if you experience noise issues (range: 100kHz - 8MHz)
+#define MCP_SPI_FREQ        100000
+
 // MCP23S17 pin assignments (GP0-GP7)
 #define MCP_SW1_PIN         0   // GP0 - HID SW1
 #define MCP_SW2_PIN         1   // GP1 - HID SW2
@@ -41,10 +45,10 @@ using namespace Adafruit_LittleFS_Namespace;
 #define HID_REPEAT_INTERVAL_MS   300   // Time between repeat key strokes (slower for YouTube)
 
 // --- HID Key Codes (Keyboard Page) ---
-#define DEFAULT_SW1_KEYCODE    0x50  // Left Arrow
-#define DEFAULT_SW2_KEYCODE    0x4F  // Right Arrow
+#define DEFAULT_SW1_KEYCODE    0x4F  // Right Arrow
+#define DEFAULT_SW2_KEYCODE    0x51  // Down Arrow
 #define DEFAULT_SW3_KEYCODE    0x52  // Up Arrow
-#define DEFAULT_SW4_KEYCODE    0x51  // Down Arrow
+#define DEFAULT_SW4_KEYCODE    0x50  // Left Arrow
 #define DEFAULT_SW5_KEYCODE    0x28  // Enter
 #define DEFAULT_SW6_KEYCODE    0x0224  // Back (Android)
 #define DEFAULT_SW7_KEYCODE    0xCD  // Play/Pause (Consumer Page)
@@ -99,6 +103,10 @@ extern LedState g_currentLedState;           // Current LED state
 extern DisplayMode g_displayMode;            // Current display mode
 extern unsigned long g_currentMillis;        // Current time for this loop iteration
 extern bool g_mcp23S17Connected;             // MCP23S17 connection status
+extern bool g_skipBleInit;                   // Skip BLE initialization (for factory reset/test mode)
+extern bool g_displayingKeyCodes;            // Currently displaying key codes (skip time display)
+extern uint16_t g_displayingKeyCode;         // Currently displaying HID key code (0 = none)
+extern unsigned long g_keyCodeDisplayEndTime; // When to stop displaying key code
 
 // Date cache structure
 struct DateCache {

@@ -23,10 +23,10 @@ data class KeyCodeSettings(
     companion object {
         // デフォルトのHID Usage ID (Keyboard & Consumer Page)
         // Arduinoファームウェア側のデフォルト設定に合わせる
-        const val DEFAULT_SW1_HID = 0x50    // Left Arrow
-        const val DEFAULT_SW2_HID = 0x4F    // Right Arrow
+        const val DEFAULT_SW1_HID = 0x4F    // Right Arrow
+        const val DEFAULT_SW2_HID = 0x51    // Down Arrow
         const val DEFAULT_SW3_HID = 0x52    // Up Arrow
-        const val DEFAULT_SW4_HID = 0x51    // Down Arrow
+        const val DEFAULT_SW4_HID = 0x50    // Left Arrow
         const val DEFAULT_SW5_HID = 0x28    // Enter
         const val DEFAULT_SW6_HID = 0x0224  // Back (Android)
         const val DEFAULT_SW7_HID = 0xCD    // Play/Pause (Consumer Page)

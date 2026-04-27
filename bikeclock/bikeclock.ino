@@ -15,6 +15,10 @@ TM1637Display* g_display = nullptr;
 volatile uint32_t g_currentTimestamp = 0;  // Unix timestamp
 Adafruit_MCP23X17 mcp;  // MCP23S17 I/O expander (SPI)
 bool g_mcp23S17Connected = false;  // MCP23S17 connection status
+bool g_skipBleInit = false;  // Skip BLE initialization (for factory reset/test mode)
+bool g_displayingKeyCodes = false;  // Currently displaying key codes (skip time display)
+uint16_t g_displayingKeyCode = 0;  // Currently displaying HID key code (0 = none)
+unsigned long g_keyCodeDisplayEndTime = 0;  // When to stop displaying key code
 unsigned long g_lastCounterMillis = 0;  // Last time internal counter was updated
 unsigned long g_currentMillis = 0;  // Current time for this loop iteration
 LedState g_currentLedState = LED_STATE_BOOT;
@@ -24,14 +28,14 @@ int g_testDisplayIndex = 1;  // Test mode display index (1-10)
 // External BLE characteristics
 extern BLECharacteristic bleSwitchNotifyCharacteristic;
 
-// Time management
-unsigned long g_lastScreenMillis = 0;  // Last time screen display was updated
-bool g_timeSynced = false;
+// --- External Functions (from bikeclock_hid.ino) ---
+void setupMCP23S17();
+void processHidSwitches();
+void checkStartupFuncKey();
+void processFunctionKey();
 
-// Date caching (to avoid redundant calculations)
-DateCache g_dateCache = {0, 0, 0, 0, false};
-
-// --- HID Switch Functions ---
+// --- HID Switch Definitions ---
+// Defined here so they can be accessed from all .ino files
 HidSwitch hidSwitches[] = {
     {MCP_SW1_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW1_KEYCODE},
     {MCP_SW2_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW2_KEYCODE},
@@ -42,6 +46,13 @@ HidSwitch hidSwitches[] = {
     {MCP_SW7_PIN, HIGH, 0, 0, HID_STATE_IDLE, DEFAULT_SW7_KEYCODE}
 };
 #define NUM_HID_SWITCHES 7
+
+// Time management
+unsigned long g_lastScreenMillis = 0;  // Last time screen display was updated
+bool g_timeSynced = false;
+
+// Date caching (to avoid redundant calculations)
+DateCache g_dateCache = {0, 0, 0, 0, false};
 
 // --- Time Helper Functions ---
 // g_currentTimestampは「JSTとしてのUnix timestamp」
@@ -140,195 +151,55 @@ int getWeekday() {
     return g_dateCache.weekday;
 }
 
-// --- HID Switch Processing ---
+// --- Settings Reset Function ---
+void resetKeySettingsToDefaults() {
+    Serial.println("[FACTORY_RESET] Resetting key settings to defaults...");
 
-// Initialize MCP23S17 I/O expander (SPI)
-void setupMCP23S17() {
-    Serial.println("[MCP] Starting MCP23S17 initialization (Hardware SPI, Low Speed)...");
+    // Format entire InternalFS to completely erase all settings
+    Serial.println("[FACTORY_RESET] Formatting InternalFS...");
+    InternalFS.format();
+    Serial.println("[FACTORY_RESET] InternalFS formatted successfully.");
 
-    // Start hardware SPI
-    SPI.begin();
-
-    // Use a very low SPI speed (100kHz) for maximum reliability
-    // The Adafruit library uses a default frequency, but we can try to force it via begin_SPI if supported, 
-    // or rely on the chip's stability at lower voltage.
-    if (!mcp.begin_SPI(MCP_SPI_CS_GPIO, &SPI)) {
-        Serial.println("[MCP] ERROR: MCP23S17 NOT detected!");
-        g_mcp23S17Connected = false;
-        return;
-    }
-
-    // Configure all pins as inputs with pull-up
-    for (int i = 0; i < 8; i++) {
-        mcp.pinMode(i, INPUT_PULLUP);
-    }
-    delay(200); // Give plenty of time for pull-ups to rise
-
-    // Communication Verification: Must not be 0x00 if nothing is pressed
-    Serial.println("[MCP] Verifying connection...");
-    uint8_t pinValues = 0;
-    int retry = 0;
-    while (retry < 10) {
-        pinValues = 0;
-        for (int i = 0; i < 8; i++) {
-            if (mcp.digitalRead(i)) pinValues |= (1 << i);
-        }
-        
-        if (pinValues != 0x00) break; // Found something!
-        
-        Serial.println("[MCP] Still reading 0x00, retrying...");
-        delay(100);
-        retry++;
-    }
-
-    if (pinValues == 0x00) {
-        Serial.println("[MCP] FATAL ERROR: All pins read as LOW. Communication is dead.");
-        g_mcp23S17Connected = false;
-        return;
-    }
-
-    Serial.printf("[MCP] Connection verified! Initial state: 0x%02X\n", pinValues);
-
-    // Synchronize initial hardware state simply
+    // Reload default settings
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
-        hidSwitches[i].pinState = (pinValues >> hidSwitches[i].gpio) & 0x01;
-        hidSwitches[i].state = HID_STATE_IDLE;
-        hidSwitches[i].lastDebounceTime = millis();
+        uint16_t defaultKey;
+        switch (i) {
+            case 0: defaultKey = DEFAULT_SW1_KEYCODE; break;
+            case 1: defaultKey = DEFAULT_SW2_KEYCODE; break;
+            case 2: defaultKey = DEFAULT_SW3_KEYCODE; break;
+            case 3: defaultKey = DEFAULT_SW4_KEYCODE; break;
+            case 4: defaultKey = DEFAULT_SW5_KEYCODE; break;
+            case 5: defaultKey = DEFAULT_SW6_KEYCODE; break;
+            case 6: defaultKey = DEFAULT_SW7_KEYCODE; break;
+            default: defaultKey = 0; break;
+        }
+        hidSwitches[i].keyCode = defaultKey;
     }
 
-    g_mcp23S17Connected = true;
-    Serial.println("[MCP] MCP23S17 initialized successfully");
-}
-void processHidSwitches() {
-    // Only process HID switches if MCP23S17 is connected
-    if (!g_mcp23S17Connected) {
-        return;
-    }
-
+    Serial.println("[FACTORY_RESET] Key settings reset to defaults:");
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
-        // Read from MCP23S17
-        uint8_t reading = mcp.digitalRead(hidSwitches[i].gpio);
-
-        // Check if switch state changed (due to noise or pressing)
-        if (reading != hidSwitches[i].pinState) {
-            hidSwitches[i].lastDebounceTime = millis();
-            hidSwitches[i].pinState = reading;
-        }
-
-        // Check if debounce delay passed
-        if ((millis() - hidSwitches[i].lastDebounceTime) > HID_DEBOUNCE_DELAY_MS) {
-            // State machine
-            switch (hidSwitches[i].state) {
-                case HID_STATE_IDLE:
-                    // Check if switch is pressed (LOW)
-                    if (reading == LOW) {
-                        Serial.printf("[HID] SW%d P\n", i + 1);
-                        sendHidKeyPress(hidSwitches[i].keyCode, NULL);
-
-                        hidSwitches[i].state = HID_STATE_PRESS;
-                        hidSwitches[i].pressStartTime = millis();
-                    }
-                    break;
-
-                case HID_STATE_PRESS:
-                    if (reading == LOW) {
-                        // Check for repeat (long press)
-                        if ((millis() - hidSwitches[i].pressStartTime) > HID_REPEAT_DELAY_MS) {
-                            // OS側のオートリピートに頼らず、マイコン側で一旦離してまた押す
-                            sendHidKeyRelease(NULL);
-                            delay(10);
-                            sendHidKeyPress(hidSwitches[i].keyCode, NULL);
-
-                            hidSwitches[i].state = HID_STATE_REPEAT;
-                            hidSwitches[i].pressStartTime = millis();
-                        }
-                    } else {
-                        // Switch released
-                        // Only send release if it was actually pressed
-                        if (hidSwitches[i].state == HID_STATE_PRESS || hidSwitches[i].state == HID_STATE_REPEAT) {
-                            Serial.printf("[HID] SW%d R\n", i + 1);
-                            sendHidKeyRelease(NULL);
-                        }
-                        hidSwitches[i].state = HID_STATE_IDLE;
-                    }
-                    break;
-
-                case HID_STATE_REPEAT:
-                    if (reading == LOW) {
-                        // Continue repeating
-                        if ((millis() - hidSwitches[i].pressStartTime) > HID_REPEAT_INTERVAL_MS) {
-                            // 一旦離してまた押すことで、OS側に新しいキー入力として認識させる
-                            sendHidKeyRelease(NULL);
-                            delay(10);
-                            sendHidKeyPress(hidSwitches[i].keyCode, NULL);
-
-                            hidSwitches[i].pressStartTime = millis();
-                        }
-                    } else {
-                        // Switch released
-                        // Only send release if it was actually pressed
-                        if (hidSwitches[i].state == HID_STATE_PRESS || hidSwitches[i].state == HID_STATE_REPEAT) {
-                            Serial.printf("[HID] SW%d R\n", i + 1);
-                            sendHidKeyRelease(NULL);
-                        }
-                        hidSwitches[i].state = HID_STATE_IDLE;
-                    }
-                    break;
-            }
-        }
+        Serial.printf("[FACTORY_RESET]   SW%d KeyCode: 0x%04X\n", i + 1, hidSwitches[i].keyCode);
     }
 }
 
-// --- Function Key Processing (Mode Switch) ---
-void processFunctionKey() {
-    // Only process FUNC key if MCP23S17 is connected
-    if (!g_mcp23S17Connected) {
-        return;
-    }
+void resetToFactoryDefaults() {
+    Serial.println("[FACTORY_RESET] Resetting all settings to factory defaults...");
 
-    static unsigned long lastDebounce = 0;
-    static bool lastState = HIGH;
-    static bool debouncedState = HIGH;
+    // Reset key settings
+    resetKeySettingsToDefaults();
 
-    // Read from MCP23S17 GP7
-    bool reading = mcp.digitalRead(MCP_FUNC_PIN);
+    // Add other reset functions here as needed
+    // Example: resetDisplaySettingsToDefaults();
+    //          resetBluetoothSettingsToDefaults();
 
-    // Detect state change
-    if (reading != lastState) {
-        lastDebounce = millis();
-        lastState = reading;
-    }
+    Serial.println("[FACTORY_RESET] Factory reset complete.");
+    Serial.println("[FACTORY_RESET] System will restart in 2 seconds...");
 
-    // After debounce delay
-    if ((millis() - lastDebounce) > HID_DEBOUNCE_DELAY_MS && reading != debouncedState) {
-        debouncedState = reading;
+    // Give time for serial output to complete
+    delay(2000);
 
-        // Only process on press (LOW)
-        if (debouncedState == LOW) {
-            Serial.println("[FUNC] SW8 pressed - Mode change triggered");
-            if (g_displayMode == DISPLAY_MODE_TEST) {
-                // Test mode: cycle through test displays
-                g_testDisplayIndex++;
-                if (g_testDisplayIndex > 10) {
-                    g_testDisplayIndex = 1;
-                }
-                updateTestDisplay();
-                Serial.printf("[TEST] Display %d\n", g_testDisplayIndex);
-            } else {
-                // Normal mode: switch display mode (cycle through TIME, DATE, WEEKDAY)
-                if (g_displayMode >= DISPLAY_MODE_WEEKDAY) {
-                    g_displayMode = DISPLAY_MODE_TIME;
-                } else {
-                    g_displayMode = (DisplayMode)(g_displayMode + 1);
-                }
-
-                // Update display immediately
-                updateDisplayForCurrentMode();
-
-                Serial.printf("[FUNC] Mode changed to: %d\n", g_displayMode);
-            }
-        }
-    }
+    // System reset
+    NVIC_SystemReset();
 }
 
 // --- System Utilities ---
@@ -343,7 +214,27 @@ void updateTimestamp() {
 
 // Update display and LED state based on time sync and connection status
 void updateDisplayAndLedState() {
-    if (!g_timeSynced) {
+    // Check if displaying HID key code
+    if (g_displayingKeyCode != 0) {
+        // Continue displaying key code until timeout
+        if (g_currentMillis < g_keyCodeDisplayEndTime) {
+            // Keep displaying the key code (already set)
+            return;
+        } else {
+            // Timeout - clear key code display
+            g_displayingKeyCode = 0;
+            g_keyCodeDisplayEndTime = 0;
+            Serial.println("[HID] Key code display timeout - resuming normal display");
+        }
+    }
+
+    // Skip display update if currently showing key codes from app
+    if (g_displayingKeyCodes) {
+        return;
+    }
+
+    // Skip time sync indicator in test mode
+    if (!g_timeSynced && g_displayMode != DISPLAY_MODE_TEST) {
         // Time not synced yet, show "88:88" (invalid time indicator)
         static unsigned long lastBlink = 0;
         if (g_currentMillis - lastBlink >= 500) {
@@ -377,15 +268,16 @@ void setup() {
 
     // Wait for serial console to connect
     // This allows us to see the initialization sequence
-    unsigned long startTime = millis();
-    while (!Serial && (millis() - startTime < 5000)) {
-    }
+    // NOTE: Commented out for faster startup without USB connection
+    // unsigned long startTime = millis();
+    // while (!Serial && (millis() - startTime < 5000)) {
+    // }
 
     Serial.println("[BIKECLOCK] " __DATE__ " " __TIME__);
 
     // Wait for power to stabilize and MCP23S17 to wake up properly
     // Especially important when power is supplied via USB/Ignition
-    delay(500); 
+    delay(500);
 
     // Initialize MCP23S17 I/O expander (SPI)
     setupMCP23S17();
@@ -398,28 +290,27 @@ void setup() {
     }
     Serial.println("[INIT] Switches OK");
 
-    // Check if function key is held down during startup -> Test mode
-    // Only check if MCP23S17 is connected
-    delay(50); // Brief delay for pin to stabilize
-    if (g_mcp23S17Connected && mcp.digitalRead(MCP_FUNC_PIN) == LOW) {
-        // Function key is pressed -> Enter test mode
-        g_displayMode = DISPLAY_MODE_TEST;
-        g_testDisplayIndex = 1;
-        Serial.println("[INIT] TEST MODE ACTIVATED");
-    }
-
+    // Initialize display BEFORE checking FUNC key (so we can show countdown)
     g_display = new TM1637Display(LED_CLK_GPIO, LED_DIO_GPIO);
     g_display->setBrightness(0x0F);
     g_display->clear();
     g_display->showNumberDec(8888);
     Serial.println("[INIT] Display OK");
 
+    // Check if function key is held down during startup
+    checkStartupFuncKey();
+
     setupLed();
 
-    setupBLE();
-
-    g_lastCounterMillis = millis();
-    Serial.println("[INIT] Waiting for BLE...");
+    // Only initialize BLE if not in factory reset/test mode
+    if (!g_skipBleInit) {
+        setupBLE();
+        g_lastCounterMillis = millis();
+        Serial.println("[INIT] Waiting for BLE...");
+    } else {
+        Serial.println("[INIT] BLE initialization skipped (factory reset/test mode)");
+        g_lastCounterMillis = millis();
+    }
 }
 
 void loop() {
