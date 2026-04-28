@@ -19,6 +19,7 @@ bool g_skipBleInit = false;  // Skip BLE initialization (for factory reset/test 
 bool g_displayingKeyCodes = false;  // Currently displaying key codes (skip time display)
 uint16_t g_displayingKeyCode = 0;  // Currently displaying HID key code (0 = none)
 unsigned long g_keyCodeDisplayEndTime = 0;  // When to stop displaying key code
+bool g_showingCountdown = false;  // Currently showing countdown (skip time display)
 unsigned long g_lastCounterMillis = 0;  // Last time internal counter was updated
 unsigned long g_currentMillis = 0;  // Current time for this loop iteration
 LedState g_currentLedState = LED_STATE_BOOT;
@@ -214,6 +215,11 @@ void updateTimestamp() {
 
 // Update display and LED state based on time sync and connection status
 void updateDisplayAndLedState() {
+    // Skip all display updates if showing countdown
+    if (g_showingCountdown) {
+        return;
+    }
+
     // Check if displaying HID key code
     if (g_displayingKeyCode != 0) {
         // Continue displaying key code until timeout
