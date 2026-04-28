@@ -44,6 +44,12 @@ object BleConstants {
      */
     const val CMD_TIME_SYNC = "SET:time"
 
+    /**
+     * バージョン取得コマンド
+     * デバイスのファームウェアバージョンを取得する
+     */
+    const val CMD_GET_VERSION = "GET:version"
+
     // --- レスポンス定数 ---
     /**
      * 成功レスポンスプレフィックス

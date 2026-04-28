@@ -51,9 +51,9 @@ class BleScanService : Service() {
         .setReportDelay(0L) // 0L: no batching, report results immediately
         .build()
 
-    private val scanFilter = ScanFilter.Builder()
-        .setDeviceName(DEVICE_NAME)
-        .build()
+    private val scanFilters = listOf(
+        ScanFilter.Builder().setDeviceName(DEVICE_NAME).build()
+    )
 
     override fun onCreate() {
         super.onCreate()
@@ -117,8 +117,7 @@ class BleScanService : Service() {
         stopBleScan() // 既存のスキャンがあれば停止
 
         Log.d(TAG, "Starting BLE scan in service...")
-        val filters = listOf(scanFilter)
-        bluetoothAdapter?.bluetoothLeScanner?.startScan(filters, scanSettings, bleScanCallback)
+        bluetoothAdapter?.bluetoothLeScanner?.startScan(scanFilters, scanSettings, bleScanCallback)
 
         // Removed scan timeout job for continuous scanning
     }
@@ -137,7 +136,7 @@ class BleScanService : Service() {
             val deviceName = result.device.name ?: "(no name)"
 
             if (deviceName == DEVICE_NAME) {
-                Log.d(TAG, "Target device '${DEVICE_NAME}' found! Signaling MainViewModel to connect.")
+                Log.d(TAG, "Target device '$deviceName' found! Signaling MainViewModel to connect.")
                 // Stop scanning to allow the ViewModel to handle the connection.
                 // The ViewModel will be responsible for restarting the scan later.
                 stopBleScan()
@@ -145,17 +144,18 @@ class BleScanService : Service() {
                     BleScanServiceManager.emitDeviceFound(result.device)
                 }
             } else {
-                Log.v(TAG, "Ignoring device: $deviceName (not '$DEVICE_NAME')")
+                Log.v(TAG, "Ignoring device: $deviceName")
             }
-        }
+            }
 
-        override fun onBatchScanResults(results: List<ScanResult>) {
+            override fun onBatchScanResults(results: List<ScanResult>) {
             super.onBatchScanResults(results)
             Log.d(TAG, "onBatchScanResults: ${results.size} devices found.")
             // バッチスキャン結果の中からターゲットデバイスを探す
             results.forEach { result ->
-                if (result.device.name == DEVICE_NAME) {
-                    Log.d(TAG, "Target device '${DEVICE_NAME}' found in batch! Signaling MainViewModel to connect.")
+                val deviceName = result.device.name ?: ""
+                if (deviceName == DEVICE_NAME) {
+                    Log.d(TAG, "Target device '$deviceName' found in batch! Signaling MainViewModel to connect.")
                     // Do NOT stop scan here; continue scanning for automatic re-detection
                     CoroutineScope(Dispatchers.IO).launch {
                         BleScanServiceManager.emitDeviceFound(result.device)
@@ -163,7 +163,8 @@ class BleScanService : Service() {
                     return // 1つ見つけたら処理を終了
                 }
             }
-        }    } // Closing brace for bleScanCallback object.
+            }
+    } // Closing brace for bleScanCallback object.
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

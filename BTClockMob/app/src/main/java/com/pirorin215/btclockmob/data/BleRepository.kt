@@ -8,6 +8,7 @@ import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -24,10 +25,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch // Add this import
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import com.pirorin215.btclockmob.constants.TimeConstants
 import com.pirorin215.btclockmob.bluetooth.constants.BleConstants
 import kotlinx.coroutines.flow.first
+import kotlin.coroutines.resume
 
 sealed class ConnectionState {
     object Disconnected : ConnectionState()
@@ -81,6 +85,13 @@ class BleRepository(private val context: Context) {
     private val _events = MutableSharedFlow<BleEvent>()
     val events = _events.asSharedFlow()
 
+    // Device version information
+    private val _deviceVersion = MutableStateFlow<String?>(null)
+    val deviceVersion = _deviceVersion.asStateFlow()
+
+    // For write callback synchronization
+    private var pendingWriteResult: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+
     private val gattCallback: BluetoothGattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             val deviceAddress = gatt.device.address
@@ -125,7 +136,9 @@ class BleRepository(private val context: Context) {
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.d(TAG, "Services discovered successfully.")
-                // Store characteristics
+
+                // カスタムサービスを探索
+                Log.d(TAG, "Checking for custom service.")
                 val service = gatt.getService(UUID.fromString(SERVICE_UUID_STRING))
                 if (service == null) {
                     Log.e(TAG, "Custom service (${SERVICE_UUID_STRING}) not found.")
@@ -170,7 +183,8 @@ class BleRepository(private val context: Context) {
 
         override fun onDescriptorWrite(gatt: BluetoothGatt?, descriptor: BluetoothGattDescriptor?, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                Log.d(TAG, "Descriptor written successfully. Repository is ready.")
+                Log.d(TAG, "Descriptor written successfully for ${descriptor?.characteristic?.uuid}")
+                Log.d(TAG, "Normal mode: Repository is ready.")
                 repositoryScope.launch { _events.emit(BleEvent.Ready) }
             } else {
                 Log.e(TAG, "Descriptor write failed with status $status")
@@ -179,9 +193,25 @@ class BleRepository(private val context: Context) {
         }
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
-            Log.d(TAG, "Characteristic ${characteristic.uuid} changed, value: ${value.toString(Charsets.UTF_8)}")
+            // ByteArrayを文字列に変換する際、null終端までを正しく処理
+            val nullIndex = value.indexOf(0)
+            val cleanValue = if (nullIndex >= 0) {
+                value.copyOfRange(0, nullIndex)
+            } else {
+                value
+            }
+            val response = cleanValue.toString(Charsets.UTF_8)
+            Log.d(TAG, "Characteristic ${characteristic.uuid} changed, value: $response")
+
+            // Check if this is a version response
+            if (response.startsWith("OK:version:")) {
+                val version = response.substringAfter("OK:version:")
+                Log.d(TAG, "Device version: $version")
+                _deviceVersion.value = version
+            }
+
             repositoryScope.launch {
-                _events.emit(BleEvent.CharacteristicChanged(characteristic, value))
+                _events.emit(BleEvent.CharacteristicChanged(characteristic, cleanValue))
             }
         }
 
@@ -189,6 +219,14 @@ class BleRepository(private val context: Context) {
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 Log.e(TAG, "Characteristic write failed for ${characteristic?.uuid} with status $status")
                 repositoryScope.launch { _events.emit(BleEvent.Error("Write failed with status $status"))}
+
+                // Notify pending write of failure
+                pendingWriteResult?.complete(false)
+                pendingWriteResult = null
+            } else {
+                // Notify pending write of success
+                pendingWriteResult?.complete(true)
+                pendingWriteResult = null
             }
         }
     }
@@ -228,7 +266,9 @@ class BleRepository(private val context: Context) {
     }
 
     fun connect(device: BluetoothDevice) {
-        Log.d(TAG, "Connecting to device ${device.address}, bond state: ${device.bondState}")
+        Log.d(TAG, "Connecting to device ${device.name} (${device.address}), bond state: ${device.bondState}")
+
+        // 通常モード：ペアリング処理
         when (device.bondState) {
             BluetoothDevice.BOND_BONDED -> {
                 _connectionState.value = ConnectionState.Paired(device)
@@ -306,7 +346,7 @@ class BleRepository(private val context: Context) {
                 characteristic,
                 command.toByteArray(Charsets.UTF_8),
                 BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-            ) == android.bluetooth.BluetoothStatusCodes.SUCCESS
+            ) == BluetoothStatusCodes.SUCCESS
         } else {
             characteristic.value = command.toByteArray(Charsets.UTF_8)
             characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
@@ -326,12 +366,20 @@ class BleRepository(private val context: Context) {
                 characteristic,
                 ackValue,
                 BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
-            ) == android.bluetooth.BluetoothStatusCodes.SUCCESS
+            ) == BluetoothStatusCodes.SUCCESS
         } else {
             characteristic.value = ackValue
             characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             bluetoothGatt?.writeCharacteristic(characteristic) ?: false
         }
+    }
+
+    /**
+     * Get device firmware version
+     * Sends GET:version command and waits for response
+     */
+    fun getVersion(): Boolean {
+        return sendCommand(BleConstants.CMD_GET_VERSION)
     }
 
 }

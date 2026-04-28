@@ -11,7 +11,7 @@
 extern TM1637Display* g_display;
 extern Adafruit_MCP23X17 mcp;
 extern bool g_mcp23S17Connected;
-extern bool g_skipBleInit;
+extern bool g_showingCountdown;
 extern DisplayMode g_displayMode;
 extern int g_testDisplayIndex;
 
@@ -21,8 +21,8 @@ extern HidSwitch hidSwitches[];
 // --- MCP23S17 Initialization ---
 // Initialize MCP23S17 I/O expander (SPI)
 void setupMCP23S17() {
-    Serial.println("[MCP] Starting MCP23S17 initialization (Hardware SPI, Low Speed)...");
-    Serial.printf("[MCP] SPI Frequency: %d Hz (%d kHz)\n", MCP_SPI_FREQ, MCP_SPI_FREQ / 1000);
+    logPrint("MCP", "Starting MCP23S17 initialization (Hardware SPI, Low Speed)...");
+    logPrint("MCP", "SPI Frequency: %d Hz (%d kHz)", MCP_SPI_FREQ, MCP_SPI_FREQ / 1000);
 
     // Start hardware SPI
     SPI.begin();
@@ -30,11 +30,11 @@ void setupMCP23S17() {
     // Initialize MCP23S17 with default frequency (library uses 1MHz internally)
     // Note: To use custom frequency, we need to modify the library approach
     if (!mcp.begin_SPI(MCP_SPI_CS_GPIO, &SPI)) {
-        Serial.println("[MCP] ERROR: MCP23S17 NOT detected!");
+        logPrint("MCP", "ERROR: MCP23S17 NOT detected!");
         g_mcp23S17Connected = false;
         return;
     }
-    Serial.println("[MCP] MCP23S17 initialized successfully");
+    logPrint("MCP", "MCP23S17 initialized successfully");
 
     // Configure all pins as inputs with pull-up
     for (int i = 0; i < 8; i++) {
@@ -43,7 +43,7 @@ void setupMCP23S17() {
     delay(200); // Give plenty of time for pull-ups to rise
 
     // Communication Verification: Must not be 0x00 if nothing is pressed
-    Serial.println("[MCP] Verifying connection...");
+    logPrint("MCP", "Verifying connection...");
     uint8_t pinValues = 0;
     int retry = 0;
     while (retry < 10) {
@@ -54,18 +54,18 @@ void setupMCP23S17() {
 
         if (pinValues != 0x00) break; // Found something!
 
-        Serial.println("[MCP] Still reading 0x00, retrying...");
+        logPrint("MCP", "Still reading 0x00, retrying...");
         delay(100);
         retry++;
     }
 
     if (pinValues == 0x00) {
-        Serial.println("[MCP] FATAL ERROR: All pins read as LOW. Communication is dead.");
+        logPrint("MCP", "FATAL ERROR: All pins read as LOW. Communication is dead.");
         g_mcp23S17Connected = false;
         return;
     }
 
-    Serial.printf("[MCP] Connection verified! Initial state: 0x%02X\n", pinValues);
+    logPrint("MCP", "Connection verified! Initial state: 0x%02X", pinValues);
 
     // Synchronize initial hardware state simply
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
@@ -75,13 +75,33 @@ void setupMCP23S17() {
     }
 
     g_mcp23S17Connected = true;
-    Serial.println("[MCP] MCP23S17 initialized successfully");
+    logPrint("MCP", "MCP23S17 initialized successfully");
 }
 
 // --- HID Switch Processing ---
 void processHidSwitches() {
     // Only process HID switches if MCP23S17 is connected
     if (!g_mcp23S17Connected) {
+        return;
+    }
+
+    // Check if in maintenance mode - skip HID processing
+    extern MaintenanceState g_maintenanceState;
+    if (g_maintenanceState.active) {
+        return;  // Skip normal HID processing in maintenance mode
+    }
+
+    // Additional safety check: verify all pins are not stuck at LOW
+    // This can happen if MCP23S17 is disconnected but SPI bus is alive
+    uint8_t allPins = 0;
+    for (int i = 0; i < 8; i++) {
+        if (mcp.digitalRead(i)) allPins |= (1 << i);
+    }
+    if (allPins == 0x00) {
+        // All pins reading LOW - likely disconnected
+        // Disable further HID processing
+        logPrint("HID", "WARNING: All pins LOW - disabling HID processing");
+        g_mcp23S17Connected = false;
         return;
     }
 
@@ -106,7 +126,7 @@ void processHidSwitches() {
                 case HID_STATE_IDLE:
                     // Check if switch is pressed (LOW)
                     if (reading == LOW) {
-                        Serial.printf("[HID] SW%d P\n", i + 1);
+                        logPrint("HID", "SW%d P", i + 1);
                         sendHidKeyPress(hidSwitches[i].keyCode, NULL);
 
                         // Display key code on 7-segment
@@ -115,7 +135,7 @@ void processHidSwitches() {
                         g_displayingKeyCode = hidSwitches[i].keyCode;
                         g_keyCodeDisplayEndTime = millis() + 500;  // Display for 500ms
                         g_display->showNumberDec(hidSwitches[i].keyCode);
-                        Serial.printf("[HID] Displaying key code: %d\n", hidSwitches[i].keyCode);
+                        logPrint("HID", "Displaying key code: %d", hidSwitches[i].keyCode);
 
                         hidSwitches[i].state = HID_STATE_PRESS;
                     }
@@ -124,7 +144,7 @@ void processHidSwitches() {
                 case HID_STATE_PRESS:
                     if (reading == HIGH) {
                         // Switch released
-                        Serial.printf("[HID] SW%d R\n", i + 1);
+                        logPrint("HID", "SW%d R", i + 1);
                         sendHidKeyRelease(NULL);
                         hidSwitches[i].state = HID_STATE_IDLE;
                     }
@@ -134,75 +154,44 @@ void processHidSwitches() {
     }
 }
 
-// --- Startup FUNC Key Check ---
-void checkStartupFuncKey() {
-    // Check if function key is held down during startup
-    // Only check if MCP23S17 is connected
-    delay(50); // Brief delay for pin to stabilize
-    if (g_mcp23S17Connected && mcp.digitalRead(MCP_FUNC_PIN) == LOW) {
-        // Function key is pressed - skip BLE initialization
-        g_skipBleInit = true;
-        Serial.println("[INIT] FUNC key detected at startup - BLE will be skipped...");
-        unsigned long pressStartTime = millis();
+// --- Common Countdown Function ---
+// Perform countdown display with LED feedback
+// startSeconds: countdown start value (e.g., 5 for "5,4,3,2,1")
+// totalSeconds: total duration to wait (must be >= startSeconds)
+// Returns: true if completed, false if key released early
+bool performCountdown(int startSeconds, int totalSeconds) {
+    unsigned long pressStartTime = millis();
 
-        // LED & Display feedback: Show countdown
-        // 7-segment: 1, 2, 3, 4, 5
-        // LED colors: Red → Green → Blue → Yellow → Magenta
-        while (mcp.digitalRead(MCP_FUNC_PIN) == LOW && (millis() - pressStartTime < 5000)) {
-            unsigned long elapsed = millis() - pressStartTime;
-            int seconds = (int)(elapsed / 1000) + 1;
+    while (mcp.digitalRead(MCP_FUNC_PIN) == LOW && (millis() - pressStartTime < (totalSeconds * 1000UL))) {
+        unsigned long elapsed = millis() - pressStartTime;
+        int secondsLeft = startSeconds - (int)(elapsed / 1000);
 
+        if (secondsLeft > 0) {
             // Update 7-segment display with countdown
-            g_display->showNumberDec(seconds);
+            g_display->showNumberDec(secondsLeft);
 
-            // Change LED color every second
-            switch (seconds) {
-                case 1:
-                    setLedColor(true, false, false);  // Red
-                    break;
-                case 2:
-                    setLedColor(false, true, false);  // Green
-                    break;
-                case 3:
-                    setLedColor(false, false, true);  // Blue
-                    break;
-                case 4:
-                    setLedColor(true, true, false);    // Yellow
-                    break;
-                case 5:
-                    setLedColor(true, false, true);   // Magenta (about to reset)
-                    break;
+            // LED feedback: flash yellow/orange based on urgency
+            bool ledOn = ((elapsed / 200) % 2) == 0;
+            if (secondsLeft <= 2) {
+                // Last 2 seconds: faster red flash
+                setLedColor(ledOn, false, false);
+            } else if (secondsLeft == 3) {
+                // 3 seconds: yellow flash
+                setLedColor(ledOn, ledOn, false);
+            } else {
+                // 4+ seconds: green/orange flash
+                setLedColor(ledOn, ledOn ? false : true, false);
             }
-            delay(100);
         }
-
-        unsigned long pressDuration = millis() - pressStartTime;
-
-        if (pressDuration >= 5000) {
-            // Long press (5+ seconds) -> Reset settings to defaults
-            // LED & Display feedback: Show "RESET" pattern
-            Serial.println("[INIT] Factory reset initiated - LED feedback active");
-            g_display->clear();
-            for (int i = 0; i < 10; i++) {
-                setLedColor(true, true, true);  // White
-                g_display->showNumberDec(8888);  // Show "8888" during reset
-                delay(100);
-                setLedColor(false, false, false);  // Off
-                g_display->clear();
-                delay(100);
-            }
-            extern void resetToFactoryDefaults();
-            resetToFactoryDefaults();
-        } else {
-            // Short press -> Enter test mode
-            // Turn off LED and clear display
-            setLedColor(false, false, false);
-            g_display->clear();
-            g_displayMode = DISPLAY_MODE_TEST;
-            g_testDisplayIndex = 1;
-            Serial.println("[INIT] FUNC key short press - TEST MODE ACTIVATED");
-        }
+        delay(50);
     }
+
+    // Check if key was released early
+    if (mcp.digitalRead(MCP_FUNC_PIN) == HIGH) {
+        return false; // Aborted
+    }
+
+    return true; // Completed
 }
 
 // --- Function Key Processing (Mode Switch) ---
@@ -215,6 +204,8 @@ void processFunctionKey() {
     static unsigned long lastDebounce = 0;
     static bool lastState = HIGH;
     static bool debouncedState = HIGH;
+    static bool inLongPressSequence = false;
+    static unsigned long pressStartTime = 0;
 
     // Read from MCP23S17 GP7
     bool reading = mcp.digitalRead(MCP_FUNC_PIN);
@@ -231,29 +222,93 @@ void processFunctionKey() {
 
         // Only process on press (LOW)
         if (debouncedState == LOW) {
-            Serial.println("[FUNC] SW8 pressed - Mode change triggered");
-            if (g_displayMode == DISPLAY_MODE_TEST) {
-                // Test mode: cycle through test displays
-                g_testDisplayIndex++;
-                if (g_testDisplayIndex > 10) {
-                    g_testDisplayIndex = 1;
-                }
-                extern void updateTestDisplay();
-                updateTestDisplay();
-                Serial.printf("[TEST] Display %d\n", g_testDisplayIndex);
-            } else {
-                // Normal mode: switch display mode (cycle through TIME, DATE, WEEKDAY)
-                if (g_displayMode >= DISPLAY_MODE_WEEKDAY) {
-                    g_displayMode = DISPLAY_MODE_TIME;
-                } else {
-                    g_displayMode = (DisplayMode)(g_displayMode + 1);
-                }
+            // Key pressed - start timing
+            pressStartTime = millis();
+            inLongPressSequence = false;
+            logPrint("FUNC", "SW8 pressed");
+        } else {
+            // Key released
+            if (!inLongPressSequence) {
+                // Short press - mode change OR maintenance menu navigation
+                extern MaintenanceState g_maintenanceState;
 
-                // Update display immediately
+                if (g_maintenanceState.active) {
+                    // Maintenance mode: cycle through menus
+                    logPrint("FUNC", "Maintenance mode - cycling menu");
+                    g_maintenanceState.selectedMenuIndex++;
+                    if (g_maintenanceState.selectedMenuIndex >= MAINTENANCE_MENU_COUNT) {
+                        g_maintenanceState.selectedMenuIndex = 0;
+                    }
+                    g_maintenanceState.currentMenu = static_cast<MaintenanceMenu>(g_maintenanceState.selectedMenuIndex);
+                    g_maintenanceState.lastInteractionMillis = millis();
+                    updateMaintenanceDisplay();
+                } else {
+                    // Normal mode: mode change
+                    logPrint("FUNC", "Short press - Mode change triggered");
+                    if (g_displayMode == DISPLAY_MODE_TEST) {
+                        // Test mode: cycle through test displays
+                        g_testDisplayIndex++;
+                        if (g_testDisplayIndex > TEST_PATTERN_COUNT) {
+                            g_testDisplayIndex = TEST_DISPLAY_MIN_INDEX;
+                        }
+                        extern void updateTestDisplay();
+                        updateTestDisplay();
+                        logPrint("TEST", "Display %d", g_testDisplayIndex);
+                    } else {
+                        // Normal mode: switch display mode (cycle through TIME, DATE, WEEKDAY)
+                        if (g_displayMode >= DISPLAY_MODE_WEEKDAY) {
+                            g_displayMode = DISPLAY_MODE_TIME;
+                        } else {
+                            g_displayMode = (DisplayMode)(g_displayMode + 1);
+                        }
+
+                        // Record mode change time for auto-return timeout
+                        extern unsigned long g_lastModeChangeMillis;
+                        g_lastModeChangeMillis = millis();
+
+                        // Update display immediately
+                        extern void updateDisplayForCurrentMode();
+                        updateDisplayForCurrentMode();
+
+                        logPrint("FUNC", "Mode changed to: %d", g_displayMode);
+                    }
+                }
+            } else if (inLongPressSequence) {
+                // User released during countdown - restore display
                 extern void updateDisplayForCurrentMode();
                 updateDisplayForCurrentMode();
+            }
+            inLongPressSequence = false;
+            g_showingCountdown = false;
+        }
+    }
 
-                Serial.printf("[FUNC] Mode changed to: %d\n", g_displayMode);
+    // Check for long press while key is held
+    if (debouncedState == LOW && !inLongPressSequence) {
+        unsigned long pressDuration = millis() - pressStartTime;
+
+        // Start countdown sequence after 2 seconds
+        if (pressDuration >= 2000) {
+            inLongPressSequence = true;
+            g_showingCountdown = true;
+            logPrint("FUNC", "Long press detected - starting countdown");
+
+            // Perform countdown: 3,2,1 (3 seconds)
+            bool completed = performCountdown(3, 3);
+
+            if (completed) {
+                // Enter maintenance mode instead of reboot
+                logPrint("FUNC", "Maintenance mode triggered");
+                g_display->showNumberDec(0000);  // Show "0000"
+                setLedColor(true, false, false);  // Red
+                delay(500);
+
+                // Enter maintenance mode
+                enterMaintenanceMode();
+            } else {
+                // User released during countdown
+                inLongPressSequence = false;
+                g_showingCountdown = false;
             }
         }
     }

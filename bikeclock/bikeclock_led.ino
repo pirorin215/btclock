@@ -9,6 +9,59 @@
 // Weekday names for display
 static const char* WEEKDAY_NAMES[] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
 
+// Segment patterns for letters (7-segment display)
+// Bit layout: 0bGFEDCBA
+const uint8_t SEGMENT_CHARS[] = {
+    0x77, // A
+    0x7C, // B
+    0x39, // C
+    0x5E, // D
+    0x79, // E
+    0x71, // F
+    0x3D, // G
+    0x74, // H
+    0x10, // I
+    0x1E, // J
+    0x75, // K
+    0x38, // L
+    0x37, // M
+    0x54, // N
+    0x5C, // O
+    0x73, // P
+    0x67, // Q
+    0x50, // R
+    0x6C, // S
+    0x78, // T
+    0x1C, // U
+    0x3E, // V
+    0x2A, // W
+    0x76, // X
+    0x6E, // Y
+    0x1B  // Z
+};
+
+// Test mode display patterns
+static const char* TEST_PATTERNS[] = {
+    "1234",  // 1
+    "4567",  // 2
+    " 89",   // 3
+    "SUN",   // 4
+    "MON",   // 5
+    "TUE",   // 6
+    "WED",   // 7
+    "THU",   // 8
+    "FRI",   // 9
+    "SAT",   // 10
+    "ABCD",  // 11
+    "EFGH",  // 12
+    "IJKL",  // 13
+    "MNOP",  // 14
+    "QRST",  // 15
+    "UVWX",  // 16
+    "YZ",    // 17
+};
+const int TEST_PATTERN_COUNT = sizeof(TEST_PATTERNS) / sizeof(TEST_PATTERNS[0]);
+
 // LED blink timing
 unsigned long g_lastLedBlink = 0;
 bool g_ledBlinkState = false;
@@ -28,7 +81,7 @@ void setupLed() {
     // Set initial state
     g_currentLedState = LED_STATE_BOOT;
 
-    Serial.println("[INIT] Onboard LED OK");
+    logPrint("INIT", "Onboard LED OK");
 }
 
 // --- Set LED Color ---
@@ -45,13 +98,13 @@ void setLedState(LedState state) {
     if (g_currentLedState != state) {
         g_currentLedState = state;
         g_ledBlinkState = false; // Reset blink state on change
-        Serial.printf("[LED] State changed: %d\n", state);
+        logPrint("LED", "State changed: %d", state);
     }
 }
 
 // --- Set LED Error State ---
 void setLedError() {
-    Serial.println("[LED] Entering ERROR state");
+    logPrint("LED", "Entering ERROR state");
     setLedState(LED_STATE_ERROR);
 }
 
@@ -140,37 +193,6 @@ void updateLed() {
 
 // --- 7-Segment LED Display Functions ---
 
-// Segment patterns for letters (7-segment display)
-// Bit layout: 0bGFEDCBA
-const uint8_t SEGMENT_CHARS[] = {
-    0x77, // A (0b01110111)
-    0x7C, // B (0b01111100)
-    0x39, // C (0b00111001)
-    0x5E, // D (0b01011110)
-    0x79, // E (0b01111001)
-    0x71, // F (0b01110001)
-    0x3D, // G (0b00111101)
-    0x76, // H (0b01110110)
-    0x10, // I (0b00010000) = E segment only (bottom-left)
-    0x38, // J (0b00111000)
-    0x00, // K (unused)
-    0x38, // L (0b00111000)
-    0x37, // M (0b00110111) = same as N
-    0x37, // N (0b00110111)
-    0x3F, // O (0b00111111)
-    0x73, // P (0b01110011)
-    0x00, // Q (unused)
-    0x50, // R (0b01010000)
-    0x6D, // S (0b01101101)
-    0x78, // T (0b01111000)
-    0x3E, // U (0b00111110)
-    0x00, // V (unused)
-    0x3E, // W (0b00111110) = same as U
-    0x00, // X (unused)
-    0x00, // Y (unused)
-    0x00  // Z (unused)
-};
-
 // --- Display Mode Switching ---
 void updateDisplayForCurrentMode() {
     switch (g_displayMode) {
@@ -237,89 +259,64 @@ void updateWeekdayDisplay() {
     uint8_t data[] = { 0x00, 0x00, 0x00, 0x00 };
 
     // Display: "MON " (left-aligned, 3 letters)
-    data[0] = SEGMENT_CHARS[name[0] - 'A'];
-    data[1] = SEGMENT_CHARS[name[1] - 'A'];
-    data[2] = SEGMENT_CHARS[name[2] - 'A'];
-    data[3] = 0x00; // 4th digit is blank
+    encodeStringToSegments(name, data);
 
     g_display->setSegments(data);
 }
 
-// --- Test Display Mode ---
-void updateTestDisplay() {
+// --- Version Display Function ---
+void displayVersion() {
     uint8_t data[] = { 0x00, 0x00, 0x00, 0x00 };
 
-    switch (g_testDisplayIndex) {
-        case 1: // 0123
-            data[0] = g_display->encodeDigit(0);
-            data[1] = g_display->encodeDigit(1);
-            data[2] = g_display->encodeDigit(2);
-            data[3] = g_display->encodeDigit(3);
-            break;
+    // Display version
+    data[0] = g_display->encodeDigit(FIRMWARE_VERSION_MAJOR) | 0x80;  // メジャー + 小数点
+    data[1] = g_display->encodeDigit(FIRMWARE_VERSION_MINOR);           // マイナー
+    data[2] = g_display->encodeDigit(FIRMWARE_VERSION_PATCH / 10);       // パッチ（十の位）
+    data[3] = g_display->encodeDigit(FIRMWARE_VERSION_PATCH % 10);       // パッチ（一の位）
 
-        case 2: // 4567
-            data[0] = g_display->encodeDigit(4);
-            data[1] = g_display->encodeDigit(5);
-            data[2] = g_display->encodeDigit(6);
-            data[3] = g_display->encodeDigit(7);
-            break;
+    g_display->setSegments(data);
+}
 
-        case 3: // 89 (blank, blank, 8, 9)
-            data[0] = 0x00;
-            data[1] = 0x00;
-            data[2] = g_display->encodeDigit(8);
-            data[3] = g_display->encodeDigit(9);
-            break;
-
-        case 4: // Sunday
-            data[0] = SEGMENT_CHARS['S' - 'A'];
-            data[1] = SEGMENT_CHARS['U' - 'A'];
-            data[2] = SEGMENT_CHARS['N' - 'A'];
-            data[3] = 0x00;
-            break;
-
-        case 5: // Monday
-            data[0] = SEGMENT_CHARS['M' - 'A'];
-            data[1] = SEGMENT_CHARS['O' - 'A'];
-            data[2] = SEGMENT_CHARS['N' - 'A'];
-            data[3] = 0x00;
-            break;
-
-        case 6: // Tuesday
-            data[0] = SEGMENT_CHARS['T' - 'A'];
-            data[1] = SEGMENT_CHARS['U' - 'A'];
-            data[2] = SEGMENT_CHARS['E' - 'A'];
-            data[3] = 0x00;
-            break;
-
-        case 7: // Wednesday
-            data[0] = SEGMENT_CHARS['W' - 'A'];
-            data[1] = SEGMENT_CHARS['E' - 'A'];
-            data[2] = SEGMENT_CHARS['D' - 'A'];
-            data[3] = 0x00;
-            break;
-
-        case 8: // Thursday
-            data[0] = SEGMENT_CHARS['T' - 'A'];
-            data[1] = SEGMENT_CHARS['H' - 'A'];
-            data[2] = SEGMENT_CHARS['U' - 'A'];
-            data[3] = 0x00;
-            break;
-
-        case 9: // Friday
-            data[0] = SEGMENT_CHARS['F' - 'A'];
-            data[1] = SEGMENT_CHARS['R' - 'A'];
-            data[2] = SEGMENT_CHARS['I' - 'A'];
-            data[3] = 0x00;
-            break;
-
-        case 10: // Saturday
-            data[0] = SEGMENT_CHARS['S' - 'A'];
-            data[1] = SEGMENT_CHARS['A' - 'A'];
-            data[2] = SEGMENT_CHARS['T' - 'A'];
-            data[3] = 0x00;
-            break;
+// --- Encode String to 7-Segment Data ---
+// str: Input string (e.g., "SUN", "ABCD", "1234")
+// data: Output array (4 elements) - will be filled with segment data
+// Supported characters: A-Z, 0-9, space (0x00 for unknown chars)
+void encodeStringToSegments(const char* str, uint8_t* data) {
+    // Initialize with blanks
+    for (int i = 0; i < 4; i++) {
+        data[i] = 0x00;
     }
 
+    // Process each character (max 4)
+    for (int i = 0; i < 4 && str[i] != '\0'; i++) {
+        char c = str[i];
+
+        if (c >= 'A' && c <= 'Z') {
+            // Uppercase letters
+            data[i] = SEGMENT_CHARS[c - 'A'];
+        } else if (c >= 'a' && c <= 'z') {
+            // Lowercase letters - convert to uppercase
+            data[i] = SEGMENT_CHARS[c - 'a'];
+        } else if (c >= '0' && c <= '9') {
+            // Digits
+            data[i] = g_display->encodeDigit(c - '0');
+        } else if (c == ' ') {
+            // Space - blank
+            data[i] = 0x00;
+        } else {
+            // Unknown character - blank
+            data[i] = 0x00;
+        }
+    }
+}
+
+// --- Test Display Mode ---
+void updateTestDisplay() {
+    // Convert to 0-based index and ensure bounds
+    int index = (g_testDisplayIndex - 1) % TEST_PATTERN_COUNT;
+
+    // Encode and display
+    uint8_t data[4] = {0};
+    encodeStringToSegments(TEST_PATTERNS[index], data);
     g_display->setSegments(data);
 }

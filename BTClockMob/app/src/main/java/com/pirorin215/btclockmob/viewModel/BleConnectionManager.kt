@@ -42,6 +42,9 @@ class BleConnectionManager(
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
 
+    // Flag to track if user initiated disconnect (power off, bike turned off, etc.)
+    private var userInitiatedDisconnect = false
+
     // The internal _connectionState is removed, as we update the external _connectionStateFlow
     // private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     // val connectionState = _connectionState.asStateFlow() // No longer exposed
@@ -60,6 +63,10 @@ class BleConnectionManager(
             // Handle disconnection signal
             when (state) {
                 is ConnectionState.Disconnected, is ConnectionState.Error -> {
+                    // For normal disconnections (power off, bike turned off), set flag to prevent reconnection
+                    if (state is ConnectionState.Disconnected) {
+                        userInitiatedDisconnect = true
+                    }
                     scope.launch { _disconnectSignal.emit(Unit) }
                 }
                 else -> {}
@@ -68,13 +75,23 @@ class BleConnectionManager(
             when (state) {
                 is ConnectionState.Connected -> {
                     logManager.addLog("Connected to device")
+                    userInitiatedDisconnect = false // Reset flag on successful connection
                     repository.requestMtu(517) // Request larger MTU for faster transfers
                 }
                 is ConnectionState.Disconnected -> {
-                    logManager.addLog("Disconnected from device")
+                    // Clean up resources
+                    repository.disconnect()
+                    repository.close()
+
+                    // Reconnect if NOT user initiated (e.g., connection error)
+                    if (!userInitiatedDisconnect) {
+                        scope.launch {
+                            delay(com.pirorin215.btclockmob.constants.TimeConstants.RECONNECT_DELAY_MS)
+                            restartScan(forceScan = true)
+                        }
+                    }
                 }
                 is ConnectionState.Error -> {
-                    logManager.addLog("Connection error: ${state.message}", LogLevel.ERROR)
                     // Ensure full disconnection and cleanup
                     repository.disconnect()
                     repository.close()
@@ -86,7 +103,6 @@ class BleConnectionManager(
                     // - バッテリー消費: 許容範囲内
                     scope.launch {
                         delay(com.pirorin215.btclockmob.constants.TimeConstants.RECONNECT_DELAY_MS)
-                        logManager.addDebugLog("Attempting reconnection...")
                         restartScan(forceScan = true)
                     }
                 }
@@ -115,7 +131,7 @@ class BleConnectionManager(
 
         // Listen for devices found by the background scanning service
         scope.launch {
-            BleScanServiceManager.deviceFoundFlow.onEach { device ->
+            BleScanServiceManager.deviceFoundFlow.collect { device ->
                 logManager.addLog("Device found: ${device.name}")
                 // Use the external connection state flow to check current state
                 if (_connectionStateFlow.value is ConnectionState.Disconnected) {
@@ -123,7 +139,7 @@ class BleConnectionManager(
                 } else {
                     logManager.addDebugLog("Already connected. Skipping.")
                 }
-            }.launchIn(this)
+            }
         }
     }
 
@@ -162,11 +178,13 @@ class BleConnectionManager(
 
     fun disconnect() {
         logManager.addDebugLog("Disconnect requested")
+        userInitiatedDisconnect = true // Set flag to prevent reconnection
         repository.disconnect()
     }
 
     fun forceReconnect() {
         logManager.addLog("Force reconnect")
+        userInitiatedDisconnect = false // Reset flag to allow reconnection
         scope.launch {
             disconnect()
             delay(500L) // Give a short delay for the stack to clear

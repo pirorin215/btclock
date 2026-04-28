@@ -15,15 +15,24 @@ TM1637Display* g_display = nullptr;
 volatile uint32_t g_currentTimestamp = 0;  // Unix timestamp
 Adafruit_MCP23X17 mcp;  // MCP23S17 I/O expander (SPI)
 bool g_mcp23S17Connected = false;  // MCP23S17 connection status
-bool g_skipBleInit = false;  // Skip BLE initialization (for factory reset/test mode)
 bool g_displayingKeyCodes = false;  // Currently displaying key codes (skip time display)
 uint16_t g_displayingKeyCode = 0;  // Currently displaying HID key code (0 = none)
 unsigned long g_keyCodeDisplayEndTime = 0;  // When to stop displaying key code
+bool g_showingCountdown = false;  // Currently showing countdown (skip time display)
 unsigned long g_lastCounterMillis = 0;  // Last time internal counter was updated
 unsigned long g_currentMillis = 0;  // Current time for this loop iteration
+unsigned long g_startupMillis = 0;  // Startup time (for log timestamps)
 LedState g_currentLedState = LED_STATE_BOOT;
 DisplayMode g_displayMode = DISPLAY_MODE_TIME;  // Initial mode: time display
-int g_testDisplayIndex = 1;  // Test mode display index (1-10)
+int g_testDisplayIndex = TEST_DISPLAY_MIN_INDEX;  // Test mode display index
+
+// Maintenance mode state
+MaintenanceState g_maintenanceState = {
+    false,                     // active
+    MAINTENANCE_MENU_CANCEL,    // currentMenu
+    0,                         // lastInteractionMillis
+    0                          // selectedMenuIndex
+};
 
 // External BLE characteristics
 extern BLECharacteristic bleSwitchNotifyCharacteristic;
@@ -31,7 +40,6 @@ extern BLECharacteristic bleSwitchNotifyCharacteristic;
 // --- External Functions (from bikeclock_hid.ino) ---
 void setupMCP23S17();
 void processHidSwitches();
-void checkStartupFuncKey();
 void processFunctionKey();
 
 // --- HID Switch Definitions ---
@@ -53,6 +61,9 @@ bool g_timeSynced = false;
 
 // Date caching (to avoid redundant calculations)
 DateCache g_dateCache = {0, 0, 0, 0, false};
+
+// Display mode timeout
+unsigned long g_lastModeChangeMillis = 0;  // Last time display mode was changed
 
 // --- Time Helper Functions ---
 // g_currentTimestampは「JSTとしてのUnix timestamp」
@@ -153,12 +164,12 @@ int getWeekday() {
 
 // --- Settings Reset Function ---
 void resetKeySettingsToDefaults() {
-    Serial.println("[FACTORY_RESET] Resetting key settings to defaults...");
+    logPrint("FACTORY_RESET", "Resetting key settings to defaults...");
 
     // Format entire InternalFS to completely erase all settings
-    Serial.println("[FACTORY_RESET] Formatting InternalFS...");
+    logPrint("FACTORY_RESET", "Formatting InternalFS...");
     InternalFS.format();
-    Serial.println("[FACTORY_RESET] InternalFS formatted successfully.");
+    logPrint("FACTORY_RESET", "InternalFS formatted successfully.");
 
     // Reload default settings
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
@@ -176,14 +187,14 @@ void resetKeySettingsToDefaults() {
         hidSwitches[i].keyCode = defaultKey;
     }
 
-    Serial.println("[FACTORY_RESET] Key settings reset to defaults:");
+    logPrint("FACTORY_RESET", "Key settings reset to defaults:");
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
-        Serial.printf("[FACTORY_RESET]   SW%d KeyCode: 0x%04X\n", i + 1, hidSwitches[i].keyCode);
+        logPrint("FACTORY_RESET", "  SW%d KeyCode: 0x%04X", i + 1, hidSwitches[i].keyCode);
     }
 }
 
 void resetToFactoryDefaults() {
-    Serial.println("[FACTORY_RESET] Resetting all settings to factory defaults...");
+    logPrint("FACTORY_RESET", "Resetting all settings to factory defaults...");
 
     // Reset key settings
     resetKeySettingsToDefaults();
@@ -192,8 +203,8 @@ void resetToFactoryDefaults() {
     // Example: resetDisplaySettingsToDefaults();
     //          resetBluetoothSettingsToDefaults();
 
-    Serial.println("[FACTORY_RESET] Factory reset complete.");
-    Serial.println("[FACTORY_RESET] System will restart in 2 seconds...");
+    logPrint("FACTORY_RESET", "Factory reset complete.");
+    logPrint("FACTORY_RESET", "System will restart in 2 seconds...");
 
     // Give time for serial output to complete
     delay(2000);
@@ -214,6 +225,11 @@ void updateTimestamp() {
 
 // Update display and LED state based on time sync and connection status
 void updateDisplayAndLedState() {
+    // Skip all display updates if showing countdown
+    if (g_showingCountdown) {
+        return;
+    }
+
     // Check if displaying HID key code
     if (g_displayingKeyCode != 0) {
         // Continue displaying key code until timeout
@@ -224,12 +240,22 @@ void updateDisplayAndLedState() {
             // Timeout - clear key code display
             g_displayingKeyCode = 0;
             g_keyCodeDisplayEndTime = 0;
-            Serial.println("[HID] Key code display timeout - resuming normal display");
+            logPrint("HID", "Key code display timeout - resuming normal display");
         }
     }
 
     // Skip display update if currently showing key codes from app
     if (g_displayingKeyCodes) {
+        return;
+    }
+
+    // Auto-return to time mode after timeout (only for DATE and WEEKDAY modes)
+    if ((g_displayMode == DISPLAY_MODE_DATE || g_displayMode == DISPLAY_MODE_WEEKDAY) &&
+        (g_currentMillis - g_lastModeChangeMillis >= MODE_AUTO_RETURN_TIMEOUT_MS)) {
+        logPrint("MODE", "Auto-returning to time mode (timeout)");
+        g_displayMode = DISPLAY_MODE_TIME;
+        g_lastModeChangeMillis = g_currentMillis;
+        updateDisplayForCurrentMode();
         return;
     }
 
@@ -273,7 +299,10 @@ void setup() {
     // while (!Serial && (millis() - startTime < 5000)) {
     // }
 
-    Serial.println("[BIKECLOCK] " __DATE__ " " __TIME__);
+    // Initialize logging first
+    setupLog();
+
+    logPrint("BIKECLOCK", __DATE__ " " __TIME__);
 
     // Wait for power to stabilize and MCP23S17 to wake up properly
     // Especially important when power is supplied via USB/Ignition
@@ -288,49 +317,49 @@ void setup() {
         hidSwitches[i].lastDebounceTime = 0;
         hidSwitches[i].state = HID_STATE_IDLE;
     }
-    Serial.println("[INIT] Switches OK");
+    logPrint("INIT", "Switches OK");
 
     // Initialize display BEFORE checking FUNC key (so we can show countdown)
     g_display = new TM1637Display(LED_CLK_GPIO, LED_DIO_GPIO);
     g_display->setBrightness(0x0F);
     g_display->clear();
-    g_display->showNumberDec(8888);
-    Serial.println("[INIT] Display OK");
+    logPrint("INIT", "Display OK");
 
-    // Check if function key is held down during startup
-    checkStartupFuncKey();
+    // Display firmware version for 1 second at startup
+    logPrint("INIT", "Displaying firmware version...");
+    displayVersion();
+    delay(1000);
 
     setupLed();
 
-    // Only initialize BLE if not in factory reset/test mode
-    if (!g_skipBleInit) {
-        setupBLE();
-        g_lastCounterMillis = millis();
-        Serial.println("[INIT] Waiting for BLE...");
-    } else {
-        Serial.println("[INIT] BLE initialization skipped (factory reset/test mode)");
-        g_lastCounterMillis = millis();
-    }
+    // Initialize BLE
+    setupBLE();
+    g_lastCounterMillis = millis();
+    logPrint("INIT", "Waiting for BLE...");
 }
 
 void loop() {
     // Get current time once for this loop iteration
     g_currentMillis = millis();
 
-    // Update onboard LED
-    updateLed();
-
-    // Process function key (mode switch)
+    // Process function key (mode switch) - must be called first
     processFunctionKey();
 
-    // Process HID switches
-    processHidSwitches();
+    // Process maintenance mode if active
+    if (!processMaintenanceMode()) {
+        // If maintenance mode is not active, process normal operations
+        // Update onboard LED
+        updateLed();
 
-    // System utilities
-    updateTimestamp();
+        // Process HID switches
+        processHidSwitches();
 
-    // Display and LED update
-    updateDisplayAndLedState();
+        // System utilities
+        updateTimestamp();
+
+        // Display and LED update
+        updateDisplayAndLedState();
+    }
 
     delay(10);
 }

@@ -10,6 +10,11 @@
 
 using namespace Adafruit_LittleFS_Namespace;
 
+// --- Firmware Version Information ---
+#define FIRMWARE_VERSION_MAJOR 1
+#define FIRMWARE_VERSION_MINOR 1
+#define FIRMWARE_VERSION_PATCH 6
+
 // --- GPIO Pin Definitions ---
 #define LED_DIO_GPIO     D4   // TM1637 DIO pin (Physical SDA pin)
 #define LED_CLK_GPIO     D5   // TM1637 CLK pin (Physical SCL pin)
@@ -95,6 +100,26 @@ enum DisplayMode {
     DISPLAY_MODE_COUNT      // Number of display modes (for bounds checking)
 };
 
+// --- Test Mode Constants ---
+#define TEST_DISPLAY_MIN_INDEX 1
+extern const int TEST_PATTERN_COUNT;  // Automatically calculated from TEST_PATTERNS array
+
+// --- Maintenance Mode Menu ---
+enum MaintenanceMenu {
+    MAINTENANCE_MENU_CANCEL,        // Cancel (normal boot)
+    MAINTENANCE_MENU_TEST,          // Test mode
+    MAINTENANCE_MENU_DFU,           // DFU mode
+    MAINTENANCE_MENU_FACTORY_RESET, // Factory reset
+    MAINTENANCE_MENU_COUNT          // Number of menus
+};
+
+struct MaintenanceState {
+    bool active;                           // Maintenance mode is active
+    MaintenanceMenu currentMenu;           // Current menu selection
+    unsigned long lastInteractionMillis;   // Last interaction time (for timeout)
+    uint8_t selectedMenuIndex;            // Current menu index (0-based)
+};
+
 // --- Global Variables ---
 extern TM1637Display* g_display;
 extern volatile uint32_t g_currentTimestamp;  // Unix timestamp
@@ -107,6 +132,10 @@ extern bool g_skipBleInit;                   // Skip BLE initialization (for fac
 extern bool g_displayingKeyCodes;            // Currently displaying key codes (skip time display)
 extern uint16_t g_displayingKeyCode;         // Currently displaying HID key code (0 = none)
 extern unsigned long g_keyCodeDisplayEndTime; // When to stop displaying key code
+extern unsigned long g_startupMillis;        // Startup time (for log timestamps)
+
+// Maintenance mode
+extern MaintenanceState g_maintenanceState;  // Maintenance mode state
 
 // Date cache structure
 struct DateCache {
@@ -118,6 +147,10 @@ struct DateCache {
 };
 
 extern DateCache g_dateCache;
+
+// Display mode timeout
+extern unsigned long g_lastModeChangeMillis;  // Last time display mode was changed
+#define MODE_AUTO_RETURN_TIMEOUT_MS 5000      // Auto-return to time mode after 5 seconds
 
 struct HidSwitch {
     uint8_t gpio;
@@ -132,6 +165,7 @@ struct HidSwitch {
 void setupBLE();
 void handleTimeSync(const char* command);
 void handleKeyConfig(const char* command);
+void handleGetVersion();
 void loadSettings();
 void saveSettings();
 void updateTimeDisplay();
@@ -149,6 +183,12 @@ int getWeekday();
 // Function key processing
 void processFunctionKey();
 
+// 7-segment display encoding
+void encodeStringToSegments(const char* str, uint8_t* data);  // Encode string to 7-segment data
+
+// Version display
+void displayVersion();  // Display firmware version on 7-segment LED
+
 // System utilities
 void updateTimestamp();
 void updateDisplayAndLedState();
@@ -165,5 +205,21 @@ void setLedState(LedState state);
 void setLedColor(bool red, bool green, bool blue);
 void setLedError();  // Set LED to error state
 void updateLedStateBasedOnStatus();  // Update LED state based on connection and sync status
+
+// Maintenance mode functions
+void enterMaintenanceMode();
+void exitMaintenanceMode();
+void updateMaintenanceDisplay();
+bool processMaintenanceMode();
+
+// Logging functions
+void setupLog();
+void logPrint(const char* tag, const char* format, ...);
+void logPrintRaw(const char* format, ...);
+#define logPrintln(format, ...) logPrint("", format, ##__VA_ARGS__)
+
+// DFU mode functions
+void enterDfuMode();
+void startOtaDfuMode();
 
 #endif // BIKECLOCK_H

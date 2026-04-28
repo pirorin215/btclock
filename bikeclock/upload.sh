@@ -18,7 +18,7 @@ check_bikeclock_port
 echo "Uploading BikeClock to $BIKECLOCK_PORT..."
 echo "========================================"
 
-UPLOAD_COMMAND="arduino-cli upload -p $BIKECLOCK_PORT --fqbn Seeeduino:nrf52:xiaonRF52840 bikeclock.ino"
+UPLOAD_COMMAND="arduino-cli upload -p $BIKECLOCK_PORT --fqbn Seeeduino:nrf52:xiaonRF52840 --input-dir build bikeclock.ino"
 
 $UPLOAD_COMMAND
 UPLOAD_EXIT_CODE=$?

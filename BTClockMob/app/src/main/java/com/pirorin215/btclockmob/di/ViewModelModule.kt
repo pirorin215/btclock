@@ -12,6 +12,7 @@ import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.KeyCodeSettingsRepository
+import com.pirorin215.btclockmob.data.BleRepository
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
 
