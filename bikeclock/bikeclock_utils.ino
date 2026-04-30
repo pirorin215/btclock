@@ -21,8 +21,10 @@ void logPrint(const char* tag, const char* format, ...) {
     // Print timestamp [SSSS.mmm]
     Serial.printf("[%4lu.%03lu] ", elapsed / 1000, elapsed % 1000);
 
-    // Print tag
-    Serial.printf("[%s] ", tag);
+    // Print tag if provided
+    if (tag != nullptr && tag[0] != '\0') {
+        Serial.printf("[%s] ", tag);
+    }
 
     // Print formatted message
     char buffer[256];
@@ -32,6 +34,22 @@ void logPrint(const char* tag, const char* format, ...) {
     va_end(args);
 
     Serial.println(buffer);
+}
+
+/**
+ * Print a message with timestamp but without extra newline if needed
+ * (Internal helper)
+ */
+void logPrintRaw(const char* format, ...) {
+    unsigned long elapsed = millis() - g_startupMillis;
+    Serial.printf("[%4lu.%03lu] ", elapsed / 1000, elapsed % 1000);
+
+    va_list args;
+    va_start(args, format);
+    char buffer[256];
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    Serial.print(buffer);
 }
 
 // 7-segment digit patterns (0-9)
@@ -104,7 +122,7 @@ void encodeStringToSegments(const char* str, uint8_t* data) {
  * Activates maintenance mode for system configuration
  */
 void enterMaintenanceMode() {
-    Serial.println("[MAINTENANCE] Entering maintenance mode");
+    logPrint("MAINTENANCE", "Entering maintenance mode");
     g_maintenanceState.active = true;
     g_maintenanceState.currentMenu = MAINTENANCE_MENU_CANCEL;
     g_maintenanceState.selectedMenuIndex = 0;
@@ -119,7 +137,7 @@ void enterMaintenanceMode() {
  * Deactivates maintenance mode and returns to normal operation
  */
 void exitMaintenanceMode() {
-    Serial.println("[MAINTENANCE] Exiting maintenance mode");
+    logPrint("MAINTENANCE", "Exiting maintenance mode");
     g_maintenanceState.active = false;
 
     // Return to time display
@@ -189,17 +207,17 @@ bool processMaintenanceMode() {
     // Check for 3-second timeout
     if (currentMillis - g_maintenanceState.lastInteractionMillis >= 3000) {
         // Execute selected menu action
-        Serial.printf("[MAINTENANCE] Menu %d selected (3 second timeout)\n",
+        logPrint("MAINTENANCE", "Menu %d selected (3 second timeout)",
                      g_maintenanceState.selectedMenuIndex + 1);
 
         switch (g_maintenanceState.currentMenu) {
             case MAINTENANCE_MENU_CANCEL:
-                Serial.println("[MAINTENANCE] Action: Cancel (normal boot)");
+                logPrint("MAINTENANCE", "Action: Cancel (normal boot)");
                 g_maintenanceState.active = false;
                 return false;  // Exit maintenance mode, continue normal boot
 
             case MAINTENANCE_MENU_TEST:
-                Serial.println("[MAINTENANCE] Action: Enter test mode");
+                logPrint("MAINTENANCE", "Action: Enter test mode");
                 g_displayMode = DISPLAY_MODE_TEST;
                 extern int g_testDisplayIndex;
                 g_testDisplayIndex = 1;
@@ -207,14 +225,14 @@ bool processMaintenanceMode() {
                 return false;  // Exit maintenance mode
 
             case MAINTENANCE_MENU_DFU:
-                Serial.println("[MAINTENANCE] Action: Enter OTA DFU mode");
+                logPrint("MAINTENANCE", "Action: Enter OTA DFU mode");
                 g_display->showNumberDec(3333);  // Show "3333"
                 delay(1000);
                 startOtaDfuMode();  // Enter Adafruit OTA DFU mode
                 break;  // Won't reach here
 
             case MAINTENANCE_MENU_FACTORY_RESET:
-                Serial.println("[MAINTENANCE] Action: Factory reset");
+                logPrint("MAINTENANCE", "Action: Factory reset");
                 g_maintenanceState.active = false;
                 resetToFactoryDefaults();  // This will reset the system
                 break;  // Won't reach here
@@ -234,9 +252,9 @@ bool processMaintenanceMode() {
  * Resets the device and starts the Nordic DFU bootloader
  */
 void enterDfuMode() {
-    Serial.println("[DFU] ========================================");
-    Serial.println("[DFU] Entering DFU Mode for OTA update");
-    Serial.println("[DFU] ========================================");
+    logPrint("DFU", "========================================");
+    logPrint("DFU", "Entering DFU Mode for OTA update");
+    logPrint("DFU", "========================================");
 
     // Visual feedback: Show "DFU" on display
     if (g_display != nullptr) {
@@ -257,7 +275,7 @@ void enterDfuMode() {
         delay(100);
     }
 
-    Serial.println("[DFU] Resetting to Nordic DFU bootloader...");
+    logPrint("DFU", "Resetting to Nordic DFU bootloader...");
     Serial.flush();
 
     // Enter OTA DFU mode using Adafruit's function
@@ -273,9 +291,9 @@ void enterDfuMode() {
  * Called from BLE command to initiate DFU mode for OTA update
  */
 void startOtaDfuMode() {
-    Serial.println("[OTA] ========================================");
-    Serial.println("[OTA] Starting OTA DFU Mode");
-    Serial.println("[OTA] ========================================");
+    logPrint("OTA", "========================================");
+    logPrint("OTA", "Starting OTA DFU Mode");
+    logPrint("OTA", "========================================");
 
     // Visual feedback: Show "9999" on display
     if (g_display != nullptr) {
@@ -296,7 +314,7 @@ void startOtaDfuMode() {
         delay(200);
     }
 
-    Serial.println("[OTA] Disconnecting BLE and entering DFU mode...");
+    logPrint("OTA", "Disconnecting BLE and entering DFU mode...");
     Serial.flush();
 
     // Disconnect BLE client

@@ -31,18 +31,18 @@ bool g_deviceConnected = false;
 void cccd_callback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t value) {
     (void)conn_hdl; // Unused parameter
     (void)chr; // Unused parameter
-    Serial.printf("[BIKECLOCK] CCCD updated: %u\n", value);
+    logPrint("BIKECLOCK", "CCCD updated: %u", value);
 }
 
 // HID LED callback disabled for debugging
 // void keyboardLedCallback(uint16_t conn_handle, uint8_t led_bitmap) {
 //     (void)conn_handle; // Unused parameter
-//     Serial.printf("[HID] Keyboard LED state: 0x%02X\n", led_bitmap);
+//     logPrint("HID", "Keyboard LED state: 0x%02X", led_bitmap);
 // }
 
 void ble_central_connect(uint16_t conn_handle) {
     (void)conn_handle; // Unused parameter
-    Serial.println("[BIKECLOCK] Device connected");
+    logPrint("BIKECLOCK", "Device connected");
     g_deviceConnected = true;
 
     // Update LED state based on time sync status
@@ -52,7 +52,7 @@ void ble_central_connect(uint16_t conn_handle) {
 void ble_central_disconnect(uint16_t conn_handle, uint8_t reason) {
     (void)conn_handle; // Unused parameter
     (void)reason; // Unused parameter
-    Serial.println("[BIKECLOCK] Device disconnected");
+    logPrint("BIKECLOCK", "Device disconnected");
     g_deviceConnected = false;
 
     // Update LED state based on time sync status
@@ -68,26 +68,26 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
         memcpy(command, data, len);
         command[len] = '\0';
 
-        Serial.printf("[BIKECLOCK] Received command: %s\n", command);
+        logPrint("BIKECLOCK", "Received command: %s", command);
 
         // Parse command
         if (strncmp(command, "SET:time:", 9) == 0) {
-            Serial.println("[BIKECLOCK] Calling handleTimeSync...");
+            logPrint("BIKECLOCK", "Calling handleTimeSync...");
             handleTimeSync(command);
-            Serial.println("[BIKECLOCK] handleTimeSync returned");
+            logPrint("BIKECLOCK", "handleTimeSync returned");
         } else if (strncmp(command, "SET:keys:", 9) == 0) {
-            Serial.println("[BIKECLOCK] Calling handleKeyConfig...");
+            logPrint("BIKECLOCK", "Calling handleKeyConfig...");
             handleKeyConfig(command);
         } else if (strncmp(command, "GET:version", 11) == 0) {
-            Serial.println("[BIKECLOCK] Calling handleGetVersion...");
+            logPrint("BIKECLOCK", "Calling handleGetVersion...");
             handleGetVersion();
-            Serial.println("[BIKECLOCK] handleGetVersion returned");
+            logPrint("BIKECLOCK", "handleGetVersion returned");
         } else if (strncmp(command, "START_OTA", 9) == 0) {
-            Serial.println("[BIKECLOCK] Calling startOtaDfuMode...");
+            logPrint("BIKECLOCK", "Calling startOtaDfuMode...");
             startOtaDfuMode();
-            Serial.println("[BIKECLOCK] startOtaDfuMode returned");
+            logPrint("BIKECLOCK", "startOtaDfuMode returned");
         } else {
-            Serial.printf("[BIKECLOCK] Unknown command: %s\n", command);
+            logPrint("BIKECLOCK", "Unknown command: %s", command);
             sendResponse("ERROR: Unknown command");
         }
     }
@@ -95,16 +95,16 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
 
 // --- BLE Setup ---
 void setupBLE() {
-    Serial.println("[BIKECLOCK] ========================================");
-    Serial.println("[BIKECLOCK] BLE Initialization (HID + Custom)");
-    Serial.printf("[BIKECLOCK] Firmware Version: %s (%s)\n", FIRMWARE_VERSION_STR, FIRMWARE_VERSION_DATE);
-    Serial.println("[BIKECLOCK] BLE Service UUID: " BLE_SERVICE_UUID);
-    Serial.println("[BIKECLOCK] Command UUID: " BLE_CHAR_COMMAND_UUID);
-    Serial.println("[BIKECLOCK] Response UUID: " BLE_CHAR_RESPONSE_UUID);
-    Serial.println("[BIKECLOCK] ========================================");
+    logPrint("BIKECLOCK", "========================================");
+    logPrint("BIKECLOCK", "BLE Initialization (HID + Custom)");
+    logPrint("BIKECLOCK", "Firmware Version: %s (%s)", FIRMWARE_VERSION_STR, FIRMWARE_VERSION_DATE);
+    logPrint("BIKECLOCK", "BLE Service UUID: " BLE_SERVICE_UUID);
+    logPrint("BIKECLOCK", "Command UUID: " BLE_CHAR_COMMAND_UUID);
+    logPrint("BIKECLOCK", "Response UUID: " BLE_CHAR_RESPONSE_UUID);
+    logPrint("BIKECLOCK", "========================================");
 
     // Initialize LittleFS
-    Serial.println("[BIKECLOCK] Initializing InternalFS...");
+    logPrint("BIKECLOCK", "Initializing InternalFS...");
     InternalFS.begin();
 
     // Initialize Bluefruit with max connections
@@ -126,14 +126,14 @@ void setupBLE() {
     Bluefruit.Periph.setDisconnectCallback(ble_central_disconnect);
 
     // --- Initialize HID Service ---
-    Serial.println("[BIKECLOCK] Initializing HID Service...");
+    logPrint("BIKECLOCK", "Initializing HID Service...");
     bledis.setManufacturer("pirorin215");
     bledis.setModel("BikeClock Dual");
     bledis.begin();
     blehid.begin();
 
     // --- Initialize Custom Service (Time Sync) ---
-    Serial.println("[BIKECLOCK] Initializing Custom Service...");
+    logPrint("BIKECLOCK", "Initializing Custom Service...");
 
     // Configure ALL properties first, before calling begin()
     // Service configuration
@@ -179,19 +179,19 @@ void setupBLE() {
     Bluefruit.Advertising.setFastTimeout(30);      // 30 seconds
     Bluefruit.Advertising.start(0);                 // 0 = Don't stop advertising
 
-    Serial.println("[BIKECLOCK] ========================================");
-    Serial.println("[BIKECLOCK] ✅ BLE Initialization Complete!");
-    Serial.printf("[BIKECLOCK] Device Name: %s\n", BLE_DEVICE_NAME);
-    Serial.println("[BIKECLOCK] HID Service: ENABLED");
-    Serial.println("[BIKECLOCK] Custom Service: ENABLED");
-    Serial.println("[BIKECLOCK] Advertising started successfully!");
-    Serial.println("[BIKECLOCK] Waiting for connections...");
-    Serial.println("[BIKECLOCK] ========================================");
+    logPrint("BIKECLOCK", "========================================");
+    logPrint("BIKECLOCK", "✅ BLE Initialization Complete!");
+    logPrint("BIKECLOCK", "Device Name: %s", BLE_DEVICE_NAME);
+    logPrint("BIKECLOCK", "HID Service: ENABLED");
+    logPrint("BIKECLOCK", "Custom Service: ENABLED");
+    logPrint("BIKECLOCK", "Advertising started successfully!");
+    logPrint("BIKECLOCK", "Waiting for connections...");
+    logPrint("BIKECLOCK", "========================================");
 }
 
 // --- Time Sync Handler ---
 void handleTimeSync(const char* command) {
-    Serial.printf("[BIKECLOCK] Processing time sync command: %s\n", command);
+    logPrint("BIKECLOCK", "Processing time sync command: %s", command);
 
     // Parse timestamp: SET:time:<timestamp>
     const char* timestampStr = command + strlen("SET:time:");
@@ -211,7 +211,7 @@ void handleTimeSync(const char* command) {
         int minutes = getMinutes();
         int seconds = getSeconds();
 
-        Serial.printf("[BIKECLOCK] Time synced successfully: %02d:%02d:%02d\n",
+        logPrint("BIKECLOCK", "Time synced successfully: %02d:%02d:%02d",
                      hours, minutes, seconds);
 
         // Send success response
@@ -220,7 +220,7 @@ void handleTimeSync(const char* command) {
         // Update display immediately
         updateTimeDisplay();
     } else {
-        Serial.printf("[BIKECLOCK] Invalid timestamp: %s\n", timestampStr);
+        logPrint("BIKECLOCK", "Invalid timestamp: %s", timestampStr);
         sendResponse("ERROR: Invalid timestamp format");
         setLedError();
     }
@@ -228,27 +228,27 @@ void handleTimeSync(const char* command) {
 
 // --- Version Handler ---
 void handleGetVersion() {
-    Serial.println("[BIKECLOCK] Processing GET:version command");
+    logPrint("BIKECLOCK", "Processing GET:version command");
 
     // ファームウェアバージョンを返す（ヘッダーで定義されたバージョンを使用）
     char versionResponse[64];
     snprintf(versionResponse, sizeof(versionResponse), "OK:version:%s", FIRMWARE_VERSION_STR);
     sendResponse(versionResponse);
 
-    Serial.printf("[BIKECLOCK] Version response sent: %s\n", FIRMWARE_VERSION_STR);
+    logPrint("BIKECLOCK", "Version response sent: %s", FIRMWARE_VERSION_STR);
 }
 
 // --- Response Helper ---
 void sendResponse(const char* message) {
     // Send notification via Command Characteristic (bidirectional)
     bleCommandCharacteristic.notify((uint8_t*)message, strlen(message));
-    Serial.printf("[BIKECLOCK] Response sent: %s\n", message);
+    logPrint("BIKECLOCK", "Response sent: %s", message);
 }
 
 // --- HID Send Functions ---
 void sendHidKeyPress(uint16_t keyCode, const char* unused) {
     // キーコードのみをログ出力（キー名はアプリ側で管理）
-    Serial.printf("[HID] Key sent: 0x%04X (%d)\n", keyCode, keyCode);
+    logPrint("HID", "Key sent: 0x%04X (%d)", keyCode, keyCode);
     Serial.flush();
 
     // Keyboard Page: 0x00-0xFF
@@ -265,7 +265,7 @@ void sendHidKeyPress(uint16_t keyCode, const char* unused) {
 }
 
 void sendHidKeyRelease(const char* unused) {
-    Serial.println("[HID] Key release");
+    logPrint("HID", "Key release");
     Serial.flush();
     
     // 両方のリリースを発行
@@ -280,7 +280,7 @@ extern HidSwitch hidSwitches[];
 // NUM_HID_SWITCHES is defined in bikeclock.ino
 
 void loadSettings() {
-    Serial.println("[BIKECLOCK] Loading settings from InternalFS...");
+    logPrint("BIKECLOCK", "Loading settings from InternalFS...");
     File file(InternalFS);
     
     if (file.open("/keys.dat", FILE_O_READ)) {
@@ -288,19 +288,19 @@ void loadSettings() {
         if (file.read((uint8_t*)savedKeys, sizeof(savedKeys)) == sizeof(savedKeys)) {
             for (int i = 0; i < NUM_HID_SWITCHES; i++) {
                 hidSwitches[i].keyCode = savedKeys[i];
-                Serial.printf("[BIKECLOCK]   SW%d KeyCode: 0x%04X\n", i + 1, hidSwitches[i].keyCode);
+                logPrint("BIKECLOCK", "  SW%d KeyCode: 0x%04X", i + 1, hidSwitches[i].keyCode);
             }
-            Serial.println("[BIKECLOCK] Settings loaded successfully.");
+            logPrint("BIKECLOCK", "Settings loaded successfully.");
         }
         file.close();
     } else {
-        Serial.println("[BIKECLOCK] No settings file found. Using defaults.");
+        logPrint("BIKECLOCK", "No settings file found. Using defaults.");
     }
     Serial.flush();
 }
 
 void saveSettings() {
-    Serial.println("[BIKECLOCK] Saving settings to InternalFS...");
+    logPrint("BIKECLOCK", "Saving settings to InternalFS...");
     InternalFS.remove("/keys.dat");
     File file(InternalFS);
     
@@ -311,9 +311,9 @@ void saveSettings() {
         }
         file.write((uint8_t*)keysToSave, sizeof(keysToSave));
         file.close();
-        Serial.println("[BIKECLOCK] Settings saved successfully.");
+        logPrint("BIKECLOCK", "Settings saved successfully.");
     } else {
-        Serial.println("[BIKECLOCK] Failed to open settings file for writing.");
+        logPrint("BIKECLOCK", "Failed to open settings file for writing.");
     }
     Serial.flush();
 }
@@ -322,8 +322,8 @@ void handleKeyConfig(const char* command) {
     // Format: SET:keys:HEX1,HEX2,HEX3,HEX4
     // Example: SET:keys:50,4F,52,51
     const char* keysStr = command + 9; // Skip "SET:keys:"
-    Serial.printf("[BIKECLOCK] Full command received: %s\n", command);
-    Serial.printf("[BIKECLOCK] Parsing key config string: \"%s\"\n", keysStr);
+    logPrint("BIKECLOCK", "Full command received: %s", command);
+    logPrint("BIKECLOCK", "Parsing key config string: \"%s\"", keysStr);
     
     char temp[64]; // バッファサイズを念のため拡張
     strncpy(temp, keysStr, sizeof(temp));
@@ -336,7 +336,7 @@ void handleKeyConfig(const char* command) {
         while(isspace(*token)) token++;
         
         hidSwitches[i].keyCode = (uint16_t)strtoul(token, NULL, 16);
-        Serial.printf("[BIKECLOCK]   SW%d (token: \"%s\") -> Parsed KeyCode: 0x%04X\n", i + 1, token, hidSwitches[i].keyCode);
+        logPrint("BIKECLOCK", "  SW%d (token: \"%s\") -> Parsed KeyCode: 0x%04X", i + 1, token, hidSwitches[i].keyCode);
         token = strtok(NULL, ",");
         i++;
     }
@@ -344,7 +344,7 @@ void handleKeyConfig(const char* command) {
     if (i == NUM_HID_SWITCHES) {
         saveSettings();
         sendResponse("OK: keys updated");
-        Serial.println("[BIKECLOCK] ✅ All 4 keys updated and saved.");
+        logPrint("BIKECLOCK", "✅ All 4 keys updated and saved.");
 
         // Visual feedback on 7-segment display
         // Show each key code in sequence (300ms each)
@@ -352,13 +352,13 @@ void handleKeyConfig(const char* command) {
         extern bool g_displayingKeyCodes;
 
         if (g_display != nullptr) {
-            Serial.println("[BIKECLOCK] Showing visual feedback on display...");
+            logPrint("BIKECLOCK", "Showing visual feedback on display...");
 
             // Set flag to skip time display during key code show
             g_displayingKeyCodes = true;
 
             for (int j = 0; j < NUM_HID_SWITCHES; j++) {
-                Serial.printf("[BIKECLOCK] Displaying SW%d: 0x%04X (%d)\n", j + 1, hidSwitches[j].keyCode, hidSwitches[j].keyCode);
+                logPrint("BIKECLOCK", "Displaying SW%d: 0x%04X (%d)", j + 1, hidSwitches[j].keyCode, hidSwitches[j].keyCode);
                 g_display->showNumberDec(hidSwitches[j].keyCode);  // Show key code as decimal
                 delay(300);  // Display for 300ms
             }
@@ -366,10 +366,10 @@ void handleKeyConfig(const char* command) {
             // Clear flag to resume time display
             g_displayingKeyCodes = false;
 
-            Serial.println("[BIKECLOCK] Visual feedback complete.");
+            logPrint("BIKECLOCK", "Visual feedback complete.");
         }
     } else {
-        Serial.printf("[BIKECLOCK] ❌ Error: Only %d keys parsed. Expected %d.\n", i, NUM_HID_SWITCHES);
+        logPrint("BIKECLOCK", "❌ Error: Only %d keys parsed. Expected %d.", i, NUM_HID_SWITCHES);
         sendResponse("ERROR: Invalid key format");
     }
     Serial.flush();

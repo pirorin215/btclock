@@ -14,6 +14,7 @@ playServicesLocation = "21.2.0"
 kotlinxCoroutinesPlayServices = "1.7.3"
 datastorePreferences = "1.1.1"
 koin = "3.5.0"
+nordic-dfu = "2.9.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -37,6 +38,7 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 google-play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "kotlinxCoroutinesPlayServices" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastorePreferences" }
+nordic-dfu = { group = "no.nordicsemi.android", name = "dfu", version.ref = "nordic-dfu" }
 
 # Koin for DI
 koin-android = { group = "io.insert-koin", name = "koin-android", version.ref = "koin" }

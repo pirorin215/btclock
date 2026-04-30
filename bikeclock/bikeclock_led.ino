@@ -28,7 +28,7 @@ void setupLed() {
     // Set initial state
     g_currentLedState = LED_STATE_BOOT;
 
-    Serial.println("[INIT] Onboard LED OK");
+    logPrint("INIT", "Onboard LED OK");
 }
 
 // --- Set LED Color ---
@@ -45,13 +45,13 @@ void setLedState(LedState state) {
     if (g_currentLedState != state) {
         g_currentLedState = state;
         g_ledBlinkState = false; // Reset blink state on change
-        Serial.printf("[LED] State changed: %d\n", state);
+        logPrint("LED", "State changed: %d", state);
     }
 }
 
 // --- Set LED Error State ---
 void setLedError() {
-    Serial.println("[LED] Entering ERROR state");
+    logPrint("LED", "Entering ERROR state");
     setLedState(LED_STATE_ERROR);
 }
 

@@ -206,6 +206,8 @@ void encodeStringToSegments(const char* str, uint8_t* data);
 // Logging functions
 void setupLog();
 void logPrint(const char* tag, const char* format, ...);
+void logPrintRaw(const char* format, ...);
+#define logPrintln(format, ...) logPrint("", format, ##__VA_ARGS__)
 
 // DFU mode functions
 void enterDfuMode();

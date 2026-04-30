@@ -76,7 +76,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.play.services)
 
     // DataStore for persistent settings
-    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.datastore-preferences)
+
+    // Nordic DFU
+    implementation(libs.nordic.dfu)
 
     // Koin for DI
     implementation(libs.koin.android)

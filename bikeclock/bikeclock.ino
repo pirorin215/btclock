@@ -163,12 +163,12 @@ int getWeekday() {
 
 // --- Settings Reset Function ---
 void resetKeySettingsToDefaults() {
-    Serial.println("[FACTORY_RESET] Resetting key settings to defaults...");
+    logPrint("FACTORY_RESET", "Resetting key settings to defaults...");
 
     // Format entire InternalFS to completely erase all settings
-    Serial.println("[FACTORY_RESET] Formatting InternalFS...");
+    logPrint("FACTORY_RESET", "Formatting InternalFS...");
     InternalFS.format();
-    Serial.println("[FACTORY_RESET] InternalFS formatted successfully.");
+    logPrint("FACTORY_RESET", "InternalFS formatted successfully.");
 
     // Reload default settings
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
@@ -186,14 +186,14 @@ void resetKeySettingsToDefaults() {
         hidSwitches[i].keyCode = defaultKey;
     }
 
-    Serial.println("[FACTORY_RESET] Key settings reset to defaults:");
+    logPrint("FACTORY_RESET", "Key settings reset to defaults:");
     for (int i = 0; i < NUM_HID_SWITCHES; i++) {
-        Serial.printf("[FACTORY_RESET]   SW%d KeyCode: 0x%04X\n", i + 1, hidSwitches[i].keyCode);
+        logPrint("FACTORY_RESET", "  SW%d KeyCode: 0x%04X", i + 1, hidSwitches[i].keyCode);
     }
 }
 
 void resetToFactoryDefaults() {
-    Serial.println("[FACTORY_RESET] Resetting all settings to factory defaults...");
+    logPrint("FACTORY_RESET", "Resetting all settings to factory defaults...");
 
     // Reset key settings
     resetKeySettingsToDefaults();
@@ -202,8 +202,8 @@ void resetToFactoryDefaults() {
     // Example: resetDisplaySettingsToDefaults();
     //          resetBluetoothSettingsToDefaults();
 
-    Serial.println("[FACTORY_RESET] Factory reset complete.");
-    Serial.println("[FACTORY_RESET] System will restart in 2 seconds...");
+    logPrint("FACTORY_RESET", "Factory reset complete.");
+    logPrint("FACTORY_RESET", "System will restart in 2 seconds...");
 
     // Give time for serial output to complete
     delay(2000);
@@ -239,7 +239,7 @@ void updateDisplayAndLedState() {
             // Timeout - clear key code display
             g_displayingKeyCode = 0;
             g_keyCodeDisplayEndTime = 0;
-            Serial.println("[HID] Key code display timeout - resuming normal display");
+            logPrint("HID", "Key code display timeout - resuming normal display");
         }
     }
 
@@ -291,7 +291,7 @@ void setup() {
     // Initialize logging first
     setupLog();
 
-    Serial.println("[BIKECLOCK] " __DATE__ " " __TIME__);
+    logPrint("BIKECLOCK", __DATE__ " " __TIME__);
 
     // Wait for power to stabilize and MCP23S17 to wake up properly
     // Especially important when power is supplied via USB/Ignition
@@ -306,14 +306,14 @@ void setup() {
         hidSwitches[i].lastDebounceTime = 0;
         hidSwitches[i].state = HID_STATE_IDLE;
     }
-    Serial.println("[INIT] Switches OK");
+    logPrint("INIT", "Switches OK");
 
     // Initialize display BEFORE checking FUNC key (so we can show countdown)
     g_display = new TM1637Display(LED_CLK_GPIO, LED_DIO_GPIO);
     g_display->setBrightness(0x0F);
     g_display->clear();
     g_display->showNumberDec(8888);
-    Serial.println("[INIT] Display OK");
+    logPrint("INIT", "Display OK");
 
     // Check if function key is held down during startup
     checkStartupFuncKey();
@@ -324,9 +324,9 @@ void setup() {
     if (!g_skipBleInit) {
         setupBLE();
         g_lastCounterMillis = millis();
-        Serial.println("[INIT] Waiting for BLE...");
+        logPrint("INIT", "Waiting for BLE...");
     } else {
-        Serial.println("[INIT] BLE initialization skipped (factory reset/test mode)");
+        logPrint("INIT", "BLE initialization skipped (factory reset/test mode)");
         g_lastCounterMillis = millis();
     }
 }
