@@ -1,7 +1,19 @@
 package com.pirorin215.btclockmob.viewModel
 
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.le.BluetoothLeScanner
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.net.Uri
+import android.os.Build
+import android.os.ParcelUuid
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
+import java.util.UUID
 
 /**
  * OTA状態を表すシールドクラス
@@ -37,6 +50,111 @@ class OtaViewModel(
 
     private val _otaState = MutableStateFlow<OtaState>(OtaState.Idle)
     val otaState = _otaState.asStateFlow()
+
+    // DFU device scanning
+    private val _dfuDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
+    val dfuDevices = _dfuDevices.asStateFlow()
+
+    private val _isScanning = MutableStateFlow(false)
+    val isScanning = _isScanning.asStateFlow()
+
+    private val _dfuDeviceConnected = MutableStateFlow(false)
+    val dfuDeviceConnected = _dfuDeviceConnected.asStateFlow()
+
+    // Nordic DFU Service UUID
+    private val DFU_SERVICE_UUID = UUID.fromString("00001530-1212-EFDE-1523-785FEABCD123")
+    private val DFU_CONTROL_POINT_UUID = UUID.fromString("00001531-1212-EFDE-1523-785FEABCD123")
+    private val DFU_PACKET_UUID = UUID.fromString("00001532-1212-EFDE-1523-785FEABCD123")
+
+    private var dfuGatt: BluetoothGatt? = null
+    private var dfuControlPointCharacteristic: BluetoothGattCharacteristic? = null
+    private var dfuPacketCharacteristic: BluetoothGattCharacteristic? = null
+
+    private val bluetoothManager by lazy {
+        context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    }
+
+    private val bluetoothLeScanner by lazy {
+        bluetoothManager.adapter.bluetoothLeScanner
+    }
+
+    private val scanCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult) {
+            val device = result.device
+            Log.d(TAG, "Found device: ${device.name} (${device.address})")
+
+            // Check if device name starts with "AdaDFU" or has Nordic DFU service
+            if (device.name?.startsWith("AdaDFU") == true ||
+                result.scanRecord?.serviceUuids?.contains(ParcelUuid(DFU_SERVICE_UUID)) == true) {
+
+                Log.d(TAG, "Found DFU device: ${device.name} (${device.address})")
+
+                // Add to list if not already present
+                _dfuDevices.value = _dfuDevices.value.toMutableList().apply {
+                    if (!any { it.address == device.address }) {
+                        add(device)
+                    }
+                }
+            }
+        }
+
+        override fun onBatchScanResults(results: MutableList<ScanResult>) {
+            Log.d(TAG, "Batch scan results: ${results.size} devices")
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            Log.e(TAG, "Scan failed: $errorCode")
+            _isScanning.value = false
+        }
+    }
+
+    private val gattCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            val deviceAddress = gatt.device.address
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    Log.d(TAG, "DFU device connected: $deviceAddress")
+                    _dfuDeviceConnected.value = true
+                    // Discover services
+                    gatt.discoverServices()
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    Log.d(TAG, "DFU device disconnected: $deviceAddress")
+                    _dfuDeviceConnected.value = false
+                }
+            } else {
+                Log.e(TAG, "DFU connection error: $status")
+                _dfuDeviceConnected.value = false
+            }
+        }
+
+        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.d(TAG, "DFU services discovered")
+
+                // Find DFU service
+                val dfuService = gatt.getService(DFU_SERVICE_UUID)
+                if (dfuService != null) {
+                    Log.d(TAG, "DFU service found")
+
+                    // Get characteristics
+                    dfuControlPointCharacteristic = dfuService.getCharacteristic(DFU_CONTROL_POINT_UUID)
+                    dfuPacketCharacteristic = dfuService.getCharacteristic(DFU_PACKET_UUID)
+
+                    if (dfuControlPointCharacteristic != null && dfuPacketCharacteristic != null) {
+                        Log.d(TAG, "DFU characteristics found")
+                    } else {
+                        Log.e(TAG, "DFU characteristics not found")
+                        Log.e(TAG, "  Control point: $dfuControlPointCharacteristic")
+                        Log.e(TAG, "  Packet: $dfuPacketCharacteristic")
+                    }
+                } else {
+                    Log.e(TAG, "DFU service not found")
+                }
+            } else {
+                Log.e(TAG, "Service discovery failed: $status")
+            }
+        }
+    }
 
     /**
      * OTA更新を実行
@@ -149,5 +267,70 @@ class OtaViewModel(
      */
     fun resetState() {
         _otaState.value = OtaState.Idle
+    }
+
+    /**
+     * DFUデバイスのスキャンを開始
+     */
+    @SuppressLint("MissingPermission")
+    fun startDfuDeviceScan() {
+        Log.d(TAG, "Starting DFU device scan")
+        _dfuDevices.value = emptyList()
+        _isScanning.value = true
+
+        try {
+            bluetoothLeScanner.startScan(scanCallback)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start scan", e)
+            _isScanning.value = false
+        }
+    }
+
+    /**
+     * DFUデバイスのスキャンを停止
+     */
+    @SuppressLint("MissingPermission")
+    fun stopDfuDeviceScan() {
+        Log.d(TAG, "Stopping DFU device scan")
+        _isScanning.value = false
+
+        try {
+            bluetoothLeScanner.stopScan(scanCallback)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop scan", e)
+        }
+    }
+
+    /**
+     * DFUデバイスに接続
+     */
+    @SuppressLint("MissingPermission")
+    fun connectDfuDevice(device: BluetoothDevice) {
+        Log.d(TAG, "Connecting to DFU device: ${device.name} (${device.address})")
+
+        try {
+            dfuGatt = device.connectGatt(context, false, gattCallback)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to connect to DFU device", e)
+            _dfuDeviceConnected.value = false
+        }
+    }
+
+    /**
+     * DFUデバイスから切断
+     */
+    fun disconnectDfuDevice() {
+        Log.d(TAG, "Disconnecting from DFU device")
+        dfuGatt?.close()
+        dfuGatt = null
+        dfuControlPointCharacteristic = null
+        dfuPacketCharacteristic = null
+        _dfuDeviceConnected.value = false
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopDfuDeviceScan()
+        disconnectDfuDevice()
     }
 }

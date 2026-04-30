@@ -12,6 +12,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,6 +42,19 @@ fun OtaScreen(
     val deviceVersion by bleConnectionManager.repositoryForOta.deviceVersion.collectAsStateWithLifecycle(initialValue = null)
     val otaState by otaViewModel.otaState.collectAsStateWithLifecycle()
     val connectionState by bleConnectionManager.connectionState.collectAsStateWithLifecycle()
+
+    // DFU device scanning
+    val dfuDevices by otaViewModel.dfuDevices.collectAsStateWithLifecycle(initialValue = emptyList())
+    val isScanning by otaViewModel.isScanning.collectAsStateWithLifecycle(initialValue = false)
+    val dfuDeviceConnected by otaViewModel.dfuDeviceConnected.collectAsStateWithLifecycle(initialValue = false)
+
+    // Start/stop scanning when entering/leaving the screen
+    DisposableEffect(Unit) {
+        otaViewModel.startDfuDeviceScan()
+        onDispose {
+            otaViewModel.stopDfuDeviceScan()
+        }
+    }
 
     // OTAファイル選択ランチャー
     val otaLauncher = rememberLauncherForActivityResult(
@@ -131,6 +146,86 @@ fun OtaScreen(
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+
+            // DFUデバイススキャン状態
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isScanning) "DFUデバイスをスキャン中..." else "DFUデバイススキャン停止",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                IconButton(onClick = {
+                    if (isScanning) {
+                        otaViewModel.stopDfuDeviceScan()
+                    } else {
+                        otaViewModel.startDfuDeviceScan()
+                    }
+                }) {
+                    Icon(
+                        imageVector = if (isScanning) Icons.Default.Stop else Icons.Default.Search,
+                        contentDescription = if (isScanning) "停止" else "スキャン"
+                    )
+                }
+            }
+
+            // DFUデバイスリスト
+            if (dfuDevices.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Text(
+                            text = "DFUデバイス",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        dfuDevices.forEach { device ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = device.name ?: "不明",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Text(
+                                        text = device.address,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (dfuDeviceConnected) {
+                                    Text(
+                                        text = "接続済み",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                } else {
+                                    Button(
+                                        onClick = {
+                                            otaViewModel.connectDfuDevice(device)
+                                        },
+                                        enabled = !dfuDeviceConnected
+                                    ) {
+                                        Text("接続")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -280,7 +375,7 @@ fun OtaScreen(
                     otaLauncher.launch("*/*")
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = connectionState is com.pirorin215.btclockmob.data.ConnectionState.Connected &&
+                enabled = dfuDeviceConnected &&
                            otaState is OtaState.Idle
             ) {
                 Text("ファームウェアを選択")
@@ -314,10 +409,11 @@ fun OtaScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "• デバイスがDFUモード（AdaDFU）に切り替わります\n" +
-                              "• ファームウェアを転送します\n" +
-                              "• 転送完了後、デバイスが再起動します\n" +
-                              "• 更新中はデバイスとの接続が切断されます",
+                        text = "• デバイスをDFUモード（AdaDFU）にしてください\n" +
+                              "• メンテナンスモード → 3OTAを選択するとDFUモードになります\n" +
+                              "• DFUデバイス（AdaDFU）が表示されたら接続してください\n" +
+                              "• ファームウェアを選択して転送を開始します\n" +
+                              "• 転送完了後、デバイスが再起動します",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
