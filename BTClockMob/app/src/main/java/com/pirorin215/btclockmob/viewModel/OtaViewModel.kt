@@ -9,17 +9,21 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.os.ParcelUuid
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.btclockmob.service.DfuService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import no.nordicsemi.android.dfu.DfuProgressListener
 import no.nordicsemi.android.dfu.DfuProgressListenerAdapter
 import no.nordicsemi.android.dfu.DfuServiceInitiator
 import no.nordicsemi.android.dfu.DfuServiceListenerHelper
+import java.io.File
 import java.util.UUID
 
 /**
@@ -118,6 +122,7 @@ class OtaViewModel(
             currentPart: Int,
             partsTotal: Int
         ) {
+            Log.d(TAG, "DFU Progress: $percent% (Speed: $speed KB/s)")
             _otaState.value = OtaState.Transferring(percent)
         }
 
@@ -157,26 +162,102 @@ class OtaViewModel(
             return
         }
 
-        Log.d(TAG, "Starting DFU update for ${device.name} (${device.address})")
+        viewModelScope.launch {
+            try {
+                _otaState.value = OtaState.Connecting
+                val fileName = getFileName(firmwareUri)
+                val isZip = fileName?.lowercase()?.endsWith(".zip") == true
 
-        val initiator = DfuServiceInitiator(device.address)
-            .setDeviceName(device.name ?: "Unknown")
-            .setKeepBond(false)
-            .setForceDfu(false)
-            .setPacketsReceiptNotificationsEnabled(true)
-            .setPacketsReceiptNotificationsValue(DfuServiceInitiator.DEFAULT_PRN_VALUE)
-            .setPrepareDataObjectDelay(300L)
-            .setUnsafeExperimentalButtonlessServiceInSecureDfuEnabled(true)
+                Log.d(TAG, "Starting DFU update for ${device.name} (${device.address}), file: $fileName")
 
-        // Android 8.0+ requires notification channel
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            DfuServiceInitiator.createDfuNotificationChannel(context)
+                val finalUri = if (!isZip) {
+                    // .binファイルの場合は4バイトアライメントを確認・修正
+                    prepareFirmware(firmwareUri)
+                } else {
+                    firmwareUri
+                }
+
+                val initiator = DfuServiceInitiator(device.address)
+                    .setDeviceName(device.name ?: "Unknown")
+                    .setKeepBond(false)
+                    .setForceDfu(false)
+                    .setPacketsReceiptNotificationsEnabled(true)
+                    .setPacketsReceiptNotificationsValue(1) // 1パケットごとに応答を待つ（最も安全な設定）
+                    .setPrepareDataObjectDelay(2000L) // 消去待ちをさらに延長
+                    .disableMtuRequest()
+                    .setUnsafeExperimentalButtonlessServiceInSecureDfuEnabled(true)
+
+                // Android 8.0+ requires notification channel
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    DfuServiceInitiator.createDfuNotificationChannel(context)
+                }
+
+                if (isZip) {
+                    initiator.setZip(finalUri)
+                } else {
+                    // .binファイルの場合はTYPE_APPLICATIONを指定
+                    initiator.setBinOrHex(no.nordicsemi.android.dfu.DfuBaseService.TYPE_APPLICATION, finalUri)
+                }
+                
+                initiator.start(context, DfuService::class.java)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to prepare OTA update", e)
+                _otaState.value = OtaState.Error("準備に失敗しました: ${e.message}")
+            }
         }
+    }
 
-        // URIからファイルを指定して開始
-        // .binファイルの場合はTYPE_APPLICATIONを指定
-        initiator.setBinOrHex(no.nordicsemi.android.dfu.DfuBaseService.TYPE_APPLICATION, firmwareUri)
-        initiator.start(context, DfuService::class.java)
+    /**
+     * .binファイルの4バイトアライメントを調整する
+     */
+    private suspend fun prepareFirmware(uri: Uri): Uri = withContext(Dispatchers.IO) {
+        val inputStream = context.contentResolver.openInputStream(uri)
+            ?: throw IllegalArgumentException("Failed to open firmware file")
+        
+        val bytes = inputStream.use { it.readBytes() }
+        
+        // 4バイトの倍数でない場合、0xFFでパディング
+        if (bytes.size % 4 == 0) return@withContext uri
+        
+        Log.d(TAG, "Firmware size ${bytes.size} is not word-aligned. Padding to 4 bytes...")
+        val padding = 4 - (bytes.size % 4)
+        val paddedBytes = ByteArray(bytes.size + padding)
+        System.arraycopy(bytes, 0, paddedBytes, 0, bytes.size)
+        for (i in bytes.size until paddedBytes.size) {
+            paddedBytes[i] = 0xFF.toByte()
+        }
+        
+        val tempFile = File(context.cacheDir, "padded_firmware.bin")
+        tempFile.writeBytes(paddedBytes)
+        
+        Log.d(TAG, "Padded firmware saved: ${tempFile.absolutePath} (${paddedBytes.size} bytes)")
+        Uri.fromFile(tempFile)
+    }
+
+    /**
+     * URIからファイル名を取得する
+     */
+    private fun getFileName(uri: Uri): String? {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor.use {
+                if (it != null && it.moveToFirst()) {
+                    val index = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) {
+                        result = it.getString(index)
+                    }
+                }
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/') ?: -1
+            if (cut != -1) {
+                result = result?.substring(cut + 1)
+            }
+        }
+        return result
     }
 
     /**

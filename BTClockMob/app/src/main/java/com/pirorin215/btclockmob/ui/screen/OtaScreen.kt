@@ -257,8 +257,14 @@ fun OtaScreen(
             )
 
             // OTA状態表示
+            var lastProgress by remember { mutableIntStateOf(0) }
+            if (otaState is OtaState.Transferring) {
+                lastProgress = (otaState as OtaState.Transferring).progress
+            }
+
             when (val state = otaState) {
                 is OtaState.Idle -> {
+                    lastProgress = 0
                     Card(
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -283,9 +289,16 @@ fun OtaScreen(
                             CircularProgressIndicator()
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "DFUモードに接続中...",
+                                text = if (lastProgress > 0) "再接続・準備中... ($lastProgress%)" else "DFUモードに接続中...",
                                 style = MaterialTheme.typography.bodyMedium
                             )
+                            if (lastProgress > 0) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                LinearProgressIndicator(
+                                    progress = { lastProgress / 100f },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
                 }
