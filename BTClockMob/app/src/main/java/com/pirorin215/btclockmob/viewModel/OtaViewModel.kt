@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.BluetoothLeScanner
@@ -142,6 +143,9 @@ class OtaViewModel(
 
                     if (dfuControlPointCharacteristic != null && dfuPacketCharacteristic != null) {
                         Log.d(TAG, "DFU characteristics found")
+
+                        // Enable notifications on Control Point
+                        enableDfuControlPointNotifications(gatt)
                     } else {
                         Log.e(TAG, "DFU characteristics not found")
                         Log.e(TAG, "  Control point: $dfuControlPointCharacteristic")
@@ -152,6 +156,15 @@ class OtaViewModel(
                 }
             } else {
                 Log.e(TAG, "Service discovery failed: $status")
+            }
+        }
+
+        override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
+            Log.d(TAG, "onDescriptorWrite - status: $status")
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.d(TAG, "DFU Control Point notifications enabled successfully")
+            } else {
+                Log.e(TAG, "Failed to enable DFU Control Point notifications: $status")
             }
         }
     }
@@ -203,6 +216,9 @@ class OtaViewModel(
     @SuppressLint("MissingPermission")
     private suspend fun performNordicDfuUpdate(firmwareData: ByteArray): Boolean = withContext(Dispatchers.IO) {
         try {
+            // Wait for notifications to be enabled
+            delay(500)
+
             // 1. Start DFUコマンド（OpCode 0x01）を送信
             Log.d(TAG, "Sending Start DFU command")
             val startDfuCommand = byteArrayOf(0x01, 0x00) // 0x01 = Start DFU, 0x00 = Application
@@ -340,6 +356,37 @@ class OtaViewModel(
             characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
             dfuGatt?.writeCharacteristic(characteristic) ?: false
         }
+    }
+
+    /**
+     * Enable notifications on DFU Control Point
+     */
+    @SuppressLint("MissingPermission")
+    private fun enableDfuControlPointNotifications(gatt: BluetoothGatt) {
+        val characteristic = dfuControlPointCharacteristic
+        if (characteristic == null) {
+            Log.e(TAG, "DFU Control Point characteristic is null")
+            return
+        }
+
+        // Get CCCD
+        val cccd = characteristic.getDescriptor(UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
+        if (cccd == null) {
+            Log.e(TAG, "CCCD not found for DFU Control Point")
+            return
+        }
+
+        // Enable notifications (0x01, 0x00)
+        val value = byteArrayOf(0x01, 0x00)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            gatt.writeDescriptor(cccd, value)
+        } else {
+            cccd.value = value
+            gatt.writeDescriptor(cccd)
+        }
+
+        Log.d(TAG, "Enabling DFU Control Point notifications")
     }
 
     /**
