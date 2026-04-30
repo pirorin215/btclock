@@ -99,6 +99,22 @@ enum DisplayMode {
     DISPLAY_MODE_COUNT      // Number of display modes (for bounds checking)
 };
 
+// --- Maintenance Mode Menu ---
+enum MaintenanceMenu {
+    MAINTENANCE_MENU_CANCEL,        // Cancel (normal boot)
+    MAINTENANCE_MENU_TEST,          // Test mode
+    MAINTENANCE_MENU_DFU,           // DFU mode
+    MAINTENANCE_MENU_FACTORY_RESET, // Factory reset
+    MAINTENANCE_MENU_COUNT          // Number of menus
+};
+
+struct MaintenanceState {
+    bool active;                           // Maintenance mode is active
+    MaintenanceMenu currentMenu;           // Current menu selection
+    unsigned long lastInteractionMillis;   // Last interaction time (for timeout)
+    uint8_t selectedMenuIndex;            // Current menu index (0-based)
+};
+
 // --- Global Variables ---
 extern TM1637Display* g_display;
 extern volatile uint32_t g_currentTimestamp;  // Unix timestamp
@@ -111,6 +127,9 @@ extern bool g_skipBleInit;                   // Skip BLE initialization (for fac
 extern bool g_displayingKeyCodes;            // Currently displaying key codes (skip time display)
 extern uint16_t g_displayingKeyCode;         // Currently displaying HID key code (0 = none)
 extern unsigned long g_keyCodeDisplayEndTime; // When to stop displaying key code
+
+// Maintenance mode
+extern MaintenanceState g_maintenanceState;  // Maintenance mode state
 
 // Date cache structure
 struct DateCache {
@@ -136,6 +155,7 @@ struct HidSwitch {
 void setupBLE();
 void handleTimeSync(const char* command);
 void handleKeyConfig(const char* command);
+void handleGetVersion();
 void loadSettings();
 void saveSettings();
 void updateTimeDisplay();
@@ -169,5 +189,18 @@ void setLedState(LedState state);
 void setLedColor(bool red, bool green, bool blue);
 void setLedError();  // Set LED to error state
 void updateLedStateBasedOnStatus();  // Update LED state based on connection and sync status
+
+// Maintenance mode functions
+void enterMaintenanceMode();
+void exitMaintenanceMode();
+void updateMaintenanceDisplay();
+bool processMaintenanceMode();
+
+// 7-segment display encoding
+void encodeStringToSegments(const char* str, uint8_t* data);
+
+// DFU mode functions
+void enterDfuMode();
+void startOtaDfuMode();
 
 #endif // BIKECLOCK_H

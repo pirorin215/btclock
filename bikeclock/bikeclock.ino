@@ -26,6 +26,14 @@ LedState g_currentLedState = LED_STATE_BOOT;
 DisplayMode g_displayMode = DISPLAY_MODE_TIME;  // Initial mode: time display
 int g_testDisplayIndex = 1;  // Test mode display index (1-10)
 
+// Maintenance mode state
+MaintenanceState g_maintenanceState = {
+    false,                     // active
+    MAINTENANCE_MENU_CANCEL,    // currentMenu
+    0,                         // lastInteractionMillis
+    0                          // selectedMenuIndex
+};
+
 // External BLE characteristics
 extern BLECharacteristic bleSwitchNotifyCharacteristic;
 
@@ -323,20 +331,24 @@ void loop() {
     // Get current time once for this loop iteration
     g_currentMillis = millis();
 
-    // Update onboard LED
-    updateLed();
-
-    // Process function key (mode switch)
+    // Process function key (mode switch) - must be called first
     processFunctionKey();
 
-    // Process HID switches
-    processHidSwitches();
+    // Process maintenance mode if active
+    if (!processMaintenanceMode()) {
+        // If maintenance mode is not active, process normal operations
+        // Update onboard LED
+        updateLed();
 
-    // System utilities
-    updateTimestamp();
+        // Process HID switches
+        processHidSwitches();
 
-    // Display and LED update
-    updateDisplayAndLedState();
+        // System utilities
+        updateTimestamp();
+
+        // Display and LED update
+        updateDisplayAndLedState();
+    }
 
     delay(10);
 }

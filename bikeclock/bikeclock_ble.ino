@@ -82,6 +82,10 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
             Serial.println("[BIKECLOCK] Calling handleGetVersion...");
             handleGetVersion();
             Serial.println("[BIKECLOCK] handleGetVersion returned");
+        } else if (strncmp(command, "START_OTA", 9) == 0) {
+            Serial.println("[BIKECLOCK] Calling startOtaDfuMode...");
+            startOtaDfuMode();
+            Serial.println("[BIKECLOCK] startOtaDfuMode returned");
         } else {
             Serial.printf("[BIKECLOCK] Unknown command: %s\n", command);
             sendResponse("ERROR: Unknown command");

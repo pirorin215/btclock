@@ -86,6 +86,12 @@ void processHidSwitches() {
         return;
     }
 
+    // Check if in maintenance mode - skip HID processing
+    extern MaintenanceState g_maintenanceState;
+    if (g_maintenanceState.active) {
+        return;  // Skip normal HID processing in maintenance mode
+    }
+
     // Additional safety check: verify all pins are not stuck at LOW
     // This can happen if MCP23S17 is disconnected but SPI bus is alive
     uint8_t allPins = 0;
@@ -262,30 +268,45 @@ void processFunctionKey() {
         } else {
             // Key released
             if (!inLongPressSequence) {
-                // Short press - mode change
-                Serial.println("[FUNC] Short press - Mode change triggered");
-                if (g_displayMode == DISPLAY_MODE_TEST) {
-                    // Test mode: cycle through test displays
-                    g_testDisplayIndex++;
-                    if (g_testDisplayIndex > 10) {
-                        g_testDisplayIndex = 1;
+                // Short press - mode change OR maintenance menu navigation
+                extern MaintenanceState g_maintenanceState;
+
+                if (g_maintenanceState.active) {
+                    // Maintenance mode: cycle through menus
+                    Serial.println("[FUNC] Maintenance mode - cycling menu");
+                    g_maintenanceState.selectedMenuIndex++;
+                    if (g_maintenanceState.selectedMenuIndex >= MAINTENANCE_MENU_COUNT) {
+                        g_maintenanceState.selectedMenuIndex = 0;
                     }
-                    extern void updateTestDisplay();
-                    updateTestDisplay();
-                    Serial.printf("[TEST] Display %d\n", g_testDisplayIndex);
+                    g_maintenanceState.currentMenu = static_cast<MaintenanceMenu>(g_maintenanceState.selectedMenuIndex);
+                    g_maintenanceState.lastInteractionMillis = millis();
+                    updateMaintenanceDisplay();
                 } else {
-                    // Normal mode: switch display mode (cycle through TIME, DATE, WEEKDAY)
-                    if (g_displayMode >= DISPLAY_MODE_WEEKDAY) {
-                        g_displayMode = DISPLAY_MODE_TIME;
+                    // Normal mode: mode change
+                    Serial.println("[FUNC] Short press - Mode change triggered");
+                    if (g_displayMode == DISPLAY_MODE_TEST) {
+                        // Test mode: cycle through test displays
+                        g_testDisplayIndex++;
+                        if (g_testDisplayIndex > 10) {
+                            g_testDisplayIndex = 1;
+                        }
+                        extern void updateTestDisplay();
+                        updateTestDisplay();
+                        Serial.printf("[TEST] Display %d\n", g_testDisplayIndex);
                     } else {
-                        g_displayMode = (DisplayMode)(g_displayMode + 1);
+                        // Normal mode: switch display mode (cycle through TIME, DATE, WEEKDAY)
+                        if (g_displayMode >= DISPLAY_MODE_WEEKDAY) {
+                            g_displayMode = DISPLAY_MODE_TIME;
+                        } else {
+                            g_displayMode = (DisplayMode)(g_displayMode + 1);
+                        }
+
+                        // Update display immediately
+                        extern void updateDisplayForCurrentMode();
+                        updateDisplayForCurrentMode();
+
+                        Serial.printf("[FUNC] Mode changed to: %d\n", g_displayMode);
                     }
-
-                    // Update display immediately
-                    extern void updateDisplayForCurrentMode();
-                    updateDisplayForCurrentMode();
-
-                    Serial.printf("[FUNC] Mode changed to: %d\n", g_displayMode);
                 }
             } else if (inLongPressSequence) {
                 // User released during countdown - restore display
@@ -311,14 +332,14 @@ void processFunctionKey() {
             bool completed = performCountdown(3, 3);
 
             if (completed) {
-                // Final feedback
-                Serial.println("[FUNC] Reboot triggered");
+                // Enter maintenance mode instead of reboot
+                Serial.println("[FUNC] Maintenance mode triggered");
                 g_display->showNumberDec(0000);  // Show "0000"
-                setLedColor(true, false, true);  // Magenta
+                setLedColor(true, false, false);  // Red
                 delay(500);
 
-                // System reset
-                NVIC_SystemReset();
+                // Enter maintenance mode
+                enterMaintenanceMode();
             } else {
                 // User released during countdown
                 inLongPressSequence = false;
