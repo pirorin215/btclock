@@ -11,7 +11,10 @@
 using namespace Adafruit_LittleFS_Namespace;
 
 // --- Firmware Version Information ---
-#define FIRMWARE_VERSION "1.0.2"
+#define FIRMWARE_VERSION_MAJOR 1
+#define FIRMWARE_VERSION_MINOR 0
+#define FIRMWARE_VERSION_PATCH 2
+#define FIRMWARE_VERSION_STR "1.0.2"
 #define FIRMWARE_VERSION_DATE "2026-04-24"
 
 // --- GPIO Pin Definitions ---

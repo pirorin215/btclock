@@ -214,10 +214,10 @@ void enterDfuMode() {
     // Visual feedback: Show "DFU" on display
     if (g_display != nullptr) {
         uint8_t data[] = {
-            g_display->encodeDigit('D'),
-            g_display->encodeDigit('F'),
-            g_display->encodeDigit('U'),
-            g_display->encodeDigit(' ')
+            SEGMENT_CHARS['D' - 'A'],
+            SEGMENT_CHARS['F' - 'A'],
+            SEGMENT_CHARS['U' - 'A'],
+            0x00
         };
         g_display->setSegments(data);
     }
@@ -233,12 +233,12 @@ void enterDfuMode() {
     Serial.println("[DFU] Resetting to Nordic DFU bootloader...");
     Serial.flush();
 
-    // Reset to Nordic DFU bootloader
-    // This magic value triggers the Nordic bootloader instead of normal application
-    NVIC_SystemReset();
+    // Enter OTA DFU mode using Adafruit's function
+    // This will restart the device into bootloader mode
+    // The bootloader will advertise as "DfuTarg" for OTA updates
+    ::enterOTADfu();
 
-    // Note: The actual DFU mode entry is handled by the bootloader
-    // The device will restart as "AdaDFU" and be ready for OTA update
+    // This line won't be reached due to reset
 }
 
 /**

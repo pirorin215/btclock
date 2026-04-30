@@ -97,7 +97,7 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
 void setupBLE() {
     Serial.println("[BIKECLOCK] ========================================");
     Serial.println("[BIKECLOCK] BLE Initialization (HID + Custom)");
-    Serial.printf("[BIKECLOCK] Firmware Version: %s (%s)\n", FIRMWARE_VERSION, FIRMWARE_VERSION_DATE);
+    Serial.printf("[BIKECLOCK] Firmware Version: %s (%s)\n", FIRMWARE_VERSION_STR, FIRMWARE_VERSION_DATE);
     Serial.println("[BIKECLOCK] BLE Service UUID: " BLE_SERVICE_UUID);
     Serial.println("[BIKECLOCK] Command UUID: " BLE_CHAR_COMMAND_UUID);
     Serial.println("[BIKECLOCK] Response UUID: " BLE_CHAR_RESPONSE_UUID);
@@ -232,10 +232,10 @@ void handleGetVersion() {
 
     // ファームウェアバージョンを返す（ヘッダーで定義されたバージョンを使用）
     char versionResponse[64];
-    snprintf(versionResponse, sizeof(versionResponse), "OK:version:%s", FIRMWARE_VERSION);
+    snprintf(versionResponse, sizeof(versionResponse), "OK:version:%s", FIRMWARE_VERSION_STR);
     sendResponse(versionResponse);
 
-    Serial.printf("[BIKECLOCK] Version response sent: %s\n", FIRMWARE_VERSION);
+    Serial.printf("[BIKECLOCK] Version response sent: %s\n", FIRMWARE_VERSION_STR);
 }
 
 // --- Response Helper ---

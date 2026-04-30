@@ -250,11 +250,11 @@ void updateTestDisplay() {
     uint8_t data[] = { 0x00, 0x00, 0x00, 0x00 };
 
     switch (g_testDisplayIndex) {
-        case 1: // 0123
-            data[0] = g_display->encodeDigit(0);
-            data[1] = g_display->encodeDigit(1);
-            data[2] = g_display->encodeDigit(2);
-            data[3] = g_display->encodeDigit(3);
+        case 1: // Version display (1.02)
+            data[0] = g_display->encodeDigit(FIRMWARE_VERSION_MAJOR) | 0x80;  // メジャー + 小数点
+            data[1] = g_display->encodeDigit(FIRMWARE_VERSION_MINOR);           // マイナー
+            data[2] = g_display->encodeDigit(FIRMWARE_VERSION_PATCH / 10);       // パッチ（十の位）
+            data[3] = g_display->encodeDigit(FIRMWARE_VERSION_PATCH % 10);       // パッチ（一の位）
             break;
 
         case 2: // 4567
