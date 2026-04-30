@@ -157,14 +157,21 @@ class OtaViewModel(
     }
 
     /**
-     * OTA更新を実行
+     * OTA更新を実行（Nordic DFUプロトコル）
      * @param firmwareUri ファームウェアファイルのURI
      */
     fun startOtaUpdate(firmwareUri: Uri) {
         viewModelScope.launch {
             try {
                 _otaState.value = OtaState.Connecting
-                Log.d(TAG, "Starting OTA update")
+                Log.d(TAG, "Starting Nordic DFU update")
+
+                // DFUデバイスに接続しているか確認
+                if (!_dfuDeviceConnected.value || dfuGatt == null) {
+                    _otaState.value = OtaState.Error("DFUデバイスに接続してください")
+                    Log.e(TAG, "DFU device not connected")
+                    return@launch
+                }
 
                 // ファームウェアファイルを読み込み
                 val firmwareData = readFirmwareFile(firmwareUri)
@@ -172,79 +179,166 @@ class OtaViewModel(
 
                 _otaState.value = OtaState.Transferring(0)
 
-                // OTA開始コマンドを送信
-                // 注意: 既にDFUモードに接続している場合、startOta()は失敗する可能性があります
-                // ユーザーは手動でDFUモードデバイスに再接続する必要があります
-                val success = withContext(Dispatchers.IO) {
-                    bleConnectionManager.repositoryForOta.startOta()
+                // Nordic DFUプロトコルでファームウェア転送
+                val success = performNordicDfuUpdate(firmwareData)
+
+                if (success) {
+                    _otaState.value = OtaState.Completed
+                    Log.d(TAG, "Nordic DFU update completed successfully")
+                } else {
+                    _otaState.value = OtaState.Error("DFU update failed")
+                    Log.e(TAG, "Nordic DFU update failed")
                 }
-
-                if (!success) {
-                    _otaState.value = OtaState.Error("Failed to start OTA. Make sure you're connected to the device first.")
-                    Log.e(TAG, "Failed to start OTA mode")
-                    return@launch
-                }
-
-                Log.d(TAG, "OTA start command sent, waiting for DFU mode...")
-
-                // デバイスがDFUモードに入るのを待機
-                // BikeClockは "9999" を表示してからリセットする
-                delay(3000)
-
-                Log.d(TAG, "Starting firmware transfer...")
-
-                // ファームウェア転送
-                val totalSize = firmwareData.size
-                var transferredSize = 0
-
-                // 分割して転送（20バイト/パケット）
-                val packetSize = 20
-                var offset = 0
-
-                while (offset < totalSize) {
-                    val remainingLength = totalSize - offset
-                    val packetLength = minOf(packetSize, remainingLength)
-
-                    val success = withContext(Dispatchers.IO) {
-                        bleConnectionManager.repositoryForOta.sendOtaPacket(firmwareData, offset, packetLength)
-                    }
-
-                    if (!success) {
-                        _otaState.value = OtaState.Error("Failed to send firmware data at offset $offset")
-                        Log.e(TAG, "Failed to send firmware packet at offset $offset")
-                        return@launch
-                    }
-
-                    offset += packetLength
-                    transferredSize = offset
-
-                    // 進捗を更新
-                    val progress = (transferredSize * 100) / totalSize
-                    _otaState.value = OtaState.Transferring(progress)
-
-                    Log.d(TAG, "Transferred: $transferredSize / $totalSize bytes ($progress%)")
-                }
-
-                // 転送完了、アクティベートコマンドを送信
-                Log.d(TAG, "Firmware transfer completed. Activating...")
-
-                val activateSuccess = withContext(Dispatchers.IO) {
-                    bleConnectionManager.repositoryForOta.activateOta()
-                }
-
-                if (!activateSuccess) {
-                    _otaState.value = OtaState.Error("Failed to activate firmware")
-                    Log.e(TAG, "Failed to activate firmware")
-                    return@launch
-                }
-
-                _otaState.value = OtaState.Completed
-                Log.d(TAG, "OTA update completed successfully")
 
             } catch (e: Exception) {
                 Log.e(TAG, "OTA update failed", e)
                 _otaState.value = OtaState.Error("OTA update failed: ${e.message}")
             }
+        }
+    }
+
+    /**
+     * Nordic DFUプロトコルでファームウェア更新を実行
+     */
+    @SuppressLint("MissingPermission")
+    private suspend fun performNordicDfuUpdate(firmwareData: ByteArray): Boolean = withContext(Dispatchers.IO) {
+        try {
+            // 1. Start DFUコマンド（OpCode 0x01）を送信
+            Log.d(TAG, "Sending Start DFU command")
+            val startDfuCommand = byteArrayOf(0x01, 0x00) // 0x01 = Start DFU, 0x00 = Application
+            if (!writeDfuControlPoint(startDfuCommand)) {
+                Log.e(TAG, "Failed to send Start DFU command")
+                return@withContext false
+            }
+            delay(100)
+
+            // 2. ファームウェアサイズをPacket Characteristicに送信（リトルエンディアン）
+            Log.d(TAG, "Sending firmware size: ${firmwareData.size}")
+            val sizeBytes = byteArrayOf(
+                (firmwareData.size and 0xFF).toByte(),
+                ((firmwareData.size shr 8) and 0xFF).toByte(),
+                ((firmwareData.size shr 16) and 0xFF).toByte(),
+                ((firmwareData.size shr 24) and 0xFF).toByte()
+            )
+            if (!writeDfuPacket(sizeBytes)) {
+                Log.e(TAG, "Failed to send firmware size")
+                return@withContext false
+            }
+            delay(100)
+
+            // 3. Receive Firmwareコマンド（OpCode 0x03）を送信
+            Log.d(TAG, "Sending Receive Firmware command")
+            val receiveFirmwareCommand = byteArrayOf(0x03, 0x00) // 0x03 = Receive Firmware, 0x00 = Application
+            if (!writeDfuControlPoint(receiveFirmwareCommand)) {
+                Log.e(TAG, "Failed to send Receive Firmware command")
+                return@withContext false
+            }
+            delay(100)
+
+            // 4. ファームウェアデータをPacket Characteristicに分割して送信
+            Log.d(TAG, "Starting firmware transfer...")
+            val totalSize = firmwareData.size
+            var offset = 0
+            val packetSize = 20 // Nordic DFUは20バイト/パケット
+
+            while (offset < totalSize) {
+                val remainingLength = totalSize - offset
+                val packetLength = minOf(packetSize, remainingLength)
+                val packet = firmwareData.sliceArray(offset until offset + packetLength)
+
+                if (!writeDfuPacket(packet)) {
+                    Log.e(TAG, "Failed to send firmware packet at offset $offset")
+                    return@withContext false
+                }
+
+                offset += packetLength
+
+                // 進捗を更新
+                val progress = (offset * 100) / totalSize
+                _otaState.value = OtaState.Transferring(progress)
+
+                if (offset % 1000 == 0) {
+                    Log.d(TAG, "Transferred: $offset / $totalSize bytes ($progress%)")
+                }
+
+                delay(10) // 少し待機してデータを処理させる
+            }
+
+            Log.d(TAG, "Firmware transfer completed")
+
+            // 5. Validateコマンド（OpCode 0x02）を送信
+            Log.d(TAG, "Sending Validate command")
+            val validateCommand = byteArrayOf(0x02) // 0x02 = Validate
+            if (!writeDfuControlPoint(validateCommand)) {
+                Log.e(TAG, "Failed to send Validate command")
+                return@withContext false
+            }
+            delay(500)
+
+            // 6. Activate & Resetコマンド（OpCode 0x04）を送信
+            Log.d(TAG, "Sending Activate & Reset command")
+            val activateCommand = byteArrayOf(0x04) // 0x04 = Activate & Reset
+            if (!writeDfuControlPoint(activateCommand)) {
+                Log.e(TAG, "Failed to send Activate & Reset command")
+                return@withContext false
+            }
+
+            Log.d(TAG, "Nordic DFU update completed successfully")
+            true
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Nordic DFU update failed", e)
+            false
+        }
+    }
+
+    /**
+     * DFU Control Pointに書き込む
+     */
+    @SuppressLint("MissingPermission")
+    private fun writeDfuControlPoint(data: ByteArray): Boolean {
+        val characteristic = dfuControlPointCharacteristic
+        if (characteristic == null) {
+            Log.e(TAG, "DFU Control Point characteristic is null")
+            return false
+        }
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val result = dfuGatt?.writeCharacteristic(
+                characteristic,
+                data,
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            )
+            result == android.bluetooth.BluetoothStatusCodes.SUCCESS
+        } else {
+            characteristic.value = data
+            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            dfuGatt?.writeCharacteristic(characteristic) ?: false
+        }
+    }
+
+    /**
+     * DFU Packetに書き込む
+     */
+    @SuppressLint("MissingPermission")
+    private fun writeDfuPacket(data: ByteArray): Boolean {
+        val characteristic = dfuPacketCharacteristic
+        if (characteristic == null) {
+            Log.e(TAG, "DFU Packet characteristic is null")
+            return false
+        }
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val result = dfuGatt?.writeCharacteristic(
+                characteristic,
+                data,
+                BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            )
+            result == android.bluetooth.BluetoothStatusCodes.SUCCESS
+        } else {
+            characteristic.value = data
+            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+            dfuGatt?.writeCharacteristic(characteristic) ?: false
         }
     }
 
