@@ -7,6 +7,33 @@
 
 #include "bikeclock.h"
 
+// --- Logging Functions ---
+
+extern unsigned long g_startupMillis;
+
+void setupLog() {
+    g_startupMillis = millis();
+}
+
+void logPrint(const char* tag, const char* format, ...) {
+    unsigned long elapsed = millis() - g_startupMillis;
+
+    // Print timestamp [SSSS.mmm]
+    Serial.printf("[%4lu.%03lu] ", elapsed / 1000, elapsed % 1000);
+
+    // Print tag
+    Serial.printf("[%s] ", tag);
+
+    // Print formatted message
+    char buffer[256];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    Serial.println(buffer);
+}
+
 // 7-segment digit patterns (0-9)
 const uint8_t SEGMENT_0 = 0x3F;
 const uint8_t SEGMENT_1 = 0x06;

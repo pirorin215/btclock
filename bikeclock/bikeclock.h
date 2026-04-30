@@ -130,6 +130,7 @@ extern bool g_skipBleInit;                   // Skip BLE initialization (for fac
 extern bool g_displayingKeyCodes;            // Currently displaying key codes (skip time display)
 extern uint16_t g_displayingKeyCode;         // Currently displaying HID key code (0 = none)
 extern unsigned long g_keyCodeDisplayEndTime; // When to stop displaying key code
+extern unsigned long g_startupMillis;        // Startup time (for log timestamps)
 
 // Maintenance mode
 extern MaintenanceState g_maintenanceState;  // Maintenance mode state
@@ -201,6 +202,10 @@ bool processMaintenanceMode();
 
 // 7-segment display encoding
 void encodeStringToSegments(const char* str, uint8_t* data);
+
+// Logging functions
+void setupLog();
+void logPrint(const char* tag, const char* format, ...);
 
 // DFU mode functions
 void enterDfuMode();

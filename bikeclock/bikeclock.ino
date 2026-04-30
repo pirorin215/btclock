@@ -22,6 +22,7 @@ unsigned long g_keyCodeDisplayEndTime = 0;  // When to stop displaying key code
 bool g_showingCountdown = false;  // Currently showing countdown (skip time display)
 unsigned long g_lastCounterMillis = 0;  // Last time internal counter was updated
 unsigned long g_currentMillis = 0;  // Current time for this loop iteration
+unsigned long g_startupMillis = 0;  // Startup time (for log timestamps)
 LedState g_currentLedState = LED_STATE_BOOT;
 DisplayMode g_displayMode = DISPLAY_MODE_TIME;  // Initial mode: time display
 int g_testDisplayIndex = 1;  // Test mode display index (1-10)
@@ -286,6 +287,9 @@ void setup() {
     // unsigned long startTime = millis();
     // while (!Serial && (millis() - startTime < 5000)) {
     // }
+
+    // Initialize logging first
+    setupLog();
 
     Serial.println("[BIKECLOCK] " __DATE__ " " __TIME__);
 
