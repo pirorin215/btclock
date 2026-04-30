@@ -22,6 +22,25 @@ object BleConstants {
      */
     const val COMMAND_UUID_STRING = "beb5483e-36e1-4688-b7f5-ea07361b26a0"
 
+    // --- OTA DFU UUID定数 ---
+    /**
+     * Nordic DFUサービスUUID
+     * Adafruit nRF52のDFUモードで使用される標準UUID
+     */
+    const val OTA_SERVICE_UUID_STRING = "00001530-1212-efde-1523-785feabcd123"
+
+    /**
+     * Nordic DFU Control Point UUID
+     * DFU制御コマンドの送信に使用
+     */
+    const val OTA_CONTROL_UUID_STRING = "00001531-1212-efde-1523-785feabcd123"
+
+    /**
+     * Nordic DFU Packet UUID
+     * ファームウェアデータの転送に使用
+     */
+    const val OTA_PACKET_UUID_STRING = "00001532-1212-efde-1523-785feabcd123"
+
     // Note: RESPONSE_UUID_STRING is no longer needed
     // We use a single bidirectional characteristic for both commands and responses
 
@@ -38,11 +57,23 @@ object BleConstants {
      */
     const val SERVICE_DISCOVERY_DELAY_MS = 1000L
 
+    /**
+     * DFUモードのデバイス名
+     * Adafruit nRF52がDFUモード時に使用するデバイス名
+     */
+    const val DFU_DEVICE_NAME = "AdaDFU"
+
     // --- コマンド定数 ---
     /**
      * 時刻同期コマンドプレフィックス
      */
     const val CMD_TIME_SYNC = "SET:time"
+
+    /**
+     * バージョン取得コマンド
+     * デバイスのファームウェアバージョンを取得する
+     */
+    const val CMD_GET_VERSION = "GET:version"
 
     // --- レスポンス定数 ---
     /**

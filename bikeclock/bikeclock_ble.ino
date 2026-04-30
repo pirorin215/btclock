@@ -78,6 +78,10 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
         } else if (strncmp(command, "SET:keys:", 9) == 0) {
             Serial.println("[BIKECLOCK] Calling handleKeyConfig...");
             handleKeyConfig(command);
+        } else if (strncmp(command, "GET:version", 11) == 0) {
+            Serial.println("[BIKECLOCK] Calling handleGetVersion...");
+            handleGetVersion();
+            Serial.println("[BIKECLOCK] handleGetVersion returned");
         } else {
             Serial.printf("[BIKECLOCK] Unknown command: %s\n", command);
             sendResponse("ERROR: Unknown command");
@@ -89,7 +93,7 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
 void setupBLE() {
     Serial.println("[BIKECLOCK] ========================================");
     Serial.println("[BIKECLOCK] BLE Initialization (HID + Custom)");
-    Serial.println("[BIKECLOCK] Firmware Version: 1.0.2 (2026-04-24)");
+    Serial.printf("[BIKECLOCK] Firmware Version: %s (%s)\n", FIRMWARE_VERSION, FIRMWARE_VERSION_DATE);
     Serial.println("[BIKECLOCK] BLE Service UUID: " BLE_SERVICE_UUID);
     Serial.println("[BIKECLOCK] Command UUID: " BLE_CHAR_COMMAND_UUID);
     Serial.println("[BIKECLOCK] Response UUID: " BLE_CHAR_RESPONSE_UUID);
@@ -216,6 +220,18 @@ void handleTimeSync(const char* command) {
         sendResponse("ERROR: Invalid timestamp format");
         setLedError();
     }
+}
+
+// --- Version Handler ---
+void handleGetVersion() {
+    Serial.println("[BIKECLOCK] Processing GET:version command");
+
+    // ファームウェアバージョンを返す（ヘッダーで定義されたバージョンを使用）
+    char versionResponse[64];
+    snprintf(versionResponse, sizeof(versionResponse), "OK:version:%s", FIRMWARE_VERSION);
+    sendResponse(versionResponse);
+
+    Serial.printf("[BIKECLOCK] Version response sent: %s\n", FIRMWARE_VERSION);
 }
 
 // --- Response Helper ---

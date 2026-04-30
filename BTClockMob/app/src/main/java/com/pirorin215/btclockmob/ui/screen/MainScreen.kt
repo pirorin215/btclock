@@ -33,6 +33,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.koin.androidx.compose.koinViewModel
 import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
+import com.pirorin215.btclockmob.viewModel.OtaViewModel
 import com.pirorin215.btclockmob.viewModel.AppSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.DeviceHistoryViewModel
@@ -81,6 +82,7 @@ fun MainScreen(
     var showAppSettings by remember { mutableStateOf(false) }
     var showAppLogPanel by remember { mutableStateOf(false) }
     var showKeyCodeSettings by remember { mutableStateOf(false) }
+    var showOtaScreen by remember { mutableStateOf(false) }
 
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
@@ -92,11 +94,13 @@ fun MainScreen(
     // KeyCodeSettingsViewModelの初期化 (Koin)
     val keyCodeSettingsViewModel: KeyCodeSettingsViewModel = koinViewModel()
 
-    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings) {
+    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showOtaScreen) {
         if (showAppSettings) {
             showAppSettings = false
         } else if (showKeyCodeSettings) {
             showKeyCodeSettings = false
+        } else if (showOtaScreen) {
+            showOtaScreen = false
         } else if (isSelectionMode) {
             historyViewModel.exitSelectionMode()
         }
@@ -128,6 +132,14 @@ fun MainScreen(
             KeyCodeSettingsScreen(
                 viewModel = keyCodeSettingsViewModel,
                 onBack = { showKeyCodeSettings = false }
+            )
+        }
+        showOtaScreen -> {
+            val otaViewModel: OtaViewModel = koinViewModel()
+            OtaScreen(
+                bleConnectionManager = mainViewModel.bleConnectionManagerForOta,
+                otaViewModel = otaViewModel,
+                onBack = { showOtaScreen = false }
             )
         }
         else -> {
@@ -198,6 +210,13 @@ fun MainScreen(
                                         text = { Text("キー設定") },
                                         onClick = {
                                             showKeyCodeSettings = true
+                                            expanded = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("OTA更新") },
+                                        onClick = {
+                                            showOtaScreen = true
                                             expanded = false
                                         }
                                     )

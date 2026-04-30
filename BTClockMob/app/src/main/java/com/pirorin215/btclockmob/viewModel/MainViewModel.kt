@@ -39,6 +39,7 @@ class MainViewModel(
 
     // --- State exposed from orchestrator and managers ---
     val connectionState: StateFlow<ConnectionState> = bleConnectionManager.connectionState
+    val bleConnectionManagerForOta = bleConnectionManager
     val currentOperation: StateFlow<BleOperation> = bleOrchestrator.currentOperation
     val navigationEvent: SharedFlow<NavigationEvent> = bleOrchestrator.navigationEvent
     val currentForegroundLocation = locationMonitor.currentForegroundLocation

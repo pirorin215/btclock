@@ -10,6 +10,10 @@
 
 using namespace Adafruit_LittleFS_Namespace;
 
+// --- Firmware Version Information ---
+#define FIRMWARE_VERSION "1.0.2"
+#define FIRMWARE_VERSION_DATE "2026-04-24"
+
 // --- GPIO Pin Definitions ---
 #define LED_DIO_GPIO     D4   // TM1637 DIO pin (Physical SDA pin)
 #define LED_CLK_GPIO     D5   // TM1637 CLK pin (Physical SCL pin)

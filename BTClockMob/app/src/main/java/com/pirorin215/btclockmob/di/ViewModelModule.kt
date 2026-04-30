@@ -10,8 +10,10 @@ import com.pirorin215.btclockmob.viewModel.LocationMonitor
 import com.pirorin215.btclockmob.viewModel.LogManager
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
+import com.pirorin215.btclockmob.viewModel.OtaViewModel
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.KeyCodeSettingsRepository
+import com.pirorin215.btclockmob.data.BleRepository
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
 
@@ -43,4 +45,11 @@ val viewModelModule = module {
     }
 
     viewModel { DeviceHistoryViewModel(get(), get<Application>()) }
+
+    viewModel {
+        OtaViewModel(
+            get<Application>(),
+            get<BleConnectionManager>()
+        )
+    }
 }

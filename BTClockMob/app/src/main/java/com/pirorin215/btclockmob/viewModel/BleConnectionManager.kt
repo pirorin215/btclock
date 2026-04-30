@@ -42,6 +42,9 @@ class BleConnectionManager(
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
 
+    // Expose repository for OTA operations
+    val repositoryForOta = repository
+
     // The internal _connectionState is removed, as we update the external _connectionStateFlow
     // private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     // val connectionState = _connectionState.asStateFlow() // No longer exposed
