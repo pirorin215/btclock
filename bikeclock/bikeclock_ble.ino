@@ -97,7 +97,8 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
 void setupBLE() {
     logPrint("BIKECLOCK", "========================================");
     logPrint("BIKECLOCK", "BLE Initialization (HID + Custom)");
-    logPrint("BIKECLOCK", "Firmware Version: %s (%s)", FIRMWARE_VERSION_STR, FIRMWARE_VERSION_DATE);
+    logPrint("BIKECLOCK", "Firmware Version: %d.%d.%d (%s)", 
+             FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH, __DATE__);
     logPrint("BIKECLOCK", "BLE Service UUID: " BLE_SERVICE_UUID);
     logPrint("BIKECLOCK", "Command UUID: " BLE_CHAR_COMMAND_UUID);
     logPrint("BIKECLOCK", "Response UUID: " BLE_CHAR_RESPONSE_UUID);
@@ -230,12 +231,14 @@ void handleTimeSync(const char* command) {
 void handleGetVersion() {
     logPrint("BIKECLOCK", "Processing GET:version command");
 
-    // ファームウェアバージョンを返す（ヘッダーで定義されたバージョンを使用）
+    // ファームウェアバージョンを返す（数値定義から動的に生成）
     char versionResponse[64];
-    snprintf(versionResponse, sizeof(versionResponse), "OK:version:%s", FIRMWARE_VERSION_STR);
+    snprintf(versionResponse, sizeof(versionResponse), "OK:version:%d.%d.%d", 
+             FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
     sendResponse(versionResponse);
 
-    logPrint("BIKECLOCK", "Version response sent: %s", FIRMWARE_VERSION_STR);
+    logPrint("BIKECLOCK", "Version response sent: %d.%d.%d", 
+             FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
 }
 
 // --- Response Helper ---

@@ -14,8 +14,6 @@ using namespace Adafruit_LittleFS_Namespace;
 #define FIRMWARE_VERSION_MAJOR 1
 #define FIRMWARE_VERSION_MINOR 0
 #define FIRMWARE_VERSION_PATCH 2
-#define FIRMWARE_VERSION_STR "1.0.2"
-#define FIRMWARE_VERSION_DATE "2026-04-24"
 
 // --- GPIO Pin Definitions ---
 #define LED_DIO_GPIO     D4   // TM1637 DIO pin (Physical SDA pin)
