@@ -1,11 +1,18 @@
 package com.pirorin215.btclockmob.viewModel
 
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.util.Log
+import com.pirorin215.btclockmob.service.BleScanService
+import kotlinx.coroutines.Job
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.btclockmob.BleScanServiceManager
 import com.pirorin215.btclockmob.data.BleRepository
@@ -42,8 +49,39 @@ class BleConnectionManager(
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
 
+    // Bluetooth状態変化を監視するBroadcastReceiver
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                when (state) {
+                    BluetoothAdapter.STATE_OFF -> {
+                        logManager.addDebugLog("Bluetooth turned OFF - disconnecting and cleaning up")
+                        // 接続状態を強制的に切断状態に設定
+                        scope.launch {
+                            disconnect()
+                            repository.close()
+                            _connectionStateFlow.value = ConnectionState.Disconnected
+                        }
+                    }
+                    BluetoothAdapter.STATE_ON -> {
+                        logManager.addDebugLog("Bluetooth turned ON - attempting reconnection")
+                        // Bluetooth ON時に再接続を試みる
+                        scope.launch {
+                            delay(1000L) // Bluetoothが完全に有効になるのを待つ
+                            restartScan(forceScan = true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Flag to track if user initiated disconnect (power off, bike turned off, etc.)
     private var userInitiatedDisconnect = false
+
+    // Periodic job to check BleScanService health
+    private var serviceCheckJob: Job? = null
 
     // The internal _connectionState is removed, as we update the external _connectionStateFlow
     // private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
@@ -53,6 +91,10 @@ class BleConnectionManager(
         // Initialize connection state to Disconnected to ensure clean state on app start
         _connectionStateFlow.value = ConnectionState.Disconnected
         logManager.addDebugLog("BleConnectionManager: Initialized with state=Disconnected")
+
+        // Bluetooth状態変化を監視するBroadcastReceiverを登録
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        context.registerReceiver(bluetoothStateReceiver, filter)
 
         // Collect connection state from the repository
         repository.connectionState.onEach { state ->
@@ -141,6 +183,23 @@ class BleConnectionManager(
                 }
             }
         }
+
+        // Start initial BLE scan after a short delay to ensure BleScanService is ready
+        // This fixes the issue where BLE auto-connection doesn't work on app startup
+        scope.launch {
+            delay(2000L) // Wait 2 seconds for BleScanService to be fully initialized
+            logManager.addDebugLog("Starting initial BLE scan...")
+            restartScan()
+        }
+
+        // Start periodic service health check (1 minute interval)
+        serviceCheckJob = scope.launch {
+            while (coroutineContext[Job.Key]?.isActive == true) {
+                delay(com.pirorin215.btclockmob.constants.TimeConstants.SERVICE_CHECK_INTERVAL_MS)
+                checkAndRestartBleScanService()
+            }
+        }
+        logManager.addDebugLog("Service health check job started (interval: ${com.pirorin215.btclockmob.constants.TimeConstants.SERVICE_CHECK_INTERVAL_MS}ms)")
     }
 
     fun startScan() {
@@ -193,7 +252,49 @@ class BleConnectionManager(
     }
 
     fun close() {
+        serviceCheckJob?.cancel()
+        serviceCheckJob = null
         repository.close()
+        // BroadcastReceiverの登録解除
+        try {
+            context.unregisterReceiver(bluetoothStateReceiver)
+        } catch (e: IllegalArgumentException) {
+            logManager.addDebugLog("BluetoothStateReceiver was not registered")
+        }
         logManager.addDebugLog("Connection manager closed")
+    }
+
+    /**
+     * Check if BleScanService is running and restart if necessary
+     * This ensures the service survives battery optimization, crashes, or system kills
+     */
+    @Suppress("DEPRECATION")
+    private fun checkAndRestartBleScanService() {
+        try {
+            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val serviceName = BleScanService::class.java.name
+
+            // Check if service is running (API 26+ uses getRunningServices with restrictions)
+            val isRunning = activityManager.getRunningServices(Integer.MAX_VALUE).any { serviceInfo ->
+                serviceInfo.service.className == serviceName
+            }
+
+            if (!isRunning) {
+                logManager.addLog("BleScanService is not running. Restarting...", LogLevel.ERROR)
+                val serviceIntent = Intent(context, BleScanService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+                logManager.addDebugLog("BleScanService restart command sent")
+            } else {
+                logManager.addDebugLog("Service health check: BleScanService is running")
+            }
+        } catch (e: SecurityException) {
+            logManager.addDebugLog("Service check failed: Permission denied (may be normal on some Android versions)")
+        } catch (e: Exception) {
+            logManager.addDebugLog("Service check failed: ${e.message}")
+        }
     }
 }

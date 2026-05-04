@@ -15,4 +15,7 @@ object TimeConstants {
     const val SERVICE_DISCOVERY_DELAY_MS = 600L
     const val RECONNECT_DELAY_MS = 500L
     const val FORCE_RECONNECT_DELAY_MS = 500L
+
+    // サービス監視
+    const val SERVICE_CHECK_INTERVAL_MS = 60000L // 1分
 }

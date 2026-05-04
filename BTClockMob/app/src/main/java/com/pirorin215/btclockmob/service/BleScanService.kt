@@ -12,8 +12,10 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -43,6 +45,25 @@ class BleScanService : Service() {
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var scanJob: Job? = null
 
+    // Bluetooth状態変化を監視するBroadcastReceiver
+    private val bluetoothStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == BluetoothAdapter.ACTION_STATE_CHANGED) {
+                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                when (state) {
+                    BluetoothAdapter.STATE_OFF -> {
+                        Log.d(TAG, "Bluetooth turned OFF - stopping scan")
+                        stopBleScan()
+                    }
+                    BluetoothAdapter.STATE_ON -> {
+                        Log.d(TAG, "Bluetooth turned ON - starting scan")
+                        startBleScan()
+                    }
+                }
+            }
+        }
+    }
+
     private val scanSettings = ScanSettings.Builder()
         .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER) // バッテリー消費を抑える
         .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES) // 全ての一致を報告
@@ -61,6 +82,10 @@ class BleScanService : Service() {
         bluetoothManager = getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothAdapter = bluetoothManager.adapter
         createNotificationChannel()
+
+        // Bluetooth状態変化を監視するBroadcastReceiverを登録
+        val filter = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
+        registerReceiver(bluetoothStateReceiver, filter)
 
         // Subscribe to restart scan events
         CoroutineScope(Dispatchers.IO).launch {
@@ -100,6 +125,12 @@ class BleScanService : Service() {
         Log.d(TAG, "BleScanService onDestroy")
         stopBleScan()
         stopForeground(true)
+        // BroadcastReceiverの登録解除
+        try {
+            unregisterReceiver(bluetoothStateReceiver)
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "BluetoothStateReceiver was not registered")
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? {
