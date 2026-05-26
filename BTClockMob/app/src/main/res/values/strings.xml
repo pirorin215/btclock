@@ -23,6 +23,7 @@
     <string name="auto_start_on_boot">OS起動時に自動開始</string>
     <string name="history_interval">定期記録の間隔（分）</string>
     <string name="history_distance">定期記録の距離（メートル）</string>
+    <string name="route_center_offset">ルート表示の中心点オフセット（垂直方向）</string>
     <string name="save_button">保存</string>
 
     <!-- Device History (Integrated into MainScreen) -->

@@ -33,6 +33,33 @@ class DeviceHistoryViewModel(
                 initialValue = emptyList()
             )
 
+    // フィルター状態：接続・切断のみ表示するかどうか（デフォルト：ON）
+    private val _isFilterConnectionOnly = MutableStateFlow(true)
+    val isFilterConnectionOnly: StateFlow<Boolean> = _isFilterConnectionOnly.asStateFlow()
+
+    // グルーピング状態：1日単位でまとめるかどうか（デフォルト：ON）
+    private val _isGroupByDay = MutableStateFlow(true)
+    val isGroupByDay: StateFlow<Boolean> = _isGroupByDay.asStateFlow()
+
+    /**
+     * フィルター適用後の履歴リスト
+     */
+    val filteredHistoryEntries: StateFlow<List<DeviceHistoryEntry>> =
+        kotlinx.coroutines.flow.combine(
+            deviceHistoryEntriesForList,
+            _isFilterConnectionOnly
+        ) { entries, filterOnly ->
+            if (filterOnly) {
+                entries.filter { !it.isPeriodic }
+            } else {
+                entries
+            }
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
     /**
      * デバイス履歴エントリ（全てのデータ、昇順 - 将来的な拡張用）
      */
@@ -75,7 +102,7 @@ class DeviceHistoryViewModel(
      * 住所が未取得の最近のエントリ（最大20件）に対して、住所を取得して更新する
      */
     private suspend fun fillMissingAddresses() {
-        val entries = deviceHistoryEntriesForList.value
+        val entries = filteredHistoryEntries.value
         val missingAddressEntries = entries.filter { it.address == null && it.latitude != null && it.longitude != null }
             .take(20) // 一度に大量にリクエストしないよう制限
             
@@ -151,11 +178,22 @@ class DeviceHistoryViewModel(
         }
     }
 
+    // 接続・切断のみフィルターを切り替え
+    fun toggleFilterConnectionOnly() {
+        _isFilterConnectionOnly.value = !_isFilterConnectionOnly.value
+    }
+
+    // 1日単位のグルーピングを切り替え
+    fun toggleGroupByDay() {
+        _isGroupByDay.value = !_isGroupByDay.value
+    }
+
     // 選択モードを開始
     fun enterSelectionMode(timestamp: Long) {
         _isSelectionMode.value = true
         _selectedEntries.value = setOf(timestamp)
     }
+
 
     // 選択モードを終了
     fun exitSelectionMode() {

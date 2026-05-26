@@ -44,6 +44,20 @@ class AppSettingsViewModel(
             initialValue = 1000
         )
 
+    val routeCenterOffset: StateFlow<Float> = appSettingsRepository.getFlow(Settings.ROUTE_CENTER_OFFSET)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 0f
+        )
+
+    val routeLabelFontSize: StateFlow<Float> = appSettingsRepository.getFlow(Settings.ROUTE_LABEL_FONT_SIZE)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 18f
+        )
+
     fun saveThemeMode(themeMode: ThemeMode) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.THEME_MODE, themeMode)
@@ -65,6 +79,18 @@ class AppSettingsViewModel(
     fun saveHistoryDistanceM(meters: Int) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.HISTORY_DISTANCE_M, meters)
+        }
+    }
+
+    fun saveRouteCenterOffset(offset: Float) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.ROUTE_CENTER_OFFSET, offset)
+        }
+    }
+
+    fun saveRouteLabelFontSize(size: Float) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.ROUTE_LABEL_FONT_SIZE, size)
         }
     }
 }

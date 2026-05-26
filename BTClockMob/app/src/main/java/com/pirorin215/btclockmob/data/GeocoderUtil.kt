@@ -42,13 +42,28 @@ object GeocoderUtil {
         if (address == null) return null
         
         // getAddressLine(0) は「日本、〒305-0005 茨城県つくば市天久保２丁目１−１」のようなフルセットを返す
-        val fullAddress = address.getAddressLine(0) ?: return address.featureName
+        val fullAddress = address.getAddressLine(0)
+        val featureName = address.featureName
         
-        // 表示をスッキリさせるため、国名と郵便番号を削る
-        return fullAddress
-            .replace("日本、", "")
-            .replace("日本", "")
-            .replace(Regex("〒\\d{3}-\\d{4}\\s*"), "")
-            .trim()
+        var result = if (fullAddress != null) {
+            fullAddress
+                .replace("日本、", "")
+                .replace("日本", "")
+                .replace(Regex("〒\\d{3}-\\d{4}\\s*"), "")
+                .trim()
+        } else {
+            featureName ?: return null
+        }
+
+        // featureName が住所の末尾（番地など）と一致せず、かつ有意な名前（数字のみ等でない）の場合は、
+        // 建物名の可能性があるため付加してみる
+        if (fullAddress != null && featureName != null && featureName != address.subThoroughfare) {
+            // featureName が住所に含まれていない場合のみ追記
+            if (!result.contains(featureName)) {
+                result = "$result ($featureName)"
+            }
+        }
+        
+        return result
     }
 }

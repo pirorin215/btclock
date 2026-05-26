@@ -58,18 +58,21 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentAutoStartOnBoot by appSettingsViewModel.autoStartOnBoot.collectAsState()
     val currentInterval by appSettingsViewModel.historyIntervalMin.collectAsState()
     val currentDistance by appSettingsViewModel.historyDistanceM.collectAsState()
+    val currentRouteOffset by appSettingsViewModel.routeCenterOffset.collectAsState()
 
     // 状態を管理
     var selectedThemeMode by remember(currentThemeMode) { mutableStateOf(currentThemeMode) }
     var autoStartOnBootChecked by remember(currentAutoStartOnBoot) { mutableStateOf(currentAutoStartOnBoot) }
     var selectedInterval by remember(currentInterval) { mutableStateOf(currentInterval.toFloat()) }
     var selectedDistance by remember(currentDistance) { mutableStateOf(currentDistance.toFloat()) }
+    var selectedRouteOffset by remember(currentRouteOffset) { mutableStateOf(currentRouteOffset) }
 
     val saveSettings: () -> Unit = {
         appSettingsViewModel.saveThemeMode(selectedThemeMode)
         appSettingsViewModel.saveAutoStartOnBoot(autoStartOnBootChecked)
         appSettingsViewModel.saveHistoryIntervalMin(selectedInterval.roundToInt())
         appSettingsViewModel.saveHistoryDistanceM(selectedDistance.roundToInt())
+        appSettingsViewModel.saveRouteCenterOffset(selectedRouteOffset)
         onBack()
     }
 
@@ -138,6 +141,22 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                 onValueChange = { selectedDistance = it },
                 valueRange = 100f..5000f,
                 steps = 48
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Route Center Offset
+            Text(
+                text = "${stringResource(R.string.route_center_offset)}: ${selectedRouteOffset.roundToInt()}",
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Slider(
+                value = selectedRouteOffset,
+                onValueChange = { selectedRouteOffset = it },
+                valueRange = -1000f..1000f,
+                steps = 2000
             )
 
             Spacer(modifier = Modifier.height(16.dp))

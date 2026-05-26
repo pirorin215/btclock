@@ -66,6 +66,16 @@ object Settings {
         intPreferencesKey("history_distance_m"),
         1000
     )
+
+    val ROUTE_CENTER_OFFSET = SettingKey.Direct(
+        floatPreferencesKey("route_center_offset"),
+        0f
+    )
+
+    val ROUTE_LABEL_FONT_SIZE = SettingKey.Direct(
+        floatPreferencesKey("route_label_font_size"),
+        18f
+    )
 }
 
 class AppSettingsRepository(private val context: Context) {

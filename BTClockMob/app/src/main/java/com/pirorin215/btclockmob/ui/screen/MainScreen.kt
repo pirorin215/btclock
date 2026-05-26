@@ -10,14 +10,17 @@ import com.pirorin215.btclockmob.data.ConnectionState
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -60,7 +63,7 @@ private fun openMapForEntry(context: android.content.Context, entry: com.pirorin
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @SuppressLint("MissingPermission")
 @Composable
 fun MainScreen(
@@ -73,10 +76,14 @@ fun MainScreen(
     val logs: List<String> by mainViewModel.logs.collectAsState()
 
     val historyEntries by historyViewModel.deviceHistoryEntries.collectAsState()
-    val entriesForList by historyViewModel.deviceHistoryEntriesForList.collectAsState()
+    val entriesForList by historyViewModel.filteredHistoryEntries.collectAsState()
+    val isFilterConnectionOnly by historyViewModel.isFilterConnectionOnly.collectAsState()
+    val isGroupByDay by historyViewModel.isGroupByDay.collectAsState()
     val homeLocation by historyViewModel.homeLocation.collectAsState()
     val isSelectionMode by historyViewModel.isSelectionMode.collectAsState()
     val selectedEntries by historyViewModel.selectedEntries.collectAsState()
+    val routeCenterOffset by appSettingsViewModel.routeCenterOffset.collectAsState()
+    val routeLabelFontSize by appSettingsViewModel.routeLabelFontSize.collectAsState()
 
     var showAppSettings by remember { mutableStateOf(false) }
     var showAppLogPanel by remember { mutableStateOf(false) }
@@ -84,6 +91,15 @@ fun MainScreen(
 
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
+    var showRouteDialogDate by remember { mutableStateOf<String?>(null) }
+    
+    // 現在選択されている日のエントリを動的に取得（フィルター変更に追従）
+    val routeEntries = remember(entriesForList, showRouteDialogDate) {
+        if (showRouteDialogDate == null) emptyList()
+        else entriesForList.filter { 
+            java.text.SimpleDateFormat("yyyy/MM/dd", java.util.Locale.getDefault()).format(java.util.Date(it.timestamp)) == showRouteDialogDate 
+        }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -231,7 +247,7 @@ fun MainScreen(
                     )
                 }
             ) { innerPadding ->
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
@@ -244,56 +260,136 @@ fun MainScreen(
                             Text(stringResource(R.string.no_device_history_yet), style = MaterialTheme.typography.bodyLarge)
                         }
                     } else {
-                        // 最後に「切断」されたエントリを特定
-                        val lastDisconnection = entriesForList.find { it.isDisconnection }
+                        // 各日付の展開状態を管理
+                        var expandedDate by remember { mutableStateOf<String?>(null) }
+                        var showCalendar by remember { mutableStateOf(false) }
 
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            item {
-                                DeviceHistoryHeader()
-                            }
+                        // フィルター操作（選択モード以外で表示）
+                        if (!isSelectionMode) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilterChip(
+                                    selected = isFilterConnectionOnly,
+                                    onClick = { historyViewModel.toggleFilterConnectionOnly() },
+                                    label = { Text("接続/切断のみ") },
+                                    leadingIcon = if (isFilterConnectionOnly) {
+                                        { Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                                    } else null
+                                )
 
-                            items(entriesForList) { entry ->
-                                val isLastDisconnection = lastDisconnection?.timestamp == entry.timestamp
-                                DeviceHistoryCard(
-                                    entry = entry,
-                                    home = homeLocation,
-                                    isSelectionMode = isSelectionMode,
-                                    isSelected = selectedEntries.contains(entry.timestamp),
-                                    isHighlighted = isLastDisconnection,
-                                    onClick = { clickedEntry ->
-                                        if (isSelectionMode) {
-                                            historyViewModel.toggleSelection(clickedEntry.timestamp)
-                                        } else {
-                                            openMapForEntry(context, clickedEntry)
-                                        }
-                                    },
-                                    onLongClick = { longClickedEntry ->
-                                        if (!isSelectionMode) {
-                                            historyViewModel.enterSelectionMode(longClickedEntry.timestamp)
-                                        }
+                                FilterChip(
+                                    selected = showCalendar,
+                                    onClick = { showCalendar = !showCalendar },
+                                    label = { Text("カレンダー") },
+                                    leadingIcon = if (showCalendar) {
+                                        { Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                                    } else {
+                                        { Icon(Icons.Default.CalendarToday, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
                                     }
                                 )
                             }
                         }
 
-                        // 最新の駐車位置がある場合、右下に「バイクを探す」ボタンを表示
-                        if (lastDisconnection != null && !isSelectionMode) {
-                            ExtendedFloatingActionButton(
-                                onClick = { openMapForEntry(context, lastDisconnection) },
-                                icon = { Icon(Icons.Default.LocationOn, contentDescription = null) },
-                                text = { Text(stringResource(R.string.find_my_bike)) },
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(16.dp),
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
+                        Box(modifier = Modifier.weight(1f)) {
+                            // 最後に「切断」されたエントリを特定
+                            val lastDisconnection = entriesForList.find { it.isDisconnection }
+
+                            Column(modifier = Modifier.fillMaxSize()) {
+                                val groupedEntries = entriesForList.groupBy { entry ->
+                                    java.text.SimpleDateFormat("yyyy/MM/dd", java.util.Locale.getDefault()).format(java.util.Date(entry.timestamp))
+                                }
+
+                                if (showCalendar) {
+                                    ActivityCalendar(
+                                        activeDates = groupedEntries.keys,
+                                        onDateClick = { date ->
+                                            if (groupedEntries.containsKey(date)) {
+                                                expandedDate = date
+                                                // スクロール処理
+                                                val keys = groupedEntries.keys.toList()
+                                                val index = keys.indexOf(date)
+                                                if (index != -1) {
+                                                    scope.launch {
+                                                        listState.animateScrollToItem(index)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+
+                                Box(modifier = Modifier.weight(1f)) {
+                                    LazyColumn(
+                                        state = listState,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        groupedEntries.forEach { (date, entries) ->
+                                            val isExpanded = expandedDate == date
+                                            
+                                            stickyHeader {
+                                                DateHeader(
+                                                    date = date,
+                                                    entries = entries,
+                                                    isExpanded = isExpanded,
+                                                    onToggleExpand = {
+                                                        expandedDate = if (isExpanded) null else date
+                                                    },
+                                                    onShowRoute = {
+                                                        showRouteDialogDate = date
+                                                    }
+
+                                                )
+                                            }
+                                            
+                                            if (isExpanded) {
+                                                items(entries) { entry ->
+                                                    val isLastDisconnection = lastDisconnection?.timestamp == entry.timestamp
+                                                    DeviceHistoryCard(
+                                                        entry = entry,
+                                                        home = homeLocation,
+                                                        isSelectionMode = isSelectionMode,
+                                                        isSelected = selectedEntries.contains(entry.timestamp),
+                                                        isHighlighted = isLastDisconnection,
+                                                        onClick = { clickedEntry ->
+                                                            if (isSelectionMode) {
+                                                                historyViewModel.toggleSelection(clickedEntry.timestamp)
+                                                            } else {
+                                                                openMapForEntry(context, clickedEntry)
+                                                            }
+                                                        },
+                                                        onLongClick = { longClickedEntry ->
+                                                            if (!isSelectionMode) {
+                                                                historyViewModel.enterSelectionMode(longClickedEntry.timestamp)
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // 最新の駐車位置がある場合、右下に「バイクを探す」ボタンを表示
+                                    if (lastDisconnection != null && !isSelectionMode) {
+                                        ExtendedFloatingActionButton(
+                                            onClick = { openMapForEntry(context, lastDisconnection) },
+                                            icon = { Icon(Icons.Default.LocationOn, contentDescription = null) },
+                                            text = { Text(stringResource(R.string.find_my_bike)) },
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(16.dp),
+                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -301,7 +397,6 @@ fun MainScreen(
                     if (showAppLogPanel) {
                         Box(
                             modifier = Modifier
-                                .align(Alignment.BottomCenter)
                                 .fillMaxWidth()
                                 .heightIn(max = 200.dp) // Limit height of the log panel
                         ) {
@@ -365,5 +460,164 @@ fun MainScreen(
                 }
             }
         )
+    }
+
+    if (showRouteDialogDate != null) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showRouteDialogDate = null },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false
+            )
+        ) {
+            var selectedPoint by remember { mutableStateOf<com.pirorin215.btclockmob.data.DeviceHistoryEntry?>(null) }
+
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // ヘッダー
+                    TopAppBar(
+                        title = { Text("$showRouteDialogDate の移動ルート") },
+                        navigationIcon = {
+                            IconButton(onClick = { showRouteDialogDate = null }) {
+                                Icon(Icons.Default.Close, contentDescription = "閉じる")
+                            }
+                        },
+                        actions = {
+                            FilterChip(
+                                selected = isFilterConnectionOnly,
+                                onClick = { historyViewModel.toggleFilterConnectionOnly() },
+                                label = { Text("接続/切断のみ") },
+                                leadingIcon = if (isFilterConnectionOnly) {
+                                    { Icon(Icons.Default.FilterList, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                                } else null,
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                        }
+                    )
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        // 地図（ルート）表示
+                        RouteVisualizer(
+                            entries = routeEntries,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                            centerOffset = routeCenterOffset,
+                            initialFontSize = routeLabelFontSize,
+                            onFontSizeChanged = { newSize ->
+                                appSettingsViewModel.saveRouteLabelFontSize(newSize)
+                            },
+                            onPointSelected = { point ->
+                                selectedPoint = point
+                            }
+                        )
+
+                        // 凡例
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(16.dp)
+                                .background(
+                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                    MaterialTheme.shapes.small
+                                )
+                                .padding(8.dp)
+                        ) {
+                            Column {
+                                LegendItem(Color.Green, "開始")
+                                LegendItem(Color.Red, "終了")
+                                LegendItem(Color(0xFF4CAF50), "接続")
+                                LegendItem(Color(0xFFFF9800), "切断")
+                                LegendItem(Color(0xFF2196F3), "記録")
+                            }
+                        }
+
+                        // 選択されたポイントの情報表示
+                        selectedPoint?.let { point ->
+                            Card(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(16.dp)
+                                    .fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(point.timestamp))
+                                    val type = when {
+                                        point.isPeriodic -> "記録"
+                                        point.isDisconnection -> "切断"
+                                        else -> "接続"
+                                    }
+                                    
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "$time [$type]",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                        IconButton(onClick = { selectedPoint = null }) {
+                                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    
+                                    if (point.address != null) {
+                                        Text(
+                                            text = point.address,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                    
+                                    Text(
+                                        text = "Lat: ${point.latitude}, Lon: ${point.longitude}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                                    )
+                                    
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    
+                                    Button(
+                                        onClick = { openMapForEntry(context, point) },
+                                        modifier = Modifier.align(Alignment.End),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Google Mapで開く")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LegendItem(color: Color, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(vertical = 2.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(color, CircleShape)
+                .border(1.dp, Color.White, CircleShape)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(text = label, style = MaterialTheme.typography.labelSmall)
     }
 }
