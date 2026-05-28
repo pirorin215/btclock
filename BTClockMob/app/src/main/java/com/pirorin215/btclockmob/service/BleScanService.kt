@@ -66,10 +66,10 @@ class BleScanService : Service() {
 
     private val scanSettings = ScanSettings.Builder()
         .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER) // バッテリー消費を抑える
-        .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES) // 全ての一致を報告
+        .setCallbackType(ScanSettings.CALLBACK_TYPE_FIRST_MATCH) // 最初の一致のみ報告（省電力）
         .setMatchMode(ScanSettings.MATCH_MODE_STICKY) // 不定期なアドバタイズも検出
         .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT) // 1つのアドバタイズで報告
-        .setReportDelay(0L) // 0L: no batching, report results immediately
+        .setReportDelay(1000L) // 1秒バッチ処理で報告（省電力）
         .build()
 
     private val scanFilters = listOf(
