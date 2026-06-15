@@ -185,7 +185,7 @@ void setup() {
     Serial.println("BikeClock ESP32-S3 SuperMini");
     Serial.printf("Firmware Version: %d.%d.%d\n",
                  FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
-    Serial.println("[Phase 1] Display & Time Logic");
+    Serial.println("[Phase 2.5] Display + LED + BLE + ePaper");
     Serial.println("========================================");
 
     // TM1637 初期化
@@ -196,6 +196,9 @@ void setup() {
 
     // オンボードRGB LED 初期化（Phase 2）
     setupLed();
+
+    // ePaper 初期化（昼間視認性用、Phase 2.5）— ブートスプラッシュ表示
+    setupEpaper();
 
     // バージョン表示（1秒）
     logPrint("INIT", "Displaying firmware version...");
@@ -231,5 +234,6 @@ void loop() {
     updateTimestamp();
     updateLed();
     updateDisplayAndLedState();
+    updateEpaperDisplay();
     delay(10);
 }

@@ -8,7 +8,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 4
+#define FIRMWARE_VERSION_PATCH 5
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -23,6 +23,15 @@
 
 // Onboard RGB LED (WS2812 addressable, fixed on GPIO48)
 #define ONBOARD_LED_GPIO    48
+
+// ePaper (WeAct 2.13" BW, GxEPD2_213_B74) — 昼間視認性用
+// 専用 SPI3_HOST バスを使用（MCP23S17 の既定SPI2と完全分離）
+#define EPD_CS_GPIO         1
+#define EPD_DC_GPIO         2
+#define EPD_RST_GPIO        3
+#define EPD_BUSY_GPIO       10
+#define EPD_SPI_SCK_GPIO    12   // 専用 SPI3_HOST
+#define EPD_SPI_MOSI_GPIO   11   // 専用 SPI3_HOST (MISOはePaper不要)
 
 // --- Display Settings ---
 #define DISPLAY_UPDATE_INTERVAL_MS  1000
@@ -76,6 +85,10 @@ void updateWeekdayDisplay();
 void updateDisplayForCurrentMode();
 void displayVersion();
 void encodeStringToSegments(const char* str, uint8_t* data);
+
+// ePaper表示（昼間視認性用）— bikeclock_esp32_epaper.ino
+void setupEpaper();
+void updateEpaperDisplay();
 
 // システム
 void updateTimestamp();

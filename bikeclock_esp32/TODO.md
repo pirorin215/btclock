@@ -26,9 +26,15 @@ Seeed XIAO BLE (nRF52840) 版 `bikeclock/` を **ESP32-S3 SuperMini** へ移植�
 | MCP23S17 SPI | MISO | 5 |
 | MCP23S17 SPI | SCK | 8 |
 | MCP23S17 SPI | CS | 9 |
+| ePaper (Phase 2.5) | CS | 1 |
+| ePaper (Phase 2.5) | DC | 2 |
+| ePaper (Phase 2.5) | RST | 3 |
+| ePaper (Phase 2.5) | BUSY | 10 |
+| ePaper (Phase 2.5) | SCK (専用SPI3) | 12 |
+| ePaper (Phase 2.5) | MOSI (専用SPI3) | 11 |
 | オンボードLED | RGB (WS2812) | 48（ボード固定） |
 
-空き: GPIO 0,1,2,3,10（0 は boot ピン注意 / Serial は USB-CDC を使用）
+空き: GPIO 0,13,14,15,16,17,18,21,33-41,45-47（0 は boot ピン注意 / Serial は USB-CDC を使用）
 
 ### アプリ互換性の維持要件（必ず守る）
 - デバイス名: `BikeClock-0001`
@@ -90,6 +96,20 @@ XIAO 版の 3 色 common anode LED から、ESP32-S3 の **WS2812 RGB LED 1個**
 - [x] `setup()` に `setupLed()` + `updateLedStateBasedOnStatus()`、`loop()` に `updateLed()` 追加
 - [x] ファームウェアバージョン 2.0.1 → 2.0.2
 - **検証**: ビルド成功 ✅ / 実機LED確認 ✅（起動後 緑固定 = SYNCED 状態 確認済み）
+
+#### Phase 2.5 — ePaper 表示（昼間視認性） [リスク:低〜中] ✅ 完了
+TM1637 7セグLEDは昼間の太陽光下で視認性が悪いため、WeAct 2.13" ePaper(BW) を追加して併用。時刻ソース・BLE・アプリ互換性はそのまま。
+- [x] `bikeclock_esp32_epaper.ino`（新規）: GxEPD2_213_B74(BW) + U8g2_for_Adafruit_GFX（日本語）
+- [x] 専用 SPI3_HOST バス（`SPIClass epdSPI(HSPI)`）。`epdSPI.begin()` → `epd2.selectSPI()` → `init()` の順で専用ピン確保
+- [x] ピン割当: CS=1, DC=2, RST=3, BUSY=10, SCK=12, MOSI=11（MCP23S17既定SPI2と完全分離）
+- [x] 表示内容: 時刻(大, `logisoso46_tn`+手描画コロン) + 曜日(月曜日…) + 日付(○月○日)（`unifont_t_japanese3`）
+- [x] 更新戦略: 分変化→時刻帯部分更新(約0.3s) / 日変化・初回同期・15分ごと→全画面フル更新 / 未同期→「時刻未同期」
+- [x] `setup()` に `setupEpaper()`（ブートスプラッシュ）、`loop()` に `updateEpaperDisplay()` 追加
+- [x] ファームウェアバージョン 2.0.4 → 2.0.5
+- **検証**: ビルド成功 ✅ / 実機ePaper表示確認（要配線）
+  - 配線: ePaper(VCC→3V3, GND→GND, CS→1, DC→2, RES→3, BUSY→10, SCL/SCK→12, SDA/MOSI→11)
+
+> **学び**: GxEPD2 はデフォルトでグローバル `SPI`(FSPI=SPI2) を使う。別ホストを使う場合は `epd2.selectSPI(SPIClass&, SPISettings)` で差替え、かつ `init()` 前に自前で `epdSPI.begin(カスタムピン)` を呼ぶ（`init()` 内の `begin()` は既起動なら即returnしピンを保持するため、ESP32-S3 core 3.3.8 で確認済み）。
 
 #### Phase 5 — BLE カスタム GATT（時刻同期・キー設定） [リスク:中] ✅ 完了
 NimBLE でカスタムサービスを立て、**BTClockMob と時刻同期できる**状態を目指す（HID はまだ）。
