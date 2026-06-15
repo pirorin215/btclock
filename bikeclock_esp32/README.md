@@ -47,7 +47,7 @@ XIAO BLE (nRF52840) 版 [`bikeclock/`](../bikeclock/) の **ESP32-S3 移植版**
 
 | コンポーネント | 説明 |
 |--------------|------|
-| マイコン | **ESP32-S3 SuperMini** (ESP32S3FH4R2: 4MB Flash, 2MB PSRAM) |
+| マイコン | **ESP32-S3 SuperMini** (ESP32S3FH4R2: 4MB Flash, 2MB PSRAM) ※[ピンアウト・仕様参考](https://www.espboards.dev/esp32/esp32-s3-super-mini/) |
 | 表示 | 4-Digit 7セグメントLEDディスプレイ (TM1637) |
 | スイッチI/O | MCP23S17 SPI I/Oエキスパンダー（28pin DIP/SOIC） |
 | 操作 | 外付けスイッチユニット（8ボタン：SW1-SW7 + FUNC） |
