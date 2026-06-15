@@ -6,22 +6,24 @@
  *
  * 表示レイアウト（250x122 横長, rotation=1）:
  *
- *        ┌────────────────────────────────┐
- *        │                                │
- *        │         １ ２ ： ３ ４          │  時刻(logisoso62_tn, 62px)
- *        │                                │
- *        │   １５ 月          ００：１５   │  下段(32px統一): 日付+曜日(左) / 乗車時間(右)
- *        └────────────────────────────────┘
+ *        ┌────────┬─────────────────────┐
+ *        │   月   │      １ ２ ： ３ ４  │  時刻(logisoso62, 右寄せ)
+ *        │ (曜日) │═════════════════════│  ← 横線
+ *        │   15   │      ０ ０ ： １ ５  │  乗車時間(logisoso32, 右寄せ)
+ *        │ (日付) │                     │
+ *        └────────┴─────────────────────┘
+ *          ↑縦線
+ *        左欄: 曜日(上)・日付(下)を縦に表示
  *
- *   - 時刻        : 現在時刻 HH:MM（logisoso62_tn 62px）
- *   - 日付+曜日   : getDay()(数字32px) + 曜日漢字(32px)  例: "15 月" = 15日・月曜
- *                   ※漢字は GNU Unifont 16x16 ビットマップ(KANJI_WEEKDAY)を2倍拡大描画。
- *                     U8g2収録の大きいフォントは漢字非対応のため、自前ビットマップで実現。
- *   - 乗車時間    : 電源ONからの経過(millisベース) HH:MM（logisoso32_tn 32px）
+ *   - 時刻        : 現在時刻 HH:MM（logisoso62_tn 62px, 右寄せ）
+ *   - 曜日        : 漢字32px（左欄上半分）。GNU Unifont 16x16ビットマップを2倍拡大
+ *   - 日付        : getDay() 数字32px（左欄下半分）
+ *   - 乗車時間    : 電源ONからの経過(millisベース) HH:MM（logisoso32_tn 32px, 右寄せ）
  *                   ※時刻同期で時刻がジャンプしても継続＝実際の乗車時間
+ *   - 区切り線    : 縦線(左欄/右欄)、横線(時刻/乗車時間)
  *
  * 更新戦略:
- *   - 分が変化 → 全画面部分更新（高速・低フリッカ。時刻帯も下段も同時更新）
+ *   - 分が変化 → 全画面部分更新（高速・低フリッカ）
  *   - 日が変化 / 初回同期 / 15分ごと → 全画面フル更新（ゴースティング対策）
  *   - 未同期 → 「時刻未同期」固定表示（乗車時間も非表示）
  *
@@ -52,19 +54,29 @@ static int8_t  ep_lastRideMin   = -1;   // 乗車時間の分（変化検出用�
 static bool    ep_lastSynced    = false;
 static bool    ep_showingUnsync = false;
 static uint8_t ep_partialCount  = 0;   // 部分更新の連続回数（一定でフル更新しゴースト除去）
+static uint8_t ep_warmupCount   = 0;   // 同期後の残りフル更新回数（部分更新のコントラスト安定用）
 
 // === 画面ジオメトリ（rotation=1 で 250x122 横長） ===
 static const int16_t EP_W = 250;
 static const int16_t EP_H = 122;
-static const int16_t TIME_BASELINE_Y = 66;    // 時刻(logisoso62)のベースライン
-static const int16_t INFO_BASELINE_Y = 116;   // 下段(logisoso32)のベースライン
-static const int16_t MARGIN_X        = 10;    // 下段の左右マージン
+static const int16_t DIVIDER_X    = 63;   // 縦線のx（左欄幅=63px）
+static const int16_t DIVIDER_Y    = 75;   // 横線のy（時刻/乗車時間の境界）
+static const int16_t LINE_W       = 3;    // 区切り線の太さ
+static const int16_t LEFT_MARGIN  = 4;    // 左欄文字の左端マージン
+static const int16_t RIGHT_MARGIN = 8;    // 右欄の右端マージン
+static const int16_t TIME_BLY     = 62;   // 時刻(logisoso62)のベースライン（上段中央）
+static const int16_t RIDE_BLY     = 119;  // 乗車時間(logisoso32)のベースライン（下段中央）
+static const int16_t ICON_CX      = 136;  // 経過時間アイコン(時計)の中心x
+static const int16_t ICON_CY      = 104;  // 経過時間アイコン(時計)の中心y
+static const int16_t ICON_R       = 12;   // 経過時間アイコン(時計)の半径
 
 // 曜日（0=日 ... 6=土）
 static const char* WEEKDAY_JP[] = {"日", "月", "火", "水", "木", "金", "土"};
 
 // ゴースティング対策: この回数の部分更新ごとに1回フル更新
 static const uint8_t PARTIAL_FULL_REFRESH_EVERY = 15;
+// 同期直後の部分更新は黒が薄くなるため、最初の数回はフル更新でコントラストを安定させる
+static const uint8_t WARMUP_FULL_REFRESHES = 2;
 
 // ====================================================================
 // 曜日漢字 16x16 ビットマップ（GNU Unifont, MSB=左端）
@@ -130,42 +142,43 @@ static void drawKanji16x16(int16_t x, int16_t y, const uint16_t* bmp, int16_t sc
     }
 }
 
-// 数字のみフォント(_tn)で HH MM を「中央揃え」描画。
-// コロンは数字フォントに非収録のため fillCircle で2点を手描画。
-static void drawClockDigitsCenter(int16_t centerX, int16_t baselineY,
-                                  int hours, int minutes,
-                                  const uint8_t* font, int16_t gap,
-                                  int16_t dotR, int16_t dotOff) {
-    u8g2Fonts.setFont(font);
-    u8g2Fonts.setFontMode(1);  // 1=透過（背景は自前で塗る）
-    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
-    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
-
-    char buf[4];
-    snprintf(buf, sizeof(buf), "%02d", hours);
-    int hhW = u8g2Fonts.getUTF8Width(buf);
-    snprintf(buf, sizeof(buf), "%02d", minutes);
-    int mmW = u8g2Fonts.getUTF8Width(buf);
-
-    int16_t totalW = hhW + gap + mmW;
-    int16_t x = centerX - totalW / 2;
-
-    snprintf(buf, sizeof(buf), "%02d", hours);
-    u8g2Fonts.setCursor(x, baselineY);
-    u8g2Fonts.print(buf);
-    snprintf(buf, sizeof(buf), "%02d", minutes);
-    u8g2Fonts.setCursor(x + hhW + gap, baselineY);
-    u8g2Fonts.print(buf);
-
-    // コロン: 数字の上下中央に2つのドット
-    int16_t asc = u8g2Fonts.getFontAscent();
-    int16_t midY = baselineY - asc / 2;
-    int16_t colX = x + hhW + gap / 2;
-    g_epaper.fillCircle(colX, midY - dotOff, dotR, GxEPD_BLACK);
-    g_epaper.fillCircle(colX, midY + dotOff, dotR, GxEPD_BLACK);
+// 太字版: 各黒ピクセルの上下左右に1px追加してストロークを太くする（曜日漢字用）
+static void drawKanji16x16Bold(int16_t x, int16_t y, const uint16_t* bmp, int16_t scale) {
+    for (int16_t row = 0; row < 16; row++) {
+        uint16_t bits = bmp[row];
+        for (int16_t col = 0; col < 16; col++) {
+            if (bits & (0x8000 >> col)) {
+                int16_t px = x + col * scale;
+                int16_t py = y + row * scale;
+                g_epaper.fillRect(px, py, scale, scale, GxEPD_BLACK);
+                g_epaper.fillRect(px + scale, py, 1, scale, GxEPD_BLACK);  // 右に1px膨張
+                g_epaper.fillRect(px - 1, py, 1, scale, GxEPD_BLACK);      // 左に1px膨張
+                g_epaper.fillRect(px, py + scale, scale, 1, GxEPD_BLACK);  // 下に1px膨張
+                g_epaper.fillRect(px, py - 1, scale, 1, GxEPD_BLACK);      // 上に1px膨張
+            }
+        }
+    }
 }
 
-// 数字のみフォント(_tn)で HH MM を「右寄せ」描画（乗車時間用）。
+// 経過時間アイコン（時計: 太い円＋太い針）。center(cx,cy), 半径r
+static void drawClockIcon(int16_t cx, int16_t cy, int16_t r) {
+    // 太い文字盤（2重円で2px線）
+    g_epaper.drawCircle(cx, cy, r, GxEPD_BLACK);
+    g_epaper.drawCircle(cx, cy, r - 1, GxEPD_BLACK);
+    // 12時方向の針(上): fillRectで2px幅
+    g_epaper.fillRect(cx - 1, cy - r + 4, 2, r - 3, GxEPD_BLACK);
+    // 4時方向の針(右下): drawLine 3本並列で太く
+    g_epaper.drawLine(cx, cy - 1, cx + (r * 2 / 3), cy + 2, GxEPD_BLACK);
+    g_epaper.drawLine(cx, cy,     cx + (r * 2 / 3), cy + 3, GxEPD_BLACK);
+    g_epaper.drawLine(cx, cy + 1, cx + (r * 2 / 3), cy + 4, GxEPD_BLACK);
+    // 太い頭金具
+    g_epaper.fillRect(cx - 2, cy - r - 3, 5, 3, GxEPD_BLACK);
+    // 中心点（濃さアップ）
+    g_epaper.fillCircle(cx, cy, 2, GxEPD_BLACK);
+}
+
+// 数字のみフォント(_tn)で HH MM を「右寄せ」描画（時刻・乗車時間共用）。
+// コロンは数字フォントに非収録のため fillCircle で2点を手描画。
 static void drawClockDigitsRight(int16_t rightX, int16_t baselineY,
                                  int hours, int minutes,
                                  const uint8_t* font, int16_t gap,
@@ -198,14 +211,24 @@ static void drawClockDigitsRight(int16_t rightX, int16_t baselineY,
     g_epaper.fillCircle(colX, midY + dotOff, dotR, GxEPD_BLACK);
 }
 
-// 下段描画: 左「<日付> <曜日漢字>」(例: 15 月) / 右「乗車時間 HH:MM」(例: 00:15)
-static void drawInfoLine(int16_t baselineY) {
-    int rideH, rideM;
-    getRideTime(&rideH, &rideM);
+// 区切り線（縦線: 左欄/右欄、横線: 時刻/乗車時間）
+static void drawDividers() {
+    // 縦線（全高）
+    g_epaper.fillRect(DIVIDER_X, 0, LINE_W, EP_H, GxEPD_BLACK);
+    // 横線（縦線から右端まで）
+    g_epaper.fillRect(DIVIDER_X, DIVIDER_Y, EP_W - DIVIDER_X, LINE_W, GxEPD_BLACK);
+}
 
-    // --- 左: 「15 月」 ---
-    // 日付の数字を logisoso32_tn(32px) で描画
-    u8g2Fonts.setFont(u8g2_font_logisoso32_tn);
+// 左欄: 曜日漢字(上半分) + 日付数字(下半分) を縦に配置（左端基準）
+static void drawLeftPanel() {
+    // --- 曜日漢字48px(3倍)（上段 0〜DIVIDER_Y の中央、左端配置） ---
+    const int16_t kw = 48;  // 16x16を3倍
+    int16_t kx = LEFT_MARGIN;                       // 左端
+    int16_t ky = DIVIDER_Y / 2 - kw / 2;            // 上段中央(39)-24=15
+    drawKanji16x16Bold(kx, ky, KANJI_WEEKDAY[getWeekday()], 3);
+
+    // --- 日付数字 logisoso38（下段 DIVIDER_Y〜EP_H の中央、左端配置） ---
+    u8g2Fonts.setFont(u8g2_font_logisoso38_tn);
     u8g2Fonts.setFontMode(1);
     u8g2Fonts.setForegroundColor(GxEPD_BLACK);
     u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
@@ -213,18 +236,15 @@ static void drawInfoLine(int16_t baselineY) {
     char dayBuf[4];
     snprintf(dayBuf, sizeof(dayBuf), "%d", getDay());
     int dayW = u8g2Fonts.getUTF8Width(dayBuf);
-    int16_t asc = u8g2Fonts.getFontAscent();  // 漢字の垂直位置合わせ用
-
-    u8g2Fonts.setCursor(MARGIN_X, baselineY);
+    int16_t asc = u8g2Fonts.getFontAscent();
+    int16_t dx = LEFT_MARGIN - 5;                    // 日付は左端からさらに5px左（視覚的左寄せ）
+    int16_t centerDownY = (DIVIDER_Y + EP_H) / 2;   // 下段中央(100)
+    int16_t dBaselineY = centerDownY + asc / 2;     // 中心→ベースライン
+    u8g2Fonts.setCursor(dx, dBaselineY);
     u8g2Fonts.print(dayBuf);
 
-    // 曜日漢字を32px(2倍)で描画。数字の上端に合わせる。
-    drawKanji16x16(MARGIN_X + dayW + 4, baselineY - asc,
-                   KANJI_WEEKDAY[getWeekday()], 2);
-
-    // --- 右: 乗車時間 HH:MM（logisoso32_tn、コロン手描画） ---
-    drawClockDigitsRight(EP_W - MARGIN_X, baselineY, rideH, rideM,
-                         u8g2_font_logisoso32_tn, 14, 2, 5);
+    // 数字の右に小さく「日」(16px)。数字の下寄りに配置
+    drawKanji16x16(dx + dayW + 2, dBaselineY - 14, KANJI_WEEKDAY[0], 1);
 }
 
 // 中央揃えテキスト（unifont日本語、未同期/スプラッシュ用）
@@ -239,30 +259,35 @@ static void drawCenteredText(const char* text, int16_t baselineY) {
 }
 
 // ====================================================================
-// 画面描画（フル / 部分 / 未同期 / スプラッシュ）
+// 画面描画
 // ====================================================================
 
-// 全画面フル更新（時刻 + 下段）。初回/日替わり/ゴースト除去用。
-static void drawEpaperClockFull() {
-    g_epaper.setFullWindow();
+// 時計画面（full=true: フル更新 / false: 部分更新）。描画内容は同一。
+static void drawEpaperClock(bool full) {
+    if (full) {
+        g_epaper.setFullWindow();
+    } else {
+        g_epaper.setPartialWindow(0, 0, EP_W, EP_H);
+    }
     g_epaper.firstPage();
     do {
-        g_epaper.fillScreen(GxEPD_WHITE);
-        drawClockDigitsCenter(EP_W / 2, TIME_BASELINE_Y, getHours(), getMinutes(),
-                              u8g2_font_logisoso62_tn, 30, 4, 11);
-        drawInfoLine(INFO_BASELINE_Y);
-    } while (g_epaper.nextPage());
-}
-
-// 全画面部分更新（高速・低フリッカ）。分変化時に時刻帯も下段も同時更新。
-static void drawEpaperClockPartial() {
-    g_epaper.setPartialWindow(0, 0, EP_W, EP_H);
-    g_epaper.firstPage();
-    do {
-        g_epaper.fillRect(0, 0, EP_W, EP_H, GxEPD_WHITE);
-        drawClockDigitsCenter(EP_W / 2, TIME_BASELINE_Y, getHours(), getMinutes(),
-                              u8g2_font_logisoso62_tn, 30, 4, 11);
-        drawInfoLine(INFO_BASELINE_Y);
+        if (full) {
+            g_epaper.fillScreen(GxEPD_WHITE);
+        } else {
+            g_epaper.fillRect(0, 0, EP_W, EP_H, GxEPD_WHITE);
+        }
+        drawDividers();
+        drawLeftPanel();
+        // 時刻（右寄せ、上段）
+        drawClockDigitsRight(EP_W - RIGHT_MARGIN, TIME_BLY, getHours(), getMinutes(),
+                             u8g2_font_logisoso62_tn, 30, 4, 11);
+        // 乗車時間（右寄せ、下段）
+        int rideH, rideM;
+        getRideTime(&rideH, &rideM);
+        drawClockDigitsRight(EP_W - RIGHT_MARGIN, RIDE_BLY, rideH, rideM,
+                             u8g2_font_logisoso32_tn, 14, 2, 5);
+        // 経過時間アイコン（時計）
+        drawClockIcon(ICON_CX, ICON_CY, ICON_R);
     } while (g_epaper.nextPage());
 }
 
@@ -344,13 +369,23 @@ void updateEpaperDisplay() {
         return;
     }
 
+    // 同期直後: 部分更新のコントラストが薄いためウォームアップ指定
+    if (justSynced) {
+        ep_warmupCount = WARMUP_FULL_REFRESHES;
+    }
+
     if (justSynced || dayChanged || periodicClear) {
         // 全画面フル更新（初回/日替わり/ゴースト除去）
-        drawEpaperClockFull();
+        drawEpaperClock(true);
+        ep_partialCount = 0;
+    } else if (ep_warmupCount > 0) {
+        // ウォームアップ: 同期直後の部分更新は黒が薄いため、最初の数回はフル更新で濃く安定させる
+        drawEpaperClock(true);
+        ep_warmupCount--;
         ep_partialCount = 0;
     } else {
         // 分変化のみ → 全画面部分更新
-        drawEpaperClockPartial();
+        drawEpaperClock(false);
         ep_partialCount++;
     }
 
