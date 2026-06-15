@@ -48,6 +48,7 @@ secrets/
 
 # 設定ファイル（テンプレートは除外しない）
 bikeclock/setting.sh
+bikeclock_esp32/setting.sh
 
 # コード検索インデックス
 .cocoindex_code/

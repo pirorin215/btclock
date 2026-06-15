@@ -1,0 +1,124 @@
+#ifndef BIKECLOCK_H
+#define BIKECLOCK_H
+
+#include <Arduino.h>
+#include <TM1637Display.h>
+
+// --- Firmware Version Information (ESP32-S3 edition) ---
+// XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
+#define FIRMWARE_VERSION_MAJOR 2
+#define FIRMWARE_VERSION_MINOR 0
+#define FIRMWARE_VERSION_PATCH 4
+
+// --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
+// TM1637 4-digit 7-segment display
+#define LED_DIO_GPIO     6   // TM1637 DIO
+#define LED_CLK_GPIO     7   // TM1637 CLK
+
+// MCP23S17 SPI I/O Expander
+#define MCP_SPI_MOSI_GPIO   4
+#define MCP_SPI_MISO_GPIO   5
+#define MCP_SPI_SCK_GPIO    8
+#define MCP_SPI_CS_GPIO     9
+
+// Onboard RGB LED (WS2812 addressable, fixed on GPIO48)
+#define ONBOARD_LED_GPIO    48
+
+// --- Display Settings ---
+#define DISPLAY_UPDATE_INTERVAL_MS  1000
+
+// --- Test Display ---
+#define TEST_DISPLAY_MIN_INDEX 1
+extern const int TEST_PATTERN_COUNT;
+
+// --- Display Mode ---
+enum DisplayMode {
+    DISPLAY_MODE_TIME,      // HH:MM
+    DISPLAY_MODE_DATE,      // MMDD
+    DISPLAY_MODE_WEEKDAY,   // MON/TUE/...
+    DISPLAY_MODE_TEST,      // テスト（Phase 3 で使用）
+    DISPLAY_MODE_COUNT
+};
+
+// --- Date Cache (日付計算のキャッシュ) ---
+struct DateCache {
+    int month;
+    int day;
+    int weekday;
+    uint32_t lastTimestamp;
+    bool valid;
+};
+
+// --- Global Variables ---
+extern TM1637Display* g_display;
+extern volatile uint32_t g_currentTimestamp;   // JST換算のUnix timestamp
+extern bool g_timeSynced;
+extern DisplayMode g_displayMode;
+extern unsigned long g_currentMillis;
+extern unsigned long g_lastScreenMillis;
+extern unsigned long g_lastCounterMillis;
+extern DateCache g_dateCache;
+extern unsigned long g_startupMillis;
+
+// --- Function Prototypes ---
+// 時刻計算
+int getHours();
+int getMinutes();
+int getSeconds();
+int getMonth();
+int getDay();
+int getWeekday();
+
+// 表示
+void updateTimeDisplay();
+void updateDateDisplay();
+void updateWeekdayDisplay();
+void updateDisplayForCurrentMode();
+void displayVersion();
+void encodeStringToSegments(const char* str, uint8_t* data);
+
+// システム
+void updateTimestamp();
+void updateDisplayAndLedState();
+
+// ロギング
+void setupLog();
+void logPrint(const char* tag, const char* format, ...);
+
+// --- Onboard LED State (Phase 2) ---
+enum LedState {
+    LED_STATE_BOOT,              // 起動: 赤固定
+    LED_STATE_NO_SYNC,           // 未接続+未同期: 赤点滅(1s)
+    LED_STATE_SYNCED,            // 未接続+同期: 緑固定
+    LED_STATE_CONNECTED_NO_SYNC, // 接続+未同期: 青点滅(1s)
+    LED_STATE_CONNECTED_SYNCED,  // 接続+同期: 青固定
+    LED_STATE_ERROR              // エラー: 赤早点滅(0.2s)
+};
+
+extern LedState g_currentLedState;
+extern bool g_deviceConnected;   // Phase 5 (BLE) で設定
+
+// LED関数
+void setupLed();
+void updateLed();
+void setLedState(LedState state);
+void setLedColor(bool red, bool green, bool blue);
+void updateLedStateBasedOnStatus();
+
+// --- BLE Settings (Phase 5) ---
+#define BLE_DEVICE_NAME       "BikeClock-0001"
+#define BLE_SERVICE_UUID      "4fafc201-1fb5-459e-8fcc-c5c9c331914c"
+#define BLE_CHAR_COMMAND_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a0"
+
+// BLE関数プロトタイプ
+void setupBLE();
+void sendResponse(const char* message);
+void handleTimeSync(const char* command);
+void handleGetVersion();
+void handleKeyConfig(const char* command);
+
+// 設定永続化（Phase 4 で本実装、Phase 5 では空スタブ）
+void loadSettings();
+void saveSettings();
+
+#endif // BIKECLOCK_H
