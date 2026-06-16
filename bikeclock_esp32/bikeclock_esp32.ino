@@ -170,21 +170,50 @@ void updateDisplayAndLedState() {
     }
 }
 
+#include <esp_system.h>
+
+// --- Reset Reason ---
+const char* getResetReasonText(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_UNKNOWN:   return "Unknown";
+        case ESP_RST_POWERON:   return "Power On";
+        case ESP_RST_EXT:       return "External Pin";
+        case ESP_RST_SW:        return "Software";
+        case ESP_RST_PANIC:     return "Panic/Crash";
+        case ESP_RST_INT_WDT:   return "Interrupt WDT";
+        case ESP_RST_TASK_WDT:  return "Task WDT";
+        case ESP_RST_WDT:       return "Other WDT";
+        case ESP_RST_DEEPSLEEP: return "Deep Sleep";
+        case ESP_RST_BROWNOUT:  return "Brownout";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "Other";
+    }
+}
+const char* g_resetReasonStr = "Unknown";
+
 // ====================================================================
 // setup / loop
 // ====================================================================
 
 void setup() {
+    // 再起動理由を最初に取得
+    g_resetReasonStr = getResetReasonText(esp_reset_reason());
+
     Serial.begin(115200);
-    delay(300);  // USB-CDC の準備待ち
+    // USB-CDC のブロッキングを防止 (1msでタイムアウトさせる = 非ブロッキング)
+    // 0だと逆に無限待ちになる環境があるため 1 に設定
+    Serial.setTxTimeoutMs(1);
+    delay(500);  // USB-CDC の準備待ち (少し余裕を持たせる)
 
     setupLog();
+    logPrint("INIT", "Reset Reason: %s", g_resetReasonStr);
 
     Serial.println();
     Serial.println("========================================");
     Serial.println("BikeClock ESP32-S3 SuperMini");
     Serial.printf("Firmware Version: %d.%d.%d\n",
                  FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
+    Serial.printf("Reset Reason: %s\n", g_resetReasonStr);
     Serial.println("[Phase 2.5] Display + LED + BLE + ePaper");
     Serial.println("========================================");
 

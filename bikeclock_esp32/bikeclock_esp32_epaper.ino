@@ -249,6 +249,66 @@ static void drawCenteredText(const char* text, int16_t baselineY) {
     u8g2Fonts.print(text);
 }
 
+// バージョン番号 "ver major.minor.patch" を画面中央に描画。
+// 「ver」は24pxフォント、番号は巨大数字フォント(_tn)。ピリオドは数字の下端寄り。
+// （数字フォントは英字・ピリオド非収録のため「ver」は別フォント、ピリオドは fillCircle）
+static void drawVersionBig(const uint8_t* font, int16_t baselineY, int16_t dotR) {
+    u8g2Fonts.setFontMode(1);
+    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
+    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+
+    // --- 巨大数字フォント: 各番号の幅 ---
+    u8g2Fonts.setFont(font);
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_MAJOR);
+    int16_t majW = u8g2Fonts.getUTF8Width(buf);
+    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_MINOR);
+    int16_t minW = u8g2Fonts.getUTF8Width(buf);
+    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_PATCH);
+    int16_t patW = u8g2Fonts.getUTF8Width(buf);
+
+    const int16_t dotSlot = dotR * 2 + 8;   // ピリオド区画幅（ドット+両側余白、14から8に縮小）
+    const int16_t digitsW = majW + dotSlot + minW + dotSlot + patW;
+
+    // --- 「ver」プレフィックス(34px)の幅 ---
+    static const char prefix[] = "ver";
+    u8g2Fonts.setFont(u8g2_font_logisoso34_tf);
+    const int16_t prefixW = u8g2Fonts.getUTF8Width(prefix);
+    const int16_t gap = 0;  // ver と数字の間の固定余白
+
+    // --- 全体中央寄せ開始x ---
+    int16_t x = (EP_W - (prefixW + gap + digitsW)) / 2;
+
+    // --- 点のy（数字の下端寄り。ベースライン - 半径 で数字の底に接する） ---
+    const int16_t dotY = baselineY - dotR;
+
+    // --- 「ver」描画（34px、ベースライン揃え） ---
+    u8g2Fonts.setCursor(x, baselineY);
+    u8g2Fonts.print(prefix);
+    x += prefixW + gap;
+
+    // --- 番号描画（巨大フォント） ---
+    u8g2Fonts.setFont(font);
+
+    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_MAJOR);
+    u8g2Fonts.setCursor(x, baselineY);
+    u8g2Fonts.print(buf);
+    x += majW + dotSlot / 2;
+    g_epaper.fillCircle(x, dotY, dotR, GxEPD_BLACK);
+    x += dotSlot / 2;
+
+    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_MINOR);
+    u8g2Fonts.setCursor(x, baselineY);
+    u8g2Fonts.print(buf);
+    x += minW + dotSlot / 2;
+    g_epaper.fillCircle(x, dotY, dotR, GxEPD_BLACK);
+    x += dotSlot / 2;
+
+    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_PATCH);
+    u8g2Fonts.setCursor(x, baselineY);
+    u8g2Fonts.print(buf);
+}
+
 // ====================================================================
 // 画面描画
 // ====================================================================
@@ -285,17 +345,21 @@ static void drawEpaperUnsynced() {
     } while (g_epaper.nextPage());
 }
 
-// ブートスプラッシュ（タイトル + バージョン）
+extern const char* g_resetReasonStr;
+
+// ブートスプラッシュ（タイトル + バージョン巨大表示）
 static void drawEpaperSplash() {
     g_epaper.setFullWindow();
     g_epaper.firstPage();
     do {
         g_epaper.fillScreen(GxEPD_WHITE);
-        drawCenteredText("BikeClock", EP_H / 2 - 14);
-        char ver[24];
-        snprintf(ver, sizeof(ver), "v%d.%d.%d (ESP32-S3)",
-                 FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
-        drawCenteredText(ver, EP_H / 2 + 14);
+        drawCenteredText("BikeClock", 20);                       // 上段: タイトル
+        drawVersionBig(u8g2_font_logisoso62_tn, EP_H - 28, 4);   // 中央: バージョン番号(62px)
+        
+        // 下段: プラットフォーム + 再起動理由
+        char buf[64];
+        snprintf(buf, sizeof(buf), "ESP32-S3 (%s)", g_resetReasonStr);
+        drawCenteredText(buf, EP_H - 4);
     } while (g_epaper.nextPage());
 }
 
@@ -308,8 +372,8 @@ void setupEpaper() {
     epdSPI.begin(EPD_SPI_SCK_GPIO, -1 /*MISO不要*/, EPD_SPI_MOSI_GPIO, -1);
     // GxEPD2 が使う SPI 実体を専用バスへ差替え（selectSPI は GxEPD2_EPD.h に定義）
     g_epaper.epd2.selectSPI(epdSPI, SPISettings(4000000, MSBFIRST, SPI_MODE0));
-    // init: initial=true で全画面クリア(白)。reset_duration=2ms（サンプル準拠）
-    g_epaper.init(115200, true, 2, false);
+    // init: 第1引数を0にしてライブラリ内部の Serial 出力を停止
+    g_epaper.init(0, true, 2, false);
     g_epaper.setRotation(1);  // 横長 250x122
 
     u8g2Fonts.begin(g_epaper);
