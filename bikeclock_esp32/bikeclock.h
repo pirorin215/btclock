@@ -8,25 +8,33 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 16
+#define FIRMWARE_VERSION_PATCH 17
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
 #define LED_DIO_GPIO     6   // TM1637 DIO
 #define LED_CLK_GPIO     7   // TM1637 CLK
 
-// Physical Switches (Phase 3)
+// Physical Switches
 #define SWITCH_SW1_GPIO     4   // Right Arrow
 #define SWITCH_SW2_GPIO     5   // Down Arrow
-#define SWITCH_SW3_GPIO     8   // Up Arrow
-#define SWITCH_SW4_GPIO     9   // Left Arrow
-#define SWITCH_SW5_GPIO     13  // Enter
-#define SWITCH_SW6_GPIO     14  // Back
-#define SWITCH_SW7_GPIO     21  // Play/Pause
-#define SWITCH_FUNC_GPIO    47  // Function / Mode / Maintenance
+#define SWITCH_SW3_GPIO     13  // Up Arrow
+#define SWITCH_SW4_GPIO     14  // Left Arrow
+#define SWITCH_SW5_GPIO     35  // Enter
+#define SWITCH_SW6_GPIO     38  // Back
+#define SWITCH_SW7_GPIO     39  // Play/Pause
+#define SWITCH_FUNC_GPIO    8   // Function / Mode / Maintenance
 
-// USB Power Sense (Phase 3.5)
-#define VBUS_SENSE_GPIO     15  // USB 5V Detection (via voltage divider)
+#define HID_DEBOUNCE_DELAY_MS     50   // Switch debounce delay
+
+// --- HID Key Codes (Keyboard Page) ---
+#define DEFAULT_SW1_KEYCODE    0x4F  // Right Arrow
+#define DEFAULT_SW2_KEYCODE    0x51  // Down Arrow
+#define DEFAULT_SW3_KEYCODE    0x52  // Up Arrow
+#define DEFAULT_SW4_KEYCODE    0x50  // Left Arrow
+#define DEFAULT_SW5_KEYCODE    0x28  // Enter
+#define DEFAULT_SW6_KEYCODE    0x0224  // Back (Android)
+#define DEFAULT_SW7_KEYCODE    0xCD  // Play/Pause (Consumer Page)
 
 // Onboard RGB LED (WS2812 addressable, fixed on GPIO48)
 #define ONBOARD_LED_GPIO    48
@@ -65,6 +73,38 @@ struct DateCache {
     bool valid;
 };
 
+// --- HID switch state tracking ---
+enum HidSwitchState {
+    HID_STATE_IDLE,
+    HID_STATE_PRESS,
+    HID_STATE_REPEAT
+};
+
+// --- Maintenance Mode Menu ---
+enum MaintenanceMenu {
+    MAINTENANCE_MENU_CANCEL,        // Cancel (normal boot / reboot)
+    MAINTENANCE_MENU_TEST,          // Test mode
+    MAINTENANCE_MENU_DFU,           // DFU mode (OTA)
+    MAINTENANCE_MENU_FACTORY_RESET, // Factory reset
+    MAINTENANCE_MENU_COUNT          // Number of menus
+};
+
+struct MaintenanceState {
+    bool active;                           // Maintenance mode is active
+    MaintenanceMenu currentMenu;           // Current menu selection
+    unsigned long lastInteractionMillis;   // Last interaction time (for timeout)
+    uint8_t selectedMenuIndex;            // Current menu index (0-based)
+};
+
+struct HidSwitch {
+    uint8_t gpio;
+    uint8_t pinState;
+    unsigned long lastDebounceTime;
+    unsigned long pressStartTime;
+    HidSwitchState state;
+    uint16_t keyCode;
+};
+
 // --- Global Variables ---
 extern TM1637Display* g_display;
 extern volatile uint32_t g_currentTimestamp;   // JST換算のUnix timestamp
@@ -75,6 +115,16 @@ extern unsigned long g_lastScreenMillis;
 extern unsigned long g_lastCounterMillis;
 extern DateCache g_dateCache;
 extern unsigned long g_startupMillis;
+
+#define NUM_HID_SWITCHES 7
+extern HidSwitch hidSwitches[];
+extern MaintenanceState g_maintenanceState;
+extern bool g_showingCountdown;
+extern uint16_t g_displayingKeyCode;
+extern unsigned long g_keyCodeDisplayEndTime;
+extern unsigned long g_lastModeChangeMillis;
+#define MODE_AUTO_RETURN_TIMEOUT_MS 5000
+extern int g_testDisplayIndex;
 
 // --- Function Prototypes ---
 // 時刻計算
@@ -92,6 +142,7 @@ void updateWeekdayDisplay();
 void updateDisplayForCurrentMode();
 void displayVersion();
 void encodeStringToSegments(const char* str, uint8_t* data);
+void updateTestDisplay();
 
 // ePaper表示（昼間視認性用）— bikeclock_esp32_epaper.ino
 void setupEpaper();
@@ -100,6 +151,16 @@ void updateEpaperDisplay();
 // システム
 void updateTimestamp();
 void updateDisplayAndLedState();
+
+// 物理スイッチ & メンテナンスモード
+void processHidSwitches();
+void processFunctionKey();
+void sendHidKeyPress(uint16_t keyCode, const char* unused = NULL);
+void sendHidKeyRelease(const char* unused = NULL);
+void enterMaintenanceMode();
+void exitMaintenanceMode();
+void updateMaintenanceDisplay();
+bool processMaintenanceMode();
 
 // ロギング
 void setupLog();
@@ -132,6 +193,7 @@ void updateLedStateBasedOnStatus();
 
 // BLE関数プロトタイプ
 void setupBLE();
+void deinitBLE();
 void sendResponse(const char* message);
 void handleTimeSync(const char* command);
 void handleGetVersion();

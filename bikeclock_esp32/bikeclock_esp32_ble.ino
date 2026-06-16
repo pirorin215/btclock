@@ -192,3 +192,9 @@ void loadSettings() {
 void saveSettings() {
     logPrint("BLE", "saveSettings: stub (Phase 4 で LittleFS 実装)");
 }
+
+// BLEの deinit 処理（シャットダウン用）
+void deinitBLE() {
+    logPrint("BLE", "Deinitializing NimBLE stack...");
+    NimBLEDevice::deinit(true);
+}

@@ -62,7 +62,7 @@ void updateDisplayForCurrentMode() {
             updateWeekdayDisplay();
             break;
         case DISPLAY_MODE_TEST:
-            // Phase 3（物理スイッチ直接接続 + FUNCキー）で実装
+            updateTestDisplay();
             break;
         default:
             break;
@@ -145,4 +145,12 @@ void encodeStringToSegments(const char* str, uint8_t* data) {
             data[i] = 0x00;  // space等は空白
         }
     }
+}
+
+// --- テスト表示モード ---
+void updateTestDisplay() {
+    int index = (g_testDisplayIndex - 1) % TEST_PATTERN_COUNT;
+    uint8_t data[4] = {0};
+    encodeStringToSegments(TEST_PATTERNS[index], data);
+    g_display->setSegments(data);
 }

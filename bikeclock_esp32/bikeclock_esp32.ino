@@ -146,9 +146,36 @@ void updateTimestamp() {
     }
 }
 
-// 表示状態更新（Phase 1: 表示のみ。LED 状態遷移は Phase 2 で追加）
+// 表示状態更新（カウントダウン、キーコード表示、オートリターン対応）
 void updateDisplayAndLedState() {
-    if (!g_timeSynced) {
+    // カウントダウン表示中は表示更新をスキップ
+    if (g_showingCountdown) {
+        return;
+    }
+
+    // キーコード表示中の処理
+    if (g_displayingKeyCode != 0) {
+        if (g_currentMillis < g_keyCodeDisplayEndTime) {
+            return; // 表示継続中
+        } else {
+            g_displayingKeyCode = 0;
+            g_keyCodeDisplayEndTime = 0;
+            logPrint("HID", "Key code display timeout - resuming normal display");
+        }
+    }
+
+    // オートリターン (DATE / WEEKDAY モードで 5秒無操作で TIME に戻る)
+    if ((g_displayMode == DISPLAY_MODE_DATE || g_displayMode == DISPLAY_MODE_WEEKDAY) &&
+        (g_currentMillis - g_lastModeChangeMillis >= MODE_AUTO_RETURN_TIMEOUT_MS)) {
+        logPrint("MODE", "Auto-returning to time mode (timeout)");
+        g_displayMode = DISPLAY_MODE_TIME;
+        g_lastModeChangeMillis = g_currentMillis;
+        updateDisplayForCurrentMode();
+        updateLedStateBasedOnStatus();
+        return;
+    }
+
+    if (!g_timeSynced && g_displayMode != DISPLAY_MODE_TEST) {
         // 未同期: 8888 点滅
         static unsigned long lastBlink = 0;
         if (g_currentMillis - lastBlink >= 500) {
@@ -161,8 +188,10 @@ void updateDisplayAndLedState() {
             showPattern = !showPattern;
             lastBlink = g_currentMillis;
         }
+        updateLedStateBasedOnStatus();
     } else {
-        // 同期済み: 現在モードで表示（1秒ごと更新）
+        // 同期済みまたはテストモード: 現在モードで表示（1秒ごと更新）
+        updateLedStateBasedOnStatus();
         if (g_currentMillis - g_lastScreenMillis >= DISPLAY_UPDATE_INTERVAL_MS) {
             updateDisplayForCurrentMode();
             g_lastScreenMillis = g_currentMillis;
@@ -214,7 +243,7 @@ void setup() {
     Serial.printf("Firmware Version: %d.%d.%d\n",
                  FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
     Serial.printf("Reset Reason: %s\n", g_resetReasonStr);
-    Serial.println("[Phase 2.5] Display + LED + BLE + ePaper");
+    Serial.println("[Phase 3] Display + LED + BLE + ePaper + Switches");
     Serial.println("========================================");
 
     // TM1637 初期化
@@ -222,6 +251,10 @@ void setup() {
     g_display->setBrightness(0x0F);
     g_display->clear();
     logPrint("INIT", "Display OK (CLK=%d, DIO=%d)", LED_CLK_GPIO, LED_DIO_GPIO);
+
+    // 物理スイッチ初期化（Phase 3）
+    extern void setupSwitches();
+    setupSwitches();
 
     // オンボードRGB LED 初期化（Phase 2）
     setupLed();
@@ -260,9 +293,19 @@ void setup() {
 
 void loop() {
     g_currentMillis = millis();
-    updateTimestamp();
-    updateLed();
-    updateDisplayAndLedState();
-    updateEpaperDisplay();
+
+    // 最初にファンクションキー（モード切替）の処理
+    processFunctionKey();
+
+    // メンテナンスモードの処理
+    if (!processMaintenanceMode()) {
+        // メンテナンスモードがアクティブでない場合のみ、通常処理を行う
+        updateLed();
+        processHidSwitches();
+        updateTimestamp();
+        updateDisplayAndLedState();
+        updateEpaperDisplay();
+    }
+
     delay(10);
 }
