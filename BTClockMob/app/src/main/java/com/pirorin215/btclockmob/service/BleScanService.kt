@@ -23,6 +23,7 @@ import androidx.core.app.NotificationCompat
 import com.pirorin215.btclockmob.MainActivity
 import com.pirorin215.btclockmob.R // リソースファイルが必要になります
 import com.pirorin215.btclockmob.BleScanServiceManager
+import com.pirorin215.btclockmob.resolveTargetDeviceName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,7 +34,6 @@ import java.util.concurrent.TimeUnit
 class BleScanService : Service() {
 
     companion object {
-        const val DEVICE_NAME = "BikeClock-0001"
         const val NOTIFICATION_ID = 1 // Moved here
     }
 
@@ -44,6 +44,7 @@ class BleScanService : Service() {
     private lateinit var bluetoothManager: BluetoothManager
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var scanJob: Job? = null
+    private var resolvedTargetName: String = ""
 
     // Bluetooth状態変化を監視するBroadcastReceiver
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
@@ -72,9 +73,13 @@ class BleScanService : Service() {
         .setReportDelay(1000L) // 1秒バッチ処理で報告（省電力）
         .build()
 
-    private val scanFilters = listOf(
-        ScanFilter.Builder().setDeviceName(DEVICE_NAME).build()
-    )
+    /**
+     * 指定デバイス名でスキャンフィルタを構築する。
+     */
+    private fun buildScanFilters(name: String): List<ScanFilter> {
+        return if (name.isBlank()) emptyList()
+        else listOf(ScanFilter.Builder().setDeviceName(name).build())
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -147,8 +152,16 @@ class BleScanService : Service() {
 
         stopBleScan() // 既存のスキャンがあれば停止
 
-        Log.d(TAG, "Starting BLE scan in service...")
-        bluetoothAdapter?.bluetoothLeScanner?.startScan(scanFilters, scanSettings, bleScanCallback)
+        // 接続先を解決: ユーザー選択があればそれ、未選択ならペアリング済みの先頭BikeClockデバイス。
+        // スキャン開始時に解決することで、起動時の設定読み込みレースを回避する。
+        val resolved = resolveTargetDeviceName(BleScanServiceManager.targetDeviceName, this)
+        if (resolved.isBlank()) {
+            Log.w(TAG, "No target BikeClock device available (not paired / not selected). Skipping scan.")
+            return
+        }
+        resolvedTargetName = resolved
+        Log.d(TAG, "Starting BLE scan in service... (target name: $resolved)")
+        bluetoothAdapter?.bluetoothLeScanner?.startScan(buildScanFilters(resolved), scanSettings, bleScanCallback)
 
         // Removed scan timeout job for continuous scanning
     }
@@ -166,7 +179,7 @@ class BleScanService : Service() {
             Log.d(TAG, "ScanResult: Device found - ${result.device.name} (${result.device.address}), RSSI: ${result.rssi}")
             val deviceName = result.device.name ?: "(no name)"
 
-            if (deviceName == DEVICE_NAME) {
+            if (deviceName == resolvedTargetName) {
                 Log.d(TAG, "Target device '$deviceName' found! Signaling MainViewModel to connect.")
                 // Stop scanning to allow the ViewModel to handle the connection.
                 // The ViewModel will be responsible for restarting the scan later.
@@ -185,7 +198,7 @@ class BleScanService : Service() {
             // バッチスキャン結果の中からターゲットデバイスを探す
             results.forEach { result ->
                 val deviceName = result.device.name ?: ""
-                if (deviceName == DEVICE_NAME) {
+                if (deviceName == resolvedTargetName) {
                     Log.d(TAG, "Target device '$deviceName' found in batch! Signaling MainViewModel to connect.")
                     // Do NOT stop scan here; continue scanning for automatic re-detection
                     CoroutineScope(Dispatchers.IO).launch {

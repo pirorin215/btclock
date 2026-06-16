@@ -111,7 +111,7 @@ void setupBLE() {
     // Service 開始
     g_pService->start();
 
-    // 設定読込（Phase 4 で本実装、今はスタブ）
+    // キー設定読込（Phase 4: LittleFS から復元）
     loadSettings();
 
     // Advertising（デバイス名 + カスタムサービス）
@@ -174,24 +174,39 @@ void handleGetVersion() {
              FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
 }
 
-// SET:keys:HEX,... — キー設定
-// Phase 5 では受信ログ＋OK応答のみ。実際のキー更新(hidSwitches)は Phase 3、
-// 永続化(saveSettings)は Phase 4 で本実装する。
+// SET:keys:HEX,HEX,... — キー設定（Phase 4: 永続化対応）
+// 形式: SET:keys:50,4F,52,51,28,0224,CD （7個の16進キーコード、カンマ区切り）
+// XIAO 版と同一プロトコル・応答。成功時は hidSwitches を更新して saveSettings()。
 void handleKeyConfig(const char* command) {
-    logPrint("BLE", "SET:keys received: %s", command + 9);
-    sendResponse("OK: keys updated");  // アプリ互換のためOK応答
+    const char* keysStr = command + 9;  // "SET:keys:" の長さ
+    logPrint("BLE", "SET:keys received: %s", keysStr);
+
+    // 作業用バッファにコピー（strtok は文字列を破壊するため）
+    char temp[80];
+    strncpy(temp, keysStr, sizeof(temp) - 1);
+    temp[sizeof(temp) - 1] = '\0';
+
+    char* token = strtok(temp, ",");
+    int i = 0;
+    while (token != NULL && i < NUM_HID_SWITCHES) {
+        while (isspace((unsigned char)*token)) token++;  // 前後の空白をスキップ
+        hidSwitches[i].keyCode = (uint16_t)strtoul(token, NULL, 16);
+        logPrint("BLE", "  SW%d -> 0x%04X", i + 1, hidSwitches[i].keyCode);
+        token = strtok(NULL, ",");
+        i++;
+    }
+
+    if (i == NUM_HID_SWITCHES) {
+        saveSettings();
+        sendResponse("OK: keys updated");
+        logPrint("BLE", "All %d keys updated and saved.", NUM_HID_SWITCHES);
+    } else {
+        logPrint("BLE", "Error: only %d keys parsed. Expected %d.", i, NUM_HID_SWITCHES);
+        sendResponse("ERROR: Invalid key format");
+    }
 }
 
-// ====================================================================
-// 設定永続化スタブ（Phase 4 で LittleFS 本実装に差し替え）
-// ====================================================================
-void loadSettings() {
-    logPrint("BLE", "loadSettings: stub (Phase 4 で LittleFS 実装)");
-}
-
-void saveSettings() {
-    logPrint("BLE", "saveSettings: stub (Phase 4 で LittleFS 実装)");
-}
+// ※ loadSettings()/saveSettings() は bikeclock_esp32_settings.ino（Phase 4）に実装
 
 // BLEの deinit 処理（シャットダウン用）
 void deinitBLE() {

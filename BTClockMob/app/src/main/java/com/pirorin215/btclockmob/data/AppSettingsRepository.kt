@@ -76,6 +76,16 @@ object Settings {
         floatPreferencesKey("route_label_font_size"),
         18f
     )
+
+    /**
+     * 接続先BLEデバイス名（ユーザー選択）。
+     * 空 = 未選択。実行時にOSペアリング済みの先頭 "BikeClock-" デバイスを自動使用する。
+     * デバイス名はハードコードせず、接頭辞 "BikeClock-" のルールのみで運用する。
+     */
+    val TARGET_DEVICE_NAME = SettingKey.Direct(
+        stringPreferencesKey("target_device_name"),
+        ""
+    )
 }
 
 class AppSettingsRepository(private val context: Context) {

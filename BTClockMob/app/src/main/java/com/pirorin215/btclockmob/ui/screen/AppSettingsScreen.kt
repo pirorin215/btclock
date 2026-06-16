@@ -38,6 +38,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalContext
+import com.pirorin215.btclockmob.bondedBikeClockDeviceNames
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -59,6 +61,11 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentInterval by appSettingsViewModel.historyIntervalMin.collectAsState()
     val currentDistance by appSettingsViewModel.historyDistanceM.collectAsState()
     val currentRouteOffset by appSettingsViewModel.routeCenterOffset.collectAsState()
+    val currentTargetDeviceName by appSettingsViewModel.targetDeviceName.collectAsState()
+
+    // ペアリング済みのBikeClockデバイス候補（設定画面の選択リスト／自動選択で使用）
+    val context = LocalContext.current
+    val pairedDevices = remember { bondedBikeClockDeviceNames(context) }
 
     // 状態を管理
     var selectedThemeMode by remember(currentThemeMode) { mutableStateOf(currentThemeMode) }
@@ -66,6 +73,10 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     var selectedInterval by remember(currentInterval) { mutableStateOf(currentInterval.toFloat()) }
     var selectedDistance by remember(currentDistance) { mutableStateOf(currentDistance.toFloat()) }
     var selectedRouteOffset by remember(currentRouteOffset) { mutableStateOf(currentRouteOffset) }
+    // 未選択(空)のときは先頭デバイスを事前選択（アプリが実際に接続しに行く対象と一致させる）
+    var targetDeviceNameInput by remember(currentTargetDeviceName, pairedDevices) {
+        mutableStateOf(currentTargetDeviceName.ifBlank { pairedDevices.firstOrNull() ?: "" })
+    }
 
     val saveSettings: () -> Unit = {
         appSettingsViewModel.saveThemeMode(selectedThemeMode)
@@ -73,6 +84,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
         appSettingsViewModel.saveHistoryIntervalMin(selectedInterval.roundToInt())
         appSettingsViewModel.saveHistoryDistanceM(selectedDistance.roundToInt())
         appSettingsViewModel.saveRouteCenterOffset(selectedRouteOffset)
+        appSettingsViewModel.saveTargetDeviceName(targetDeviceNameInput.trim())
         onBack()
     }
 
@@ -99,6 +111,38 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
+            // Target BLE device name (multi-device switching)
+            Text(
+                text = stringResource(R.string.target_device_name),
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (pairedDevices.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.target_device_name_no_paired),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                pairedDevices.forEach { name ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        RadioButton(
+                            selected = name == targetDeviceNameInput,
+                            onClick = { targetDeviceNameInput = name }
+                        )
+                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
             // New: Auto-start on boot setting
             Row(
                 modifier = Modifier.fillMaxWidth(),

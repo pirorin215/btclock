@@ -267,6 +267,9 @@ void setup() {
     displayVersion();
     delay(1000);
 
+    // ファイルシステム初期化（Phase 4: LittleFS。setupBLE 内の loadSettings より先にマウント）
+    setupFileSystem();
+
     // BLE 初期化（Phase 5）
     setupBLE();
 

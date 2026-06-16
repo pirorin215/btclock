@@ -15,6 +15,7 @@ import com.pirorin215.btclockmob.service.BleScanService
 import kotlinx.coroutines.Job
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.btclockmob.BleScanServiceManager
+import com.pirorin215.btclockmob.resolveTargetDeviceName
 import com.pirorin215.btclockmob.data.BleRepository
 import com.pirorin215.btclockmob.data.ConnectionState
 import kotlinx.coroutines.CoroutineScope
@@ -41,10 +42,6 @@ class BleConnectionManager(
 ) {
 
     val connectionState = _connectionStateFlow.asStateFlow()
-
-    companion object {
-        const val DEVICE_NAME = "BikeClock-0001"
-    }
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
@@ -215,8 +212,10 @@ class BleConnectionManager(
         }
 
         // 1. Try to connect to a bonded device first
+        //    接続先は「ユーザー選択／未選択時は先頭BikeClockデバイス」で解決
         val bondedDevices = bluetoothAdapter?.bondedDevices
-        val bondedBTDevice = bondedDevices?.find { it.name.equals(DEVICE_NAME, ignoreCase = true) }
+        val targetName = resolveTargetDeviceName(BleScanServiceManager.targetDeviceName, context)
+        val bondedBTDevice = bondedDevices?.find { it.name.equals(targetName, ignoreCase = true) }
 
         if (bondedBTDevice != null) {
             logManager.addDebugLog("Attempting bonded device connection")

@@ -3,12 +3,13 @@
 
 #include <Arduino.h>
 #include <TM1637Display.h>
+#include <LittleFS.h>
 
 // --- Firmware Version Information (ESP32-S3 edition) ---
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 17
+#define FIRMWARE_VERSION_PATCH 19
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -187,7 +188,7 @@ void setLedColor(bool red, bool green, bool blue);
 void updateLedStateBasedOnStatus();
 
 // --- BLE Settings (Phase 5) ---
-#define BLE_DEVICE_NAME       "BikeClock-0001"
+#define BLE_DEVICE_NAME       "BikeClock-ESP32"
 #define BLE_SERVICE_UUID      "4fafc201-1fb5-459e-8fcc-c5c9c331914c"
 #define BLE_CHAR_COMMAND_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a0"
 
@@ -199,8 +200,12 @@ void handleTimeSync(const char* command);
 void handleGetVersion();
 void handleKeyConfig(const char* command);
 
-// 設定永続化（Phase 4 で本実装、Phase 5 では空スタブ）
+// 設定永続化（Phase 4: LittleFS 実装）
+#define KEYS_FILE_PATH "/keys.dat"
+void setupFileSystem();
 void loadSettings();
 void saveSettings();
+void resetKeySettingsToDefaults();
+void resetToFactoryDefaults();
 
 #endif // BIKECLOCK_H

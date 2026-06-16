@@ -7,12 +7,15 @@ import android.net.Uri
 import android.util.Log
 import android.widget.Toast
 import com.pirorin215.btclockmob.data.ConnectionState
+import com.pirorin215.btclockmob.bondedBikeClockDeviceNames
+import com.pirorin215.btclockmob.resolveTargetDeviceName
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -73,6 +76,7 @@ fun MainScreen(
 ) {
     val context = LocalContext.current
     val connectionState by mainViewModel.connectionState.collectAsState()
+    val targetDevicePref by appSettingsViewModel.targetDeviceName.collectAsState()
     val logs: List<String> by mainViewModel.logs.collectAsState()
 
     val historyEntries by historyViewModel.deviceHistoryEntries.collectAsState()
@@ -156,20 +160,62 @@ fun MainScreen(
                             if (isSelectionMode) {
                                 Text("${selectedEntries.size} 選択中")
                             } else {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(stringResource(R.string.main_screen_title))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    val statusColor = if (connectionState is ConnectionState.Connected) Color.Green else Color.Red
-                                    Box(
-                                        modifier = Modifier
-                                            .size(12.dp)
-                                            .background(color = statusColor, shape = CircleShape)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = if (connectionState is ConnectionState.Connected) stringResource(R.string.status_connected) else stringResource(R.string.status_disconnected),
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
+                                Box {
+                                    val pairedDevices = remember { bondedBikeClockDeviceNames(context) }
+                                    var showDeviceMenu by remember { mutableStateOf(false) }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(stringResource(R.string.main_screen_title))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        val statusColor = if (connectionState is ConnectionState.Connected) Color.Green else Color.Red
+                                        Box(
+                                            modifier = Modifier
+                                                .size(12.dp)
+                                                .background(color = statusColor, shape = CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        val disconnectedText = stringResource(R.string.status_disconnected)
+                                        // 接続中は接続デバイス名、未接続時は接続ターゲット名を表示。
+                                        // ターゲット = 設定で選んだ名前（未選択なら先頭BikeClockデバイスを自動使用）。
+                                        // ドット色で接続状態を示す（緑=接続中／赤=未接続）。
+                                        val targetName = remember(targetDevicePref, connectionState) {
+                                            resolveTargetDeviceName(targetDevicePref, context)
+                                        }
+                                        val headerName = (connectionState as? ConnectionState.Connected)?.device?.name
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?: targetName
+                                        // ペアリング済みが2台以上なら、BT名タップでターゲット切替（ドロップダウン）
+                                        val switchable = pairedDevices.size >= 2
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.clickable(enabled = switchable) { showDeviceMenu = true }
+                                        ) {
+                                            Text(
+                                                text = headerName.ifBlank { disconnectedText },
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                            if (switchable) {
+                                                Icon(
+                                                    Icons.Filled.ArrowDropDown,
+                                                    contentDescription = "デバイス切り替え",
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                    DropdownMenu(
+                                        expanded = showDeviceMenu,
+                                        onDismissRequest = { showDeviceMenu = false }
+                                    ) {
+                                        pairedDevices.forEach { name ->
+                                            DropdownMenuItem(
+                                                text = { Text(name) },
+                                                onClick = {
+                                                    appSettingsViewModel.saveTargetDeviceName(name)
+                                                    showDeviceMenu = false
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         },

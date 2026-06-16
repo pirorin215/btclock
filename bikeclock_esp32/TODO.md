@@ -125,7 +125,7 @@ NimBLE でカスタムサービスを立て、**BTClockMob と時刻同期でき
 - [x] `sendResponse()`（Command char の notify）
 - [x] アドバタイズ: デバイス名 `BikeClock-0001`（`setName`+`enableScanResponse`）+ カスタムサービス + 切断時再アドバタイズ
 - [x] `g_deviceConnected` / `g_timeSynced` 連携、LED 状態遷移
-- [x] `loadSettings/saveSettings` は空スタブ（Phase 4 で本実装）。`SET:keys` は受信 OK 応答のみ（hidSwitches は Phase 3）
+- [x] `loadSettings/saveSettings` は Phase 4 で LittleFS 本実装済み。`SET:keys` で hidSwitches 更新＋保存
 - [x] ファームウェアバージョン 2.0.2 → 2.0.4
 - **検証**: ビルド成功 ✅ / **BTClockMob 接続・時刻同期 成功** ✅（Time synced、現在時刻表示確認済み）
 
@@ -142,13 +142,13 @@ NimBLE でカスタムサービスを立て、**BTClockMob と時刻同期でき
 - [x] FUNC (GPIO 8) 長押し → メンテナンスモード遷移（DFU 項目は Phase 7 で仮表示）
 - **検証**: ビルド成功 ✅ / 実機検証用コード実装完了（ログ、カウントダウン、テストモード、1BOO〜4RST遷移動作確認可能）
 
-#### Phase 4 — 設定永続化（LittleFS） [リスク:低]
+#### Phase 4 — 設定永続化（LittleFS） [リスク:低] ✅ 完了
 `InternalFS` → ESP32 LittleFS。Phase 5 のスタブを本実装に差し替え。
-- [ ] `<LittleFS.h>` で `/keys.dat` 読み書き
-- [ ] `loadSettings()` / `saveSettings()` を File API に合わせて書き換え（Phase 5 のスタブと置換）
-- [ ] `resetKeySettingsToDefaults()` のフォーマット処理を `LittleFS.format()` に
-- [ ] ファイル不存在時はデフォルトキーコードを使用（現状ロジック踏襲）
-- **検証**: キー設定保存→再起動で復元、ファクトリーリセットで初期化
+- [x] `<LittleFS.h>` で `/keys.dat` 読み書き
+- [x] `loadSettings()` / `saveSettings()` を File API に合わせて書き換え（Phase 5 のスタブと置換）
+- [x] `resetKeySettingsToDefaults()` のフォーマット処理を `LittleFS.format()` に
+- [x] ファイル不存在時はデフォルトキーコードを使用（現状ロジック踏襲）
+- **検証**: ビルド成功 ✅ / キー設定保存→再起動で復元、ファクトリーリセットで初期化（要実機確認）
 
 #### Phase 6 — BLE HID キーボード [リスク:高] ★技術的に最難関
 NimBLE HID を実装し、物理スイッチで Android を操作できるようにする。

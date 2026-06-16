@@ -25,6 +25,8 @@
     <string name="history_distance">定期記録の距離（メートル）</string>
     <string name="route_center_offset">ルート表示の中心点オフセット（垂直方向）</string>
     <string name="save_button">保存</string>
+    <string name="target_device_name">接続するBTデバイス名</string>
+    <string name="target_device_name_no_paired">OSとペアリング済みのBikeClockデバイスが見つかりません</string>
 
     <!-- Device History (Integrated into MainScreen) -->
     <string name="find_my_bike">バイクを探す</string>

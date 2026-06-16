@@ -351,10 +351,10 @@ bool processMaintenanceMode() {
                 break;
 
             case MAINTENANCE_MENU_FACTORY_RESET:
-                logPrint("MAINTENANCE", "Action: Factory reset (Stub for Phase 3)");
-                g_display->showNumberDec(4444);
-                delay(3000);
-                ESP.restart();
+                logPrint("MAINTENANCE", "Action: Factory reset");
+                g_display->showNumberDec(4444);  // 視覚フィードバック
+                delay(1000);
+                resetToFactoryDefaults();  // LittleFS消去 + デフォルト復元 + 再起動
                 break;
 
             default:
