@@ -23,12 +23,11 @@
  *   - 区切り線    : 縦線(左欄/右欄)、横線(時刻/乗車時間)
  *
  * 更新戦略:
- *   - 分が変化 → 全画面部分更新（高速・低フリッカ）
- *   - 日が変化 / 初回同期 / 15分ごと → 全画面フル更新（ゴースティング対策）
+ *   - 分が変化 / 日が変化 / 初回同期 → 全画面フル更新（文字のにじみや薄化を防ぎコントラストを最大化）
  *   - 未同期 → 「時刻未同期」固定表示（乗車時間も非表示）
  *
  * ハードウェア:
- *   - 専用 SPI3_HOST バス（SPIClass epdSPI(HSPI)）。MCP23S17(Phase3)の既定SPI2と完全分離。
+ *   - 専用 SPI3_HOST バス（SPIClass epdSPI(HSPI)）を使用。
  *   - CS=1, DC=2, RST=3, BUSY=10, SCK=12, MOSI=11
  *
  * 注意: ePaper更新はブロッキング（部分~0.3s / フル~3s）だが、NimBLEは別FreeRTOS
@@ -50,11 +49,8 @@ static U8G2_FOR_ADAFRUIT_GFX u8g2Fonts;
 static int8_t  ep_lastHr        = -1;
 static int8_t  ep_lastMin       = -1;
 static int8_t  ep_lastDay       = -1;
-static int8_t  ep_lastRideMin   = -1;   // 乗車時間の分（変化検出用）
 static bool    ep_lastSynced    = false;
 static bool    ep_showingUnsync = false;
-static uint8_t ep_partialCount  = 0;   // 部分更新の連続回数（一定でフル更新しゴースト除去）
-static uint8_t ep_warmupCount   = 0;   // 同期後の残りフル更新回数（部分更新のコントラスト安定用）
 
 // === 画面ジオメトリ（rotation=1 で 250x122 横長） ===
 static const int16_t EP_W = 250;
@@ -72,11 +68,6 @@ static const int16_t ICON_R       = 12;   // 経過時間アイコン(時計)の
 
 // 曜日（0=日 ... 6=土）
 static const char* WEEKDAY_JP[] = {"日", "月", "火", "水", "木", "金", "土"};
-
-// ゴースティング対策: この回数の部分更新ごとに1回フル更新
-static const uint8_t PARTIAL_FULL_REFRESH_EVERY = 15;
-// 同期直後の部分更新は黒が薄くなるため、最初の数回はフル更新でコントラストを安定させる
-static const uint8_t WARMUP_FULL_REFRESHES = 2;
 
 // ====================================================================
 // 曜日漢字 16x16 ビットマップ（GNU Unifont, MSB=左端）
@@ -262,20 +253,12 @@ static void drawCenteredText(const char* text, int16_t baselineY) {
 // 画面描画
 // ====================================================================
 
-// 時計画面（full=true: フル更新 / false: 部分更新）。描画内容は同一。
-static void drawEpaperClock(bool full) {
-    if (full) {
-        g_epaper.setFullWindow();
-    } else {
-        g_epaper.setPartialWindow(0, 0, EP_W, EP_H);
-    }
+// 時計画面（常にフル更新）
+static void drawEpaperClock() {
+    g_epaper.setFullWindow();
     g_epaper.firstPage();
     do {
-        if (full) {
-            g_epaper.fillScreen(GxEPD_WHITE);
-        } else {
-            g_epaper.fillRect(0, 0, EP_W, EP_H, GxEPD_WHITE);
-        }
+        g_epaper.fillScreen(GxEPD_WHITE);
         drawDividers();
         drawLeftPanel();
         // 時刻（右寄せ、上段）
@@ -334,8 +317,6 @@ void setupEpaper() {
     logPrint("EPAPER", "Init OK (CS=%d DC=%d RST=%d BUSY=%d SCK=%d MOSI=%d, SPI3_HOST)",
              EPD_CS_GPIO, EPD_DC_GPIO, EPD_RST_GPIO, EPD_BUSY_GPIO,
              EPD_SPI_SCK_GPIO, EPD_SPI_MOSI_GPIO);
-    logPrint("EPAPER", "Partial update: %s",
-             g_epaper.epd2.hasFastPartialUpdate ? "YES" : "NO");
 
     drawEpaperSplash();
 }
@@ -355,43 +336,22 @@ void updateEpaperDisplay() {
     const int h = getHours();
     const int m = getMinutes();
     const int d = getDay();
-    int rideH, rideM;
-    getRideTime(&rideH, &rideM);
 
     const bool justSynced    = !ep_lastSynced;
     const bool dayChanged    = (d != ep_lastDay);
     const bool timeChanged   = (h != ep_lastHr) || (m != ep_lastMin);
-    const bool rideChanged   = (rideM != ep_lastRideMin);
-    const bool periodicClear = (ep_partialCount >= PARTIAL_FULL_REFRESH_EVERY);
 
-    // 何も変わっていなければ描画スキップ（時刻の分 or 乗車時間の分 が変わった時のみ）
-    if (!justSynced && !dayChanged && !timeChanged && !rideChanged) {
+    // 何も変わっていなければ描画スキップ（時刻の分が変わった時のみ）
+    if (!justSynced && !dayChanged && !timeChanged) {
         return;
     }
 
-    // 同期直後: 部分更新のコントラストが薄いためウォームアップ指定
-    if (justSynced) {
-        ep_warmupCount = WARMUP_FULL_REFRESHES;
-    }
+    // 全画面フル更新
+    drawEpaperClock();
 
-    if (justSynced || dayChanged || periodicClear) {
-        // 全画面フル更新（初回/日替わり/ゴースト除去）
-        drawEpaperClock(true);
-        ep_partialCount = 0;
-    } else if (ep_warmupCount > 0) {
-        // ウォームアップ: 同期直後の部分更新は黒が薄いため、最初の数回はフル更新で濃く安定させる
-        drawEpaperClock(true);
-        ep_warmupCount--;
-        ep_partialCount = 0;
-    } else {
-        // 分変化のみ → 全画面部分更新
-        drawEpaperClock(false);
-        ep_partialCount++;
-    }
-
+    ep_showingUnsync = false;
     ep_lastSynced  = true;
     ep_lastHr      = (int8_t)h;
     ep_lastMin     = (int8_t)m;
     ep_lastDay     = (int8_t)d;
-    ep_lastRideMin = (int8_t)rideM;
 }

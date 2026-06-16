@@ -62,7 +62,7 @@ void updateDisplayForCurrentMode() {
             updateWeekdayDisplay();
             break;
         case DISPLAY_MODE_TEST:
-            // Phase 3（MCP23S17 + FUNCキー）で実装
+            // Phase 3（物理スイッチ直接接続 + FUNCキー）で実装
             break;
         default:
             break;

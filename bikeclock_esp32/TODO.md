@@ -18,23 +18,28 @@ Seeed XIAO BLE (nRF52840) 版 `bikeclock/` を **ESP32-S3 SuperMini** へ移植�
 | アプリ | **BTClockMob は変更不要**（完全互換・UUID/プロトコル/デバイス名を維持） |
 
 ### ピン割り当て（推奨案A）
-| 用途 | 信号 | GPIO |
-|------|------|------|
-| TM1637 | DIO | 6 |
-| TM1637 | CLK | 7 |
-| MCP23S17 SPI | MOSI | 4 |
-| MCP23S17 SPI | MISO | 5 |
-| MCP23S17 SPI | SCK | 8 |
-| MCP23S17 SPI | CS | 9 |
-| ePaper (Phase 2.5) | CS | 1 |
-| ePaper (Phase 2.5) | DC | 2 |
-| ePaper (Phase 2.5) | RST | 3 |
-| ePaper (Phase 2.5) | BUSY | 10 |
-| ePaper (Phase 2.5) | SCK (専用SPI3) | 12 |
-| ePaper (Phase 2.5) | MOSI (専用SPI3) | 11 |
-| オンボードLED | RGB (WS2812) | 48（ボード固定） |
+| 用途 | 信号 | GPIO | 備考 |
+|------|------|------|------|
+| TM1637 | DIO | 6 | |
+| TM1637 | CLK | 7 | |
+| ePaper (Phase 2.5) | CS | 1 | |
+| ePaper (Phase 2.5) | DC | 2 | |
+| ePaper (Phase 2.5) | RST | 3 | |
+| ePaper (Phase 2.5) | BUSY | 10 | |
+| ePaper (Phase 2.5) | SCK (専用SPI3) | 12 | |
+| ePaper (Phase 2.5) | MOSI (専用SPI3) | 11 | |
+| オンボードLED | RGB (WS2812) | 48 | （ボード固定） |
+| 物理スイッチ | SW1 | 4 | 内部プルアップ使用 |
+| 物理スイッチ | SW2 | 5 | 内部プルアップ使用 |
+| 物理スイッチ | SW3 | 8 | 内部プルアップ使用 |
+| 物理スイッチ | SW4 | 9 | 内部プルアップ使用 |
+| 物理スイッチ | SW5 | 13 | 内部プルアップ使用 |
+| 物理スイッチ | SW6 | 14 | 内部プルアップ使用 |
+| 物理スイッチ | SW7 | 21 | 内部プルアップ使用 |
+| 物理スイッチ | SW8 (FUNC) | 47 | 内部プルアップ使用 |
+| USB電源監視 | VBUS_SENSE | 15 | 抵抗分圧（10kΩ+10kΩ等）でUSB 5Vを監視 |
 
-空き: GPIO 0,13,14,15,16,17,18,21,33-41,45-47（0 は boot ピン注意 / Serial は USB-CDC を使用）
+空き: GPIO 0, 16, 17, 18, 33-41, 45-46（0 は boot ピン注意 / Serial は USB-CDC を使用）
 
 ### アプリ互換性の維持要件（必ず守る）
 - デバイス名: `BikeClock-0001`
@@ -57,8 +62,9 @@ Seeed XIAO BLE (nRF52840) 版 `bikeclock/` を **ESP32-S3 SuperMini** へ移植�
 | リセット | `NVIC_SystemReset()` | `ESP.restart()` |
 | OTA | `enterOTADfu()` / `BLEDfu` | WiFi OTA (ArduinoOTA) |
 | オンボードLED | 3色LED common anode (`LED_RED/GREEN/BLUE`) | GPIO48 RGB LED (WS2812, 1個) |
-| SPI ピン | 固定(D8/D9/D10) | 任意（`SPI.begin(sck,miso,mosi,ss)`） |
-| TM1637 / MCP23S17 / 時刻計算 / 7seg / メンテナンス | — | **ロジックはそのまま流用** |
+| SPI ピン | 固定(D8/D9/D10) | 不要 (ePaper用に専用SPI3_HOSTを任意指定) |
+| TM1637 / 時刻計算 / 7seg / メンテナンス | — | **ロジックはそのまま流用** |
+| スイッチ入力 | MCP23S17 経由 (SPI) | GPIO直接入力 (内部プルアップ) |
 
 ---
 
@@ -101,9 +107,9 @@ XIAO 版の 3 色 common anode LED から、ESP32-S3 の **WS2812 RGB LED 1個**
 TM1637 7セグLEDは昼間の太陽光下で視認性が悪いため、WeAct 2.13" ePaper(BW) を追加して併用。時刻ソース・BLE・アプリ互換性はそのまま。
 - [x] `bikeclock_esp32_epaper.ino`（新規）: GxEPD2_213_B74(BW) + U8g2_for_Adafruit_GFX（日本語）
 - [x] 専用 SPI3_HOST バス（`SPIClass epdSPI(HSPI)`）。`epdSPI.begin()` → `epd2.selectSPI()` → `init()` の順で専用ピン確保
-- [x] ピン割当: CS=1, DC=2, RST=3, BUSY=10, SCK=12, MOSI=11（MCP23S17既定SPI2と完全分離）
+- [x] ピン割当: CS=1, DC=2, RST=3, BUSY=10, SCK=12, MOSI=11（SPI3_HOSTバスを使用）
 - [x] 表示内容: 時刻(大, `logisoso46_tn`+手描画コロン) + 曜日(月曜日…) + 日付(○月○日)（`unifont_t_japanese3`）
-- [x] 更新戦略: 分変化→時刻帯部分更新(約0.3s) / 日変化・初回同期・15分ごと→全画面フル更新 / 未同期→「時刻未同期」
+- [x] 更新戦略: 時刻/日付変化/同期時に全画面フル更新を行い、文字のにじみや薄化を防止 / 未同期→「時刻未同期」
 - [x] `setup()` に `setupEpaper()`（ブートスプラッシュ）、`loop()` に `updateEpaperDisplay()` 追加
 - [x] ファームウェアバージョン 2.0.4 → 2.0.5
 - **検証**: ビルド成功 ✅ / 実機ePaper表示確認（要配線）
@@ -128,15 +134,22 @@ NimBLE でカスタムサービスを立て、**BTClockMob と時刻同期でき
 
 ### ===== グループ2: 物理スイッチ・HID・OTA =====
 
-#### Phase 3 — MCP23S17 & スイッチ検出 [リスク:低〜中]
+#### Phase 3 — スイッチ直接接続 & 検出 [リスク:低]
 入力検出まで。HID 送信は Phase 6 で繋ぐため、ここではログ出力スタブ。
-- [ ] `setupMCP23S17()`: `SPI.begin(SCK=8, MISO=5, MOSI=4, CS=9)` でカスタムピン指定
-- [ ] `Adafruit_MCP23X17`（ESP32 対応）はそのまま利用
-- [ ] 未接続時の暴走対策（`allPins==0x00` 検出で無効化）を移植
-- [ ] `processHidSwitches()` / `processFunctionKey()` ロジック移植
+- [ ] スイッチピン(GPIO 4, 5, 8, 9, 13, 14, 21, 47)を `INPUT_PULLUP` でセットアップ
+- [ ] チャタリング防止（デバウンス）を考慮した入力読み取りロジックの実装
+- [ ] `processHidSwitches()` / `processFunctionKey()` ロジック移植（GPIO直読みに変更）
 - [ ] `sendHidKeyPress/Release` は **ログのみのスタブ**（BLE HID 未実装のため）
-- [ ] FUNC 長押し → メンテナンスモード遷移（DFU 項目は Phase 7 で仮表示）
+- [ ] FUNC (GPIO 47) 長押し → メンテナンスモード遷移（DFU 項目は Phase 7 で仮表示）
 - **検証**: スイッチ押下でシリアルログ、FUNC 長押しでメンテナンスメニュー表示
+
+#### Phase 3.5 — 電源喪失検知 & ePaper自動消去 [リスク:中] ★明日チャレンジ
+スーパーキャパシタのバックアップ電力を用いて、USB給電遮断時にePaper画面を自動で白にクリアする。
+- [ ] USB 5V遮断検知用のGPIOピン（GPIO 15, VBUS_SENSE）をセットアップ
+- [ ] 割り込み（`FALLING`）または `loop` 内監視でUSB給電の遮断を即座に検知するロジックを実装
+- [ ] 給電遮断検知時、直ちにePaperを白一色にクリア（全画面描画）する
+- [ ] クリア実行完了後、残電力を消費しないようESP32を即座にディープスリープに移行させる
+- **検証**: USBケーブルを抜いた瞬間に、ePaperの画面が真っ白（クリア）になり、偽の時刻が残らないことを確認。
 
 #### Phase 4 — 設定永続化（LittleFS） [リスク:低]
 `InternalFS` → ESP32 LittleFS。Phase 5 のスタブを本実装に差し替え。

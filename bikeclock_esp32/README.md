@@ -30,7 +30,7 @@ XIAO BLE (nRF52840) 版 [`bikeclock/`](../bikeclock/) の **ESP32-S3 移植版**
 └──────────────────────┘                                └──────────────────────┘
             │                                                        │
             ├─ 4桁7セグLED表示 (TM1637)                              ├─ 自動時刻同期
-            ├─ MCP23S17 経由で 8スイッチ読取                         ├─ リモートキー設定
+            ├─ GPIO直接接続で 8スイッチ読取 (内部プルアップ)          ├─ リモートキー設定
             │   (SW1-SW7: HID, SW8: FUNC)                            ├─ 接続履歴（位置情報）
             ├─ BLE HIDキーボード + カスタムGATT                       └─ バックグラウンド実行
             ├─ オンボードRGB LED (状態表示, GPIO48)                   （※アプリは XIAO 版と共通）
@@ -48,29 +48,33 @@ XIAO BLE (nRF52840) 版 [`bikeclock/`](../bikeclock/) の **ESP32-S3 移植版**
 | コンポーネント | 説明 |
 |--------------|------|
 | マイコン | **ESP32-S3 SuperMini** (ESP32S3FH4R2: 4MB Flash, 2MB PSRAM) ※[ピンアウト・仕様参考](https://www.espboards.dev/esp32/esp32-s3-super-mini/) |
-| 表示 | 4-Digit 7セグメントLEDディスプレイ (TM1637) |
-| スイッチI/O | MCP23S17 SPI I/Oエキスパンダー（28pin DIP/SOIC） |
+| 表示 | 4-Digit 7セグメントLEDディスプレイ (TM1637) + WeAct 2.13" ePaper |
+| スイッチI/O | 不要（ESP32-S3の豊富にあるGPIOに直接接続） |
 | 操作 | 外付けスイッチユニット（8ボタン：SW1-SW7 + FUNC） |
 | ステータスLED | SuperMini オンボード RGB LED（GPIO48, WS2812）※配線不要 |
 | 電源 | USB電源（5V） |
 
 ### ESP32-S3 SuperMini のピン割り当て（推奨案A）
 
-| GPIO | 用途 | 接続先 |
-|:----:|------|--------|
-| **GPIO 4** | SPI MOSI | MCP23S17 #13 (SI) |
-| **GPIO 5** | SPI MISO | MCP23S17 #14 (SO) |
-| **GPIO 6** | TM1637 DIO | TM1637 DIO |
-| **GPIO 7** | TM1637 CLK | TM1637 CLK |
-| **GPIO 8** | SPI SCK | MCP23S17 #12 (SCK) |
-| **GPIO 9** | SPI CS | MCP23S17 #11 (CS) |
-| **GPIO 48** | オンボード RGB LED | （ボード内蔵・配線不要） |
-| **3V3** | 3.3V 電源 | MCP23S17 VDD / RESET |
-| **5V (VIN)** | 5V 電源 | TM1637 VCC |
-| **GND** | グラウンド | 全デバイス共通 |
+| GPIO | 用途 | 接続先 | 備考 |
+|:----:|------|--------|------|
+| **GPIO 4** | 物理スイッチ | SW1 | 内部プルアップ使用 |
+| **GPIO 5** | 物理スイッチ | SW2 | 内部プルアップ使用 |
+| **GPIO 6** | TM1637 DIO | TM1637 DIO | |
+| **GPIO 7** | TM1637 CLK | TM1637 CLK | |
+| **GPIO 8** | 物理スイッチ | SW3 | 内部プルアップ使用 |
+| **GPIO 9** | 物理スイッチ | SW4 | 内部プルアップ使用 |
+| **GPIO 13** | 物理スイッチ | SW5 | 内部プルアップ使用 |
+| **GPIO 14** | 物理スイッチ | SW6 | 内部プルアップ使用 |
+| **GPIO 15** | USB電源監視 | VBUS_SENSE | 抵抗分圧（10kΩ+10kΩ等）でUSB 5Vを監視 |
+| **GPIO 21** | 物理スイッチ | SW7 | 内部プルアップ使用 |
+| **GPIO 47** | 物理スイッチ (FUNC) | SW8 (FUNC) | 内部プルアップ使用 |
+| **GPIO 48** | オンボード RGB LED | （ボード内蔵・配線不要） | |
+| **3V3** | 3.3V 電源 | （スイッチのプルアップは内部のため配線不要） | |
+| **5V (VIN)** | 5V 電源 | TM1637 VCC | ePaper VCC (3.3V) は3V3ピンに接続 |
+| **GND** | グラウンド | 全デバイス・全スイッチ共通 | |
 
-> 空きGPIO: 0, 1, 2, 3, 10（GPIO 0 は boot ピンなので入力用途では注意）
-> ESP32-S3 は SPI ピンを任意の GPIO にマッピングできるため、上記以外のピンでも設定変更で対応可能（`SPI.begin(SCK, MISO, MOSI, SS)`）。
+> 空きGPIO: 0, 16, 17, 18, 33-41, 45-46（GPIO 0 は boot ピンなので入力用途では注意）
 
 ---
 
@@ -79,42 +83,36 @@ XIAO BLE (nRF52840) 版 [`bikeclock/`](../bikeclock/) の **ESP32-S3 移植版**
 ### 全体接続イメージ
 
 ```
-                     ESP32-S3 SuperMini
-                  ┌─────────────────────┐
-           USB ───┤ USB-CDC (書込/ログ)  │
-          (5V) ───┤ 5V (VIN)         3V3├──┬───── 3.3V ──→ MCP23S17 VDD(#9), RESET(#18)
-                 │                   5V├──┼───── 5V   ──→ TM1637 VCC
-          (GND)───┤ GND              GND├──┴───── GND  ──→ 全デバイス共通GND
-                 │                     │
-                 │  GPIO4 (MOSI)       │─────────────────→ MCP23S17 #13 (SI)
-                 │  GPIO5 (MISO)       │←───────────────── MCP23S17 #14 (SO)
-                 │  GPIO8 (SCK)        │─────────────────→ MCP23S17 #12 (SCK)
-                 │  GPIO9 (CS)         │─────────────────→ MCP23S17 #11 (CS)
-                 │                     │
-                 │  GPIO6 (DIO)        │───────→ TM1637 DIO
-                 │  GPIO7 (CLK)        │───────→ TM1637 CLK
-                 │                     │
-                 │  GPIO48 (RGB LED)   │  ※ボード内蔵（配線不要）
-                 └─────────────────────┘
+                               ESP32-S3 SuperMini
+                            ┌─────────────────────┐
+                     USB ───┤ USB-CDC (書込/ログ)  │
+                    (5V) ──┬┼─→ GPIO15 (VBUS_SENSE) ※抵抗分圧(10kΩ+10kΩ等)で2.5Vに降圧
+                           ││
+                      [D1] ▽│(逆流防止ダイオード)
+                           ├┼─→ 5V (VIN)             3V3├──┬───── 3.3V ──→ ePaper VCC (3.3V)
+                           ├┼─→ TM1637 VCC             │
+                           ││                          │
+                      [C1] ═│(スーパーキャパシタ 0.22〜1.0F)
+                           ││  ※保護用突入電流制限抵抗(10Ω等)推奨
+                    (GND)──┴┼─→ GND              GND├──┴───── GND  ──→ 全デバイス・全スイッチ共通GND
+                           │                     │
+                           │  GPIO4 (SW1)        │────────→ スイッチ SW1 (他端はGND)
+                           │  GPIO5 (SW2)        │────────→ スイッチ SW2 (他端はGND)
+                           │  GPIO8 (SW3)        │────────→ スイッチ SW3 (他端はGND)
+                           │  GPIO9 (SW4)        │────────→ スイッチ SW4 (他端はGND)
+                           │  GPIO13 (SW5)       │────────→ スイッチ SW5 (他端はGND)
+                           │  GPIO14 (SW6)       │────────→ スイッチ SW6 (他端はGND)
+                           │  GPIO21 (SW7)       │────────→ スイッチ SW7 (他端はGND)
+                           │  GPIO47 (SW8 FUNC)  │────────→ スイッチ SW8/FUNC (他端はGND)
+                           │                     │
+                           │  GPIO6 (DIO)        │────────→ TM1637 DIO
+                           │  GPIO7 (CLK)        │────────→ TM1637 CLK
+                           │                     │
+                           │  GPIO48 (RGB LED)   │  ※ボード内蔵（配線不要）
+                           └─────────────────────┘
 ```
 
-### ① ESP32-S3 SuperMini ↔ MCP23S17（SPI）
-
-| SuperMini | MCP23S17 ピン | 信号 | 備考 |
-|:---------:|:-------------:|------|------|
-| GPIO 4 | #13 (SI) | SPI MOSI | マスター→スレーブ |
-| GPIO 5 | #14 (SO) | SPI MISO | スレーブ→マスター |
-| GPIO 8 | #12 (SCK) | SPI SCK | クロック |
-| GPIO 9 | #11 (CS) | SPI CS | チップセレクト |
-| 3V3 | #9 (VDD) | 3.3V 電源 | |
-| 3V3 | #18 (RESET) | リセット | HIGH で動作（3.3V に接続） |
-| GND | #10 (VSS) | GND | |
-| GND | #15, #16, #17 (A0, A1, A2) | ハードウェアアドレス | **全て GND に落としてアドレス 0 に設定** |
-| (未接続) | #19, #20 (INTB, INTA) | 割込 | 本ファームでは未使用（オープン可） |
-
-> **注意**: MCP23S17 は 3.3V 駆動。ESP32-S3（3.3Vロジック）と直接接続でき、レベル変換不要です。
-
-### ② ESP32-S3 SuperMini ↔ TM1637（4桁7セグLED）
+### ① ESP32-S3 SuperMini ↔ TM1637（4桁7セグLED）
 
 | SuperMini | TM1637 | 信号 |
 |:---------:|:------:|------|
@@ -123,44 +121,41 @@ XIAO BLE (nRF52840) 版 [`bikeclock/`](../bikeclock/) の **ESP32-S3 移植版**
 | 5V (VIN) | VCC | 5V 電源（明るさ重視なら5V推奨） |
 | GND | GND | GND |
 
-### ③ MCP23S17 ↔ スイッチユニット（8ボタン）
+### ② ESP32-S3 SuperMini ↔ スイッチユニット（8ボタン）
 
-スイッチは **GPAポート（#21〜#28ピン）** を使用し、各スイッチのもう片側を **GND** に接続します（MCP23S17 の内部プルアップで HIGH、押下で LOW）。
+スイッチは ESP32-S3 SuperMini の GPIO ピンに直接接続し、各スイッチのもう片側を **GND** に接続します。
+マイコン内部でプルアップ（`INPUT_PULLUP`）を有効化するため、外付けプルアップ抵抗は不要です。押下時に `LOW`、オープン時に `HIGH` となります。
 
-| MCP23S17 ピン | ポート | ボタン | デフォルトキー割り当て |
-|:------------:|:------:|:------:|----------------------|
-| #21 | GPA0 | SW1 | 右矢印 (0x4F) |
-| #22 | GPA1 | SW2 | 下矢印 (0x51) |
-| #23 | GPA2 | SW3 | 上矢印 (0x52) |
-| #24 | GPA3 | SW4 | 左矢印 (0x50) |
-| #25 | GPA4 | SW5 | Enter (0x28) |
-| #26 | GPA5 | SW6 | Back (0x0224) |
-| #27 | GPA6 | SW7 | 再生/一時停止 (0xCD) |
-| #28 | GPA7 | **SW8 (FUNC)** | 表示モード切替（HIDキーではない） |
+| SuperMini GPIO | ボタン | デフォルトキー割り当て | 備考 |
+|:--------------:|:------:|----------------------|-----|
+| GPIO 4 | SW1 | 右矢印 (0x4F) | |
+| GPIO 5 | SW2 | 下矢印 (0x51) | |
+| GPIO 8 | SW3 | 上矢印 (0x52) | |
+| GPIO 9 | SW4 | 左矢印 (0x50) | |
+| GPIO 13 | SW5 | Enter (0x28) | |
+| GPIO 14 | SW6 | Back (0x0224) | |
+| GPIO 21 | SW7 | 再生/一時停止 (0xCD) | |
+| GPIO 47 | **SW8 (FUNC)** | 表示モード切替（HIDキーではない） | 長押しでメンテナンスモード |
 
 > **注**: キー割り当ては BTClockMob アプリから変更可能です（`SET:keys:` コマンド）。
 > GPBポート（#1〜#8）は本プロジェクトでは未使用です。
 
-### ④ 電源接続
+### ③ 電源接続
 
 ```
 USB 5V給電
    │
    ├─→ SuperMini 5V (VIN)   … SuperMini 本体駆動（内蔵レギュレータで 3.3V 生成）
-   ├─→ TM1637 VCC           … 5V駆動
-   │
-   └─(SuperMini 3V3ピンから)─→ MCP23S17 VDD, RESET   … 3.3V駆動
+   └─→ TM1637 VCC           … 5V駆動
 
-   全デバイスの GND を共通化（必須）
+   全デバイス・スイッチの GND を共通化（必須）
 ```
 
 ### 配線時の注意点
 
-- **共通GND**: 全デバイスの GND を必ず1点に束ねてください。GND 不共通は通信不安定の主因です。
-- **MCP23S17 の電圧**: 3.3V 駆動（**5V をかけないこと**）。ESP32-S3 と同じ 3.3V 系なので直接接続できます。
+- **共通GND**: 全デバイスおよび各スイッチの GND を必ず1点に束ねてください。GND 不共通は動作不安定やチャタリングの主因となります。
 - **TM1637 の電圧**: 5V 推奨（明るさ）。3.3V でも動作しますが暗くなります。
-- **MCP23S17 の A0/A1/A2**: 全て GND に落としてハードウェアアドレス = `000`（SPI ではデバイスID `0x00`〜`0x07`）。配線忘れると通信できません。
-- **GPIO 0**: boot ピンのため、起動時のレベルに注意。本構成では未使用推奨。
+- **GPIO 0**: boot ピンのため、起動時のレベルに影響を及ぼします。起動時にLOWになっているとダウンロードモードに入ってしまうため、スイッチの接続先としては避けてください（本構成では未使用）。
 - **GPIO 19/20**: USB D-/D+ に接続されているため使用禁止（USB-CDC/書込に影響）。
 - **GPIO 26〜32**: 内蔵フラッシュに接続されており使用不可。
 
@@ -220,14 +215,14 @@ Arduino IDE / arduino-cli で以下をインストール：
 | ライブラリ | 用途 | 導入フェーズ |
 |-----------|------|-------------|
 | **TM1637** (Avishay Orpaz) | 4桁7セグLED表示 | Phase 1 |
-| **Adafruit MCP23X17** (Adafruit) | MCP23S17 I/Oエキスパンダー | Phase 3 |
 | **NimBLE-Arduino** (h2zero) | BLE (HID + GATT) | Phase 5/6 |
 | **Adafruit NeoPixel** (Adafruit) | オンボードRGB LED (GPIO48) | Phase 2 |
+| **GxEPD2** / **U8g2** | ePaper 描画 | Phase 2.5 |
 | **ArduinoOTA** | WiFi OTA（arduino-esp32 付属） | Phase 7 |
 | **LittleFS** | 設定保存（arduino-esp32 付属） | Phase 4 |
 
 ```bash
-arduino-cli lib install "TM1637" "Adafruit MCP23X17" "NimBLE-Arduino" "Adafruit NeoPixel"
+arduino-cli lib install "TM1637" "NimBLE-Arduino" "Adafruit NeoPixel" "GxEPD2" "U8g2"
 ```
 
 ### ボード設定
@@ -285,15 +280,17 @@ sh consolelog.sh
 
 ## 実装状況
 
-フェーズ別に段階開発中。現在 **Phase 0（ビルド環境）完了**。
+フェーズ別に段階開発中。現在 **Phase 5（BLE 時刻同期）まで完了**。
 
 | フェーズ | 内容 | 状態 |
 |---------|------|:----:|
 | 0 | スケルトン & ビルド環境 | ✅ |
-| 1 | 表示 & 時刻ロジック | ⏳ |
-| 2 | オンボードLED (GPIO48 RGB) | |
-| 5 | BLE カスタムGATT（時刻同期） | |
-| 3 | MCP23S17 & スイッチ検出 | |
+| 1 | 表示 & 時刻ロジック | ✅ |
+| 2 | オンボードLED (GPIO48 RGB) | ✅ |
+| 2.5 | ePaper 表示 (昼間視認性用) | ✅ |
+| 5 | BLE カスタムGATT（時刻同期） | ✅ |
+| 3 | スイッチ直接接続 & 検出 | ⏳ |
+| 3.5 | 電源喪失検知 & ePaper自動消去 | |
 | 4 | 設定永続化 (LittleFS) | |
 | 6 | BLE HIDキーボード | |
 | 7 | WiFi OTA | |
@@ -333,8 +330,7 @@ sh consolelog.sh
 - **言語**: C++ (Arduino)
 - **MCU**: ESP32-S3 (arduino-esp32 core)
 - **BLE**: NimBLE-Arduino
-- **表示**: TM1637
-- **I/Oエキスパンダー**: Adafruit MCP23X17 (MCP23S17, SPI)
+- **表示**: TM1637 + ePaper (GxEPD2)
 - **LED**: Adafruit NeoPixel（オンボードRGB LED, GPIO48）
 - **ファイル**: LittleFS (ESP32)
 - **OTA**: ArduinoOTA (WiFi)
@@ -343,7 +339,8 @@ sh consolelog.sh
 
 - [NimBLE-Arduino](https://github.com/h2zero/NimBLE-Arduino) - ESP32 BLE ライブラリ
 - [TM1637](https://github.com/avishorp/TM1637) - LED表示ライブラリ
-- [Adafruit MCP23X17](https://github.com/adafruit/Adafruit-MCP23X17) - I/Oエキスパンダーライブラリ
+- [GxEPD2](https://github.com/ZinggJM/GxEPD2) - ePaper ディスプレイライブラリ
+- [U8g2](https://github.com/olikraus/u8g2) - フォント・グラフィックライブラリ
 - [Adafruit NeoPixel](https://github.com/adafruit/Adafruit_NeoPixel) - RGB LED ライブラリ
 - [Espressif arduino-esp32](https://github.com/espressif/arduino-esp32) - ESP32 Arduino core
 

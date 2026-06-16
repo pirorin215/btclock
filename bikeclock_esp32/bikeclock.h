@@ -15,17 +15,24 @@
 #define LED_DIO_GPIO     6   // TM1637 DIO
 #define LED_CLK_GPIO     7   // TM1637 CLK
 
-// MCP23S17 SPI I/O Expander
-#define MCP_SPI_MOSI_GPIO   4
-#define MCP_SPI_MISO_GPIO   5
-#define MCP_SPI_SCK_GPIO    8
-#define MCP_SPI_CS_GPIO     9
+// Physical Switches (Phase 3)
+#define SWITCH_SW1_GPIO     4   // Right Arrow
+#define SWITCH_SW2_GPIO     5   // Down Arrow
+#define SWITCH_SW3_GPIO     8   // Up Arrow
+#define SWITCH_SW4_GPIO     9   // Left Arrow
+#define SWITCH_SW5_GPIO     13  // Enter
+#define SWITCH_SW6_GPIO     14  // Back
+#define SWITCH_SW7_GPIO     21  // Play/Pause
+#define SWITCH_FUNC_GPIO    47  // Function / Mode / Maintenance
+
+// USB Power Sense (Phase 3.5)
+#define VBUS_SENSE_GPIO     15  // USB 5V Detection (via voltage divider)
 
 // Onboard RGB LED (WS2812 addressable, fixed on GPIO48)
 #define ONBOARD_LED_GPIO    48
 
 // ePaper (WeAct 2.13" BW, GxEPD2_213_B74) — 昼間視認性用
-// 専用 SPI3_HOST バスを使用（MCP23S17 の既定SPI2と完全分離）
+// 専用 SPI3_HOST バスを使用（SPI3_HOST）
 #define EPD_CS_GPIO         1
 #define EPD_DC_GPIO         2
 #define EPD_RST_GPIO        3
