@@ -71,6 +71,9 @@ class CommandCharCallbacks : public NimBLECharacteristicCallbacks {
             handleKeyConfig(command.c_str());
         } else if (command.startsWith("GET:version")) {
             handleGetVersion();
+        } else if (command.startsWith("NOTIFY:")) {
+            // Phase 10: スマホ通知受信（fire-and-forget：応答しない）
+            handleNotify(command.c_str());
         } else {
             logPrint("BLE", "Unknown command");
             sendResponse("ERROR: Unknown command");
@@ -98,6 +101,12 @@ void setupBLE() {
     logPrint("BLE", "========================================");
 
     NimBLEDevice::init(BLE_DEVICE_NAME);
+
+    // ATT MTU を拡大（Phase 10: 通知本文 200B を1パケットで受信するため）
+    // NimBLE デフォルト MTU 23B（ペイロード20B）では長文通知が送れない。
+    // 247B は ESP32 で安定して使える上限。Android 側は接続時にサーバー提示 MTU を採用。
+    NimBLEDevice::setMTU(247);
+    logPrint("BLE", "ATT MTU set to %d", NimBLEDevice::getMTU());
 
     // セキュリティ（Phase 6: HID は暗号化必須のため bonding を有効化）
     // Just Works（パスキーUI不要）/ bonding 有効 / SC 有効 / MITM 無し。
@@ -226,6 +235,73 @@ void handleKeyConfig(const char* command) {
 }
 
 // ※ loadSettings()/saveSettings() は bikeclock_esp32_settings.ino（Phase 4）に実装
+
+// NOTIFY:app=<アプリ名>\n<テキスト> — スマホ通知受信（Phase 10）
+// ファイア＆フォーゲット（応答なし）。受信時刻を記録し ePaper を通知表示へ切替。
+//   - "app=" が無ければアプリ名を空、残り全部を本文とする
+//   - "\n" が無ければ "app=" 以降全部をアプリ名、本文は空
+//   - 本文は 200B で切り詰め（UTF-8 境界を巻き戻し、マルチバイト文字途中で切れないようにする）
+//   - "\r\n"(CRLF) の \r は除去
+void handleNotify(const char* command) {
+    // "NOTIFY:" の7バイトをスキップ
+    const char* p = command + 7;
+
+    // "app=" を探す
+    const char* appStart = strstr(p, "app=");
+    const char* textStart = "";
+    const char* appEnd = p;   // アプリ名終端（デフォルト: 空文字列）
+
+    if (appStart != nullptr) {
+        appStart += 4;   // "app=" の4バイトをスキップ
+        appEnd = appStart;
+        // \n までがアプリ名。\r\n の \r も終端に含めない。
+        while (*appEnd != '\0' && *appEnd != '\n') {
+            appEnd++;
+        }
+        // 改行の次が本文（\r があれば1つ飛ばす）
+        if (*appEnd == '\n') {
+            textStart = appEnd + 1;
+        } else {
+            // \n 無し: アプリ名 = "app="以降全部。appEnd は '\0' を指す（本文空）
+            textStart = appEnd;
+        }
+    } else {
+        // "app=" 無し: アプリ名空、残り全部を本文
+        textStart = p;
+    }
+
+    // --- アプリ名コピー（32B上限）---
+    size_t appLen = (size_t)(appEnd - appStart);
+    if (appEnd > appStart && appEnd[-1] == '\r') appLen--;   // 末尾 \r 除去
+    if (appLen >= NOTIFY_APP_LEN) appLen = NOTIFY_APP_LEN - 1;
+    memcpy(g_notificationApp, appStart, appLen);
+    g_notificationApp[appLen] = '\0';
+
+    // --- 本文コピー（200B上限、UTF-8境界巻き戻し）---
+    size_t textLen = strlen(textStart);
+    if (textLen >= NOTIFY_TEXT_LEN) textLen = NOTIFY_TEXT_LEN - 1;
+    memcpy(g_notificationText, textStart, textLen);
+    g_notificationText[textLen] = '\0';
+    // 末尾が UTF-8 継続バイト(0b10xxxxxx)で終わっていたら、先頭バイトまで巻き戻して切り捨て
+    while (textLen > 0 && (g_notificationText[textLen - 1] & 0xC0) == 0x80) {
+        textLen--;
+    }
+    // 継続バイトを削った結果、先頭バイト単独(0b11xxxxxx)で残っていたらそれも不完全なので削る
+    if (textLen > 0 && (g_notificationText[textLen - 1] & 0xC0) == 0xC0) {
+        textLen--;
+    }
+    g_notificationText[textLen] = '\0';
+
+    // --- 通知活性化（タイムスタンプは描画側で millis() を使わず g_currentMillis を使うが、
+    //     onWrite は BLE タスクのため millis() を直接使用。loop 側は g_currentMillis で比較）---
+    g_notificationEndTime = millis() + NOTIFICATION_DISPLAY_TIMEOUT_MS;
+    g_notificationActive = true;
+    g_epaperRedrawRequested = true;
+
+    logPrint("NOTIFY", "Received (app='%s', text=%d bytes): %s",
+             g_notificationApp, (int)textLen,
+             textLen > 0 ? g_notificationText : "(empty)");
+}
 
 // BLEの deinit 処理（シャットダウン用）
 void deinitBLE() {

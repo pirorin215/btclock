@@ -9,7 +9,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 22
+#define FIRMWARE_VERSION_PATCH 23
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -142,6 +142,18 @@ extern unsigned long g_lastModeChangeMillis;
 #define MODE_AUTO_RETURN_TIMEOUT_MS 5000
 extern int g_testDisplayIndex;
 
+// --- スマホ通知表示（Phase 10: BLE受信→ePaper一時表示）---
+// プロトコル: NOTIFY:app=<アプリ名>\n<テキスト>（UTF-8、上限200バイト、応答なし）
+// 受信時に ePaper を通知表示へ自動切替し、一定時間後に元のモード（時計）へ復帰。
+#define NOTIFICATION_DISPLAY_TIMEOUT_MS 30000UL  // 通知表示時間（30秒）
+#define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null（ログ/将来用。描画には未使用）
+#define NOTIFY_TEXT_LEN  201   // 通知本文上限 200B + null
+extern volatile bool g_notificationActive;      // 通知表示中フラグ
+extern unsigned long g_notificationEndTime;     // 通知表示の終了時刻（millis()）
+extern char g_notificationApp[];                // アプリ名
+extern char g_notificationText[];               // 通知本文
+extern volatile bool g_epaperRedrawRequested;   // ePaper 強制再描画要求（ビュー変更検出用）
+
 // --- Function Prototypes ---
 // 時刻計算
 int getHours();
@@ -216,6 +228,7 @@ void sendResponse(const char* message);
 void handleTimeSync(const char* command);
 void handleGetVersion();
 void handleKeyConfig(const char* command);
+void handleNotify(const char* command);   // Phase 10: NOTIFY:app=...\n<本文>（fire-and-forget）
 
 // HID（Phase 6）— bikeclock_esp32_hid.ino
 // NimBLEServer は前方宣言のみ（実体は hid.ino で使用時 include）

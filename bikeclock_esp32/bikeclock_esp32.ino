@@ -29,6 +29,15 @@ DateCache g_dateCache = {0, 0, 0, 0, 0, false};
 unsigned long g_startupMillis = 0;
 char g_startupTimeStr[EP_STARTUP_TIME_LEN] = "";   // 初回時刻同期時に "YYYY/MM/DD HH:MM" を記録
 
+// --- スマホ通知表示状態（Phase 10） ---
+// BLE(NimBLE別タスク)の onWrite で書き込み、loop(main task)で読む。
+// 単純な bool/代入は32bit ESP32でアトミック。文字列コピーは描画側でローカルコピーを取る。
+volatile bool g_notificationActive = false;
+unsigned long g_notificationEndTime = 0;
+char g_notificationApp[NOTIFY_APP_LEN] = "";
+char g_notificationText[NOTIFY_TEXT_LEN] = "";
+volatile bool g_epaperRedrawRequested = false;
+
 // --- ロギング ---
 void setupLog() {
     g_startupMillis = millis();

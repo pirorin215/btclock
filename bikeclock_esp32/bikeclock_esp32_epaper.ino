@@ -274,6 +274,44 @@ static void drawCenteredText(const char* text, int16_t baselineY) {
     u8g2Fonts.print(text);
 }
 
+// 日本語自動折返し描画（epaper_test.ino から移植、Phase 10 通知表示用）
+// UTF-8 を1文字ずつ描画し、maxWidth を超えると改行する。分割線なしでテキスト埋め。
+static void drawWrappedText(int16_t x, int16_t y, const char* text,
+                            const uint8_t* font, uint16_t fg, uint16_t bg,
+                            int16_t maxWidth) {
+    u8g2Fonts.setFont(font);
+    u8g2Fonts.setFontMode(1);
+    u8g2Fonts.setForegroundColor(fg);
+    u8g2Fonts.setBackgroundColor(bg);
+
+    int16_t cursorX = x;
+    int16_t lineHeight = u8g2Fonts.getFontAscent() - u8g2Fonts.getFontDescent() + 6;
+    int16_t cursorY = y + u8g2Fonts.getFontAscent() + 4;
+
+    const char* p = text;
+    while (*p) {
+        uint8_t len = 0;
+        if ((*p & 0x80) == 0) len = 1;
+        else if ((*p & 0xE0) == 0xC0) len = 2;
+        else if ((*p & 0xF0) == 0xE0) len = 3;
+        else if ((*p & 0xF8) == 0xF0) len = 4;
+        else { p++; continue; }   // 不正なバイトは読み飛ばし
+
+        char buf[5] = {0};
+        strncpy(buf, p, len);
+        int16_t charWidth = u8g2Fonts.getUTF8Width(buf);
+
+        if (cursorX + charWidth > x + maxWidth) {
+            cursorX = x;
+            cursorY += lineHeight;
+        }
+        u8g2Fonts.setCursor(cursorX, cursorY);
+        u8g2Fonts.print(buf);
+        cursorX += charWidth;
+        p += len;
+    }
+}
+
 // バージョン番号 "ver major.minor.patch" を画面中央に描画。
 // 「ver」は24pxフォント、番号は巨大数字フォント(_tn)。ピリオドは数字の下端寄り。
 // （数字フォントは英字・ピリオド非収録のため「ver」は別フォント、ピリオドは fillCircle）
@@ -359,14 +397,25 @@ static void drawEpaperClock() {
     } while (g_epaper.nextPage());
 }
 
-// 通知表示（Phase 9 スタブ: 「通知なし」。本文受信は Phase 10 で実装）
-// 分割線なしでテキスト埋め（Phase 10 で drawWrappedText に差し替え）。
-static void drawEpaperNotificationStub() {
+// 通知表示（Phase 10 本実装）: 本文テキストを全画面に自動折返し描画（分割線なし）
+// アプリ名は非表示（ユーザー選択: 本文のみレイアウト）。
+// ※ onWrite(BLEタスク) と競合しないよう、ページループ前にローカルコピーを取り、
+//    ループ内ではそのコピーを使う（GxEPD2 の paged update は各ページで再描画するため）。
+static void drawEpaperNotification(const char* text) {
+    static char safeText[NOTIFY_TEXT_LEN];
+    strncpy(safeText, text, NOTIFY_TEXT_LEN - 1);
+    safeText[NOTIFY_TEXT_LEN - 1] = '\0';
+
     g_epaper.setFullWindow();
     g_epaper.firstPage();
     do {
         g_epaper.fillScreen(GxEPD_WHITE);
-        drawCenteredText("通知なし", EP_H / 2);
+        if (safeText[0] != '\0') {
+            drawWrappedText(0, 0, safeText, u8g2_font_unifont_t_japanese3,
+                            GxEPD_BLACK, GxEPD_WHITE, EP_W);
+        } else {
+            drawCenteredText("通知なし", EP_H / 2);
+        }
     } while (g_epaper.nextPage());
 }
 
@@ -491,6 +540,36 @@ static EpaperView displayModeToEpaperView(DisplayMode mode) {
 //   - 標準(CLOCK)  → 分/日が変わるかビュー切替時に毎分フル更新
 //   - 通知/詳細    → ビューが切り替わった瞬間の1回だけ描画（スナップショット）
 void updateEpaperDisplay() {
+    // === Phase 10: 通知表示の自動切替・自動復帰 ===
+    // 「ユーザ選択のベースビュー(g_displayMode)」を触らず、通知を優先オーバーライド。
+
+    // 通知タイムアウト判定: 期限切れで通知を終了し、ベースを時計(TIME)へ強制復帰
+    if (g_notificationActive && g_currentMillis >= g_notificationEndTime) {
+        logPrint("NOTIFY", "Timeout - returning to clock");
+        g_notificationActive = false;
+        g_epaperRedrawRequested = true;
+        // ベースが DATE/WEEKDAY なら時計に戻す（合意: 通知終了で常に標準時計へ）
+        if (g_displayMode == DISPLAY_MODE_DATE || g_displayMode == DISPLAY_MODE_WEEKDAY) {
+            g_displayMode = DISPLAY_MODE_TIME;
+            g_lastModeChangeMillis = g_currentMillis;
+        }
+    }
+
+    // 強制再描画要求の消化（新着通知／タイムアウト復帰でビュー切替を確実にする）
+    if (g_epaperRedrawRequested) {
+        ep_lastView = EP_VIEW_NONE;
+        g_epaperRedrawRequested = false;
+    }
+
+    // 通知表示中（未同期状態より優先。合意: 現在のモードに関わらず通知を表示）
+    if (g_notificationActive) {
+        if (ep_lastView != EP_VIEW_NOTIFICATION) {
+            drawEpaperNotification(g_notificationText);
+            ep_lastView = EP_VIEW_NOTIFICATION;
+        }
+        return;
+    }
+
     // 未同期: 固定画面
     if (!g_timeSynced) {
         if (ep_lastView != EP_VIEW_UNSYNCED) {
@@ -519,9 +598,10 @@ void updateEpaperDisplay() {
     }
 
     // 通知/詳細ビュー: ビューが変わった時だけ描画（スナップショット1回）
+    // 通知ビュー(DATE手動切替時): 直近の通知本文があれば再表示、なければ「通知なし」
     if (target != ep_lastView) {
         if (target == EP_VIEW_NOTIFICATION) {
-            drawEpaperNotificationStub();
+            drawEpaperNotification(g_notificationText);
         } else {  // EP_VIEW_DETAIL
             drawEpaperDetail();
         }
