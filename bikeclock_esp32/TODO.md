@@ -5,7 +5,7 @@ Seeed XIAO BLE (nRF52840) 版 `bikeclock/` を **ESP32-S3 SuperMini** へ移植�
 
 > **スコープ**: 本作業の主目的は **ファームウェア（ESP32）側の移植**。コアプロトコル（UUID・コマンド・応答）は XIAO 版と互換を維持する。ただし ESP32 版固有の追加機能（デバイス名 `BikeClock-ESP32` 化、複数デバイスの接続先選択など）に伴い、Androidアプリ `BTClockMob` も必要に応じて変更する（Phase 4 で実績あり）。
 
-> **進捗サマリ**: Phase 0〜6 完了（時計表示・BLE時刻同期・HIDキーボード・2接続共存まで実機確認済み・v2.0.21）。**残りは Phase 7（WiFi OTA）と Phase 8（統合・調整）のみ**。
+> **進捗サマリ**: Phase 0〜6 完了（時計表示・BLE時刻同期・HIDキーボード・2接続共存まで実機確認済み・v2.0.21）。**残りは Phase 7（WiFi OTA）・Phase 8（統合・調整）に加え、新機能として Phase 9〜11（ePaper 3モード連動＋通知転送）を追加**。
 
 ---
 
@@ -33,6 +33,35 @@ Seeed XIAO BLE (nRF52840) 版 `bikeclock/` を **ESP32-S3 SuperMini** へ移植�
 - [ ] ディープスリープ（43μA）活用の検討（※オプション、バイク常時給電なら不要かも）
 - [ ] README.md / EXTERNAL_LIBRARIES.md を ESP32 版として作成
 - **検証**: 一連のユースケース（起動→アプリ接続→時刻同期→HID操作→OTA→工場リセット）を通しで確認
+
+### Phase 9 — ePaper 3モード連動表示（マイコン単体） [リスク:中] — 実装完了（v2.0.22、実機検証待ち）
+FUNCボタン短押しで 7セグLED のモード（TIME/DATE/WEEKDAY）を切り替えたとき、**ePaper の表示も連動して 3 種類に切り替わる**ようにする（現状は7セグのみ切替で ePaper は常時標準画面）。
+- [x] モード連動: 7seg=TIME → ePaper 標準表示 ／ 7seg=DATE → ePaper 通知表示 ／ 7seg=WEEKDAY → ePaper 詳細表示
+- [x] `updateEpaperDisplay()` を `g_displayMode` に応じた 3 描画関数のディスパッチャ化（`EpaperView` / `ep_lastView`）。モード切替時の即時再描画
+- [x] 詳細表示（モードC）: 16px級フォントで ① 開始時刻＋経過時間 ② 現在日時（秒まで） ③ HIDキー設定（SW1〜7）。切替時の1回だけ描画（スナップショット）
+- [x] 通知表示（モードB）のスタブ: 「通知なし」固定表示（本文受信は Phase 10）
+- [x] 起動時刻（JST）を時刻同期完了時に記録（`g_startupTimeStr` / `recordStartupTime()`）。`getYear()` 追加
+- [x] HIDキーコード → 人間可読名（Right/Enter 等）のマッピング（`KEY_NAME_TABLE` / `keyNameFromCode()`）
+- **検証（実機）**: FUNC短押しで ePaper が 標準→通知(なし)→詳細 に切り替わる。詳細は分が変わっても更新されない。※ビルド成功（v2.0.22, 70%）
+- **オートリターン**: DATE/WEEKDAY の5秒でTIME強制復帰は **維持（合意）**。モードB/C は5秒間表示後、標準に戻る
+
+### Phase 10 — スマホ通知受信・表示（BLE） [リスク:中]
+Phase 9 の通知表示スタブを本実装し、BLE 経由でスマホからの通知を受信して ePaper に表示する（マイコン側）。
+- [ ] BLE 受信ハンドラへ通知コマンド追加。プロトコル: `NOTIFY:app=<アプリ名>\n<テキスト>`（UTF-8、上限200バイト、応答なし＝ファイア＆フォーゲット）
+- [ ] 通知受信時、現在のモードに関わらず **ePaper を通知表示に自動切替** し、一定時間（例: 30秒）後に **元のモード画面へ自動復帰**
+- [ ] 通知表示本体: `epaper_test` の `drawWrappedText()`（u8g2_font_unifont_t_japanese3、自動折り返し）を移植。分割線なしでテキスト埋め
+- [ ] 表示中モード管理: 「ユーザ選択のベースビュー」と「通知割り込みで一時表示するビュー」の分離
+- **検証**: BLE で `NOTIFY:app=Test\nテスト` を送ると、標準画面にいても通知表示に切り替わり30秒で復帰する
+
+### Phase 11 — Android 通知転送（NotificationListenerService） [リスク:中]
+Phase 10 のプロトコルをアプリ側から送る。スマホの通知を BikeClock の ePaper に転送する。
+- [ ] `NotificationListenerService` サブクラスを新規作成（マニフェスト宣言＋`BIND_NOTIFICATION_LISTENER_SERVICE`）
+- [ ] `onNotificationPosted` でアプリ名+タイトル+テキストを取り出し `NOTIFY:` ペイロード生成 → 既存 `BleRepository.sendCommand()` で送信（DI は Koin の `KoinComponent` 経由。同一プロセス運用）
+- [ ] 自己アプリ通知の除外・200バイト切り詰め・簡易デバウンス
+- [ ] AppSettings に「通知アクセス」許可誘導 UI 追加（`Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`）
+- **検証**: 通知アクセス許可後、LINE 等の通知で BikeClock の ePaper にアプリ名+テキストが表示される
+
+> **通知プロトコル（Phase 10/11 共通）**: プレフィックス `NOTIFY:` ／ アプリ名 `app=<名>` ／ 区切り `\n` 1個 ／ 上限 200バイト(UTF-8) ／ 応答なし（ファイア＆フォーゲット）
 
 ---
 

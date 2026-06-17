@@ -46,11 +46,10 @@ static GxEPD2_BW<GxEPD2_213_B74, GxEPD2_213_B74::HEIGHT> g_epaper(
 static U8G2_FOR_ADAFRUIT_GFX u8g2Fonts;
 
 // === 表示状態（前回描画内容のキャッシュで無駄な更新を省く） ===
-static int8_t  ep_lastHr        = -1;
-static int8_t  ep_lastMin       = -1;
-static int8_t  ep_lastDay       = -1;
-static bool    ep_lastSynced    = false;
-static bool    ep_showingUnsync = false;
+static int8_t     ep_lastHr  = -1;
+static int8_t     ep_lastMin = -1;
+static int8_t     ep_lastDay = -1;
+static EpaperView ep_lastView = EP_VIEW_NONE;   // 前回描画ビュー（ビュー切替検出・初回描画用）
 
 // === 画面ジオメトリ（rotation=1 で 250x122 横長） ===
 static const int16_t EP_W = 250;
@@ -114,6 +113,32 @@ static void getRideTime(int* hours, int* minutes) {
     unsigned long totalMin = elapsedMs / 60000UL;
     *hours   = (int)(totalMin / 60UL);
     *minutes = (int)(totalMin % 60UL);
+}
+
+// ====================================================================
+// HIDキーコード → 人間可読名（詳細表示用）
+// ====================================================================
+static const struct { uint16_t code; const char* name; } KEY_NAME_TABLE[] = {
+    // 矢印・編集キー
+    {0x4F, "Right"}, {0x50, "Left"}, {0x51, "Down"}, {0x52, "Up"},
+    {0x28, "Enter"}, {0x29, "Esc"}, {0x2A, "BS"}, {0x2B, "Tab"},
+    {0x2C, "Space"}, {0x4C, "Del"},
+    // Android / Consumer Page
+    {0x0224, "Back"}, {0xCD, "Play/Pause"}, {0xB5, "Next"}, {0xB6, "Prev"},
+    {0xE2, "Mute"}, {0xE9, "VolUp"}, {0xEA, "VolDn"},
+    // 数字
+    {0x1E, "1"}, {0x1F, "2"}, {0x20, "3"}, {0x21, "4"}, {0x22, "5"},
+    {0x23, "6"}, {0x24, "7"}, {0x25, "8"}, {0x26, "9"}, {0x27, "0"},
+};
+
+// キーコードから名称を返す。未知は "0xXXXX" 表記。
+static const char* keyNameFromCode(uint16_t code) {
+    for (size_t i = 0; i < sizeof(KEY_NAME_TABLE) / sizeof(KEY_NAME_TABLE[0]); i++) {
+        if (KEY_NAME_TABLE[i].code == code) return KEY_NAME_TABLE[i].name;
+    }
+    static char hexbuf[8];
+    snprintf(hexbuf, sizeof(hexbuf), "0x%04X", code);
+    return hexbuf;
 }
 
 // ====================================================================
@@ -334,6 +359,73 @@ static void drawEpaperClock() {
     } while (g_epaper.nextPage());
 }
 
+// 通知表示（Phase 9 スタブ: 「通知なし」。本文受信は Phase 10 で実装）
+// 分割線なしでテキスト埋め（Phase 10 で drawWrappedText に差し替え）。
+static void drawEpaperNotificationStub() {
+    g_epaper.setFullWindow();
+    g_epaper.firstPage();
+    do {
+        g_epaper.fillScreen(GxEPD_WHITE);
+        drawCenteredText("通知なし", EP_H / 2);
+    } while (g_epaper.nextPage());
+}
+
+// 詳細表示（モードC）: 開始時刻 / 経過時間 / 現在日時 / HIDキー設定
+// 16px級フォントで情報密度高く。切替時の1回だけ描画（スナップショット）。
+static void drawEpaperDetail() {
+    u8g2Fonts.setFont(u8g2_font_unifont_t_japanese3);
+    u8g2Fonts.setFontMode(1);
+    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
+    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+
+    g_epaper.setFullWindow();
+    g_epaper.firstPage();
+    do {
+        g_epaper.fillScreen(GxEPD_WHITE);
+
+        char buf[48];
+        const int16_t x = 4;
+        const int16_t col2 = 128;   // HIDキー2列目のx
+        const int16_t lh = 17;      // 行高
+        int16_t y = 14;
+
+        // ① 開始時刻（起動時刻/JST）
+        snprintf(buf, sizeof(buf), "開始 %s",
+                 g_startupTimeStr[0] ? g_startupTimeStr : "----/--/-- --:--");
+        u8g2Fonts.setCursor(x, y);
+        u8g2Fonts.print(buf);
+        y += lh;
+
+        // ② 経過時間（電源ONから、millisベース）
+        int rh, rm;
+        getRideTime(&rh, &rm);
+        snprintf(buf, sizeof(buf), "経過 %d時間%02d分", rh, rm);
+        u8g2Fonts.setCursor(x, y);
+        u8g2Fonts.print(buf);
+        y += lh;
+
+        // ③ 現在日時（秒まで。スナップショットなので以降更新されない）
+        snprintf(buf, sizeof(buf), "現在 %04d/%02d/%02d %s %02d:%02d:%02d",
+                 getYear(), getMonth(), getDay(), WEEKDAY_JP[getWeekday()],
+                 getHours(), getMinutes(), getSeconds());
+        u8g2Fonts.setCursor(x, y);
+        u8g2Fonts.print(buf);
+
+        // 区切り線（現在日時とHIDキーの間）
+        g_epaper.drawLine(x, y + 6, EP_W - x, y + 6, GxEPD_BLACK);
+
+        // ④ HIDキー設定（2列×4行、SW7は最終行単独）
+        y += lh + 2;
+        for (int i = 0; i < NUM_HID_SWITCHES; i++) {
+            int col = i % 2;
+            int row = i / 2;
+            snprintf(buf, sizeof(buf), "SW%d %s", i + 1, keyNameFromCode(hidSwitches[i].keyCode));
+            u8g2Fonts.setCursor(x + col * col2, y + row * lh);
+            u8g2Fonts.print(buf);
+        }
+    } while (g_epaper.nextPage());
+}
+
 // 未同期画面
 static void drawEpaperUnsynced() {
     g_epaper.setFullWindow();
@@ -385,37 +477,54 @@ void setupEpaper() {
     drawEpaperSplash();
 }
 
-// loop から毎回呼ばれる。内容が変わった時だけ実際の描画を行う（通常は何もしない）。
+// 7セグ表示モード → ePaper表示ビュー の対応
+static EpaperView displayModeToEpaperView(DisplayMode mode) {
+    switch (mode) {
+        case DISPLAY_MODE_DATE:    return EP_VIEW_NOTIFICATION;
+        case DISPLAY_MODE_WEEKDAY: return EP_VIEW_DETAIL;
+        default:                   return EP_VIEW_CLOCK;  // TIME / TEST / その他は標準
+    }
+}
+
+// loop から毎回呼ばれる。表示すべきビューまたは内容が変わった時だけ描画。
+//   - 未同期       → 「時刻未同期」固定
+//   - 標準(CLOCK)  → 分/日が変わるかビュー切替時に毎分フル更新
+//   - 通知/詳細    → ビューが切り替わった瞬間の1回だけ描画（スナップショット）
 void updateEpaperDisplay() {
+    // 未同期: 固定画面
     if (!g_timeSynced) {
-        if (!ep_showingUnsync) {
+        if (ep_lastView != EP_VIEW_UNSYNCED) {
             drawEpaperUnsynced();
-            ep_showingUnsync = true;
-            ep_lastSynced = false;  // 次回同期時にフル更新させる
+            ep_lastView = EP_VIEW_UNSYNCED;
         }
         return;
     }
 
-    // 同期済み
-    const int h = getHours();
-    const int m = getMinutes();
-    const int d = getDay();
+    const EpaperView target = displayModeToEpaperView(g_displayMode);
 
-    const bool justSynced    = !ep_lastSynced;
-    const bool dayChanged    = (d != ep_lastDay);
-    const bool timeChanged   = (h != ep_lastHr) || (m != ep_lastMin);
-
-    // 何も変わっていなければ描画スキップ（時刻の分が変わった時のみ）
-    if (!justSynced && !dayChanged && !timeChanged) {
+    // 標準ビュー: 分/日変化でも更新（時計は毎分更新）
+    if (target == EP_VIEW_CLOCK) {
+        const int h = getHours();
+        const int m = getMinutes();
+        const int d = getDay();
+        const bool viewChanged = (ep_lastView != EP_VIEW_CLOCK);
+        if (viewChanged || h != ep_lastHr || m != ep_lastMin || d != ep_lastDay) {
+            drawEpaperClock();
+            ep_lastView = EP_VIEW_CLOCK;
+            ep_lastHr  = (int8_t)h;
+            ep_lastMin = (int8_t)m;
+            ep_lastDay = (int8_t)d;
+        }
         return;
     }
 
-    // 全画面フル更新
-    drawEpaperClock();
-
-    ep_showingUnsync = false;
-    ep_lastSynced  = true;
-    ep_lastHr      = (int8_t)h;
-    ep_lastMin     = (int8_t)m;
-    ep_lastDay     = (int8_t)d;
+    // 通知/詳細ビュー: ビューが変わった時だけ描画（スナップショット1回）
+    if (target != ep_lastView) {
+        if (target == EP_VIEW_NOTIFICATION) {
+            drawEpaperNotificationStub();
+        } else {  // EP_VIEW_DETAIL
+            drawEpaperDetail();
+        }
+        ep_lastView = target;
+    }
 }

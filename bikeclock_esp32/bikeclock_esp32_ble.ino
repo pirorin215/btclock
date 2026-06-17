@@ -175,6 +175,7 @@ void handleTimeSync(const char* command) {
                  getHours(), getMinutes(), getSeconds());
 
         sendResponse("OK: Time synced");
+        recordStartupTime();   // 初回同期時に起動時刻(JST)を記録（Phase 9 詳細表示用）
         updateTimeDisplay();  // 即時表示更新
     } else {
         logPrint("BLE", "Invalid timestamp: %s", tsStr);

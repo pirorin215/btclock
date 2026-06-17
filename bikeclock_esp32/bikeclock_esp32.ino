@@ -25,8 +25,9 @@ DisplayMode g_displayMode = DISPLAY_MODE_TIME;
 unsigned long g_currentMillis = 0;
 unsigned long g_lastScreenMillis = 0;
 unsigned long g_lastCounterMillis = 0;
-DateCache g_dateCache = {0, 0, 0, 0, false};
+DateCache g_dateCache = {0, 0, 0, 0, 0, false};
 unsigned long g_startupMillis = 0;
+char g_startupTimeStr[EP_STARTUP_TIME_LEN] = "";   // 初回時刻同期時に "YYYY/MM/DD HH:MM" を記録
 
 // --- ロギング ---
 void setupLog() {
@@ -103,6 +104,7 @@ void getMonthDay(int* month, int* day) {
     }
 
     // キャッシュ更新（weekday: 1970-01-01 は木曜日 = 4）
+    g_dateCache.year = (int)year;
     g_dateCache.month = m + 1;
     g_dateCache.day = days + 1;
     g_dateCache.weekday = (getDaysSinceEpoch() + 4) % 7;
@@ -125,6 +127,12 @@ int getDay() {
     return day;
 }
 
+int getYear() {
+    int month, day;
+    getMonthDay(&month, &day);
+    return g_dateCache.year;
+}
+
 int getWeekday() {
     if (g_dateCache.valid && g_dateCache.lastTimestamp == g_currentTimestamp) {
         return g_dateCache.weekday;
@@ -144,6 +152,17 @@ void updateTimestamp() {
         g_currentTimestamp++;
         g_lastCounterMillis = g_currentMillis;
     }
+}
+
+// 起動時刻(JST)を記録（初回時刻同期時に1回だけ）。
+// 電源ON直後は時刻未同期で取得不可なため、最初の正確な時刻を実質的な起動時刻とする。
+// Phase 9 詳細表示の「開始時刻」として使用。
+void recordStartupTime() {
+    if (g_startupTimeStr[0] != '\0') return;   // 既に記録済み
+    if (!g_timeSynced) return;                  // 未同期では記録しない
+    snprintf(g_startupTimeStr, EP_STARTUP_TIME_LEN, "%04d/%02d/%02d %02d:%02d",
+             getYear(), getMonth(), getDay(), getHours(), getMinutes());
+    logPrint("TIME", "Startup time recorded: %s", g_startupTimeStr);
 }
 
 // 表示状態更新（カウントダウン、キーコード表示、オートリターン対応）
@@ -280,6 +299,7 @@ void setup() {
     logPrint("TEST", "Fixed time mode: 2026-06-15(Mon) 12:34:56 (ts=%lu)", (unsigned long)g_currentTimestamp);
     logPrint("TEST", "  -> getHours=%d getMinutes=%d getSeconds=%d", getHours(), getMinutes(), getSeconds());
     logPrint("TEST", "  -> month=%d day=%d weekday=%d(0=Sun)", getMonth(), getDay(), getWeekday());
+    recordStartupTime();   // 詳細表示の「開始時刻」用（テスト時刻を起動時刻とする）
 #else
     g_timeSynced = false;
     logPrint("INIT", "Unsynced mode (8888 blink)");

@@ -9,7 +9,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 21
+#define FIRMWARE_VERSION_PATCH 22
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -65,8 +65,21 @@ enum DisplayMode {
     DISPLAY_MODE_COUNT
 };
 
+// --- ePaper 表示ビュー（Phase 9: 7セグ表示モードに連動）---
+//   7seg=TIME    → EP_VIEW_CLOCK（標準）
+//   7seg=DATE    → EP_VIEW_NOTIFICATION（通知。Phase 9 は「通知なし」スタブ）
+//   7seg=WEEKDAY → EP_VIEW_DETAIL（詳細: 開始時刻/経過/現在日時/HIDキー）
+enum EpaperView {
+    EP_VIEW_NONE = -1,        // 未描画（初回強制描画用の番兵）
+    EP_VIEW_CLOCK,            // 標準（7seg = TIME）
+    EP_VIEW_NOTIFICATION,     // 通知（7seg = DATE）
+    EP_VIEW_DETAIL,           // 詳細（7seg = WEEKDAY）
+    EP_VIEW_UNSYNCED          // 未同期
+};
+
 // --- Date Cache (日付計算のキャッシュ) ---
 struct DateCache {
+    int year;
     int month;
     int day;
     int weekday;
@@ -116,6 +129,8 @@ extern unsigned long g_lastScreenMillis;
 extern unsigned long g_lastCounterMillis;
 extern DateCache g_dateCache;
 extern unsigned long g_startupMillis;
+extern char g_startupTimeStr[];   // 起動時刻(JST) "YYYY/MM/DD HH:MM"。初回時刻同期時に記録
+#define EP_STARTUP_TIME_LEN 17    // "YYYY/MM/DD HH:MM" + null
 
 #define NUM_HID_SWITCHES 7
 extern HidSwitch hidSwitches[];
@@ -135,6 +150,7 @@ int getSeconds();
 int getMonth();
 int getDay();
 int getWeekday();
+int getYear();
 
 // 表示
 void updateTimeDisplay();
@@ -152,6 +168,7 @@ void updateEpaperDisplay();
 // システム
 void updateTimestamp();
 void updateDisplayAndLedState();
+void recordStartupTime();   // 初回時刻同期時に起動時刻(JST)を g_startupTimeStr へ記録
 
 // 物理スイッチ & メンテナンスモード
 void processHidSwitches();
