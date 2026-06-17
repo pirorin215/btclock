@@ -4,12 +4,13 @@
 #include <Arduino.h>
 #include <TM1637Display.h>
 #include <LittleFS.h>
+#include <U8g2_for_Adafruit_GFX.h>
 
 // --- Firmware Version Information (ESP32-S3 edition) ---
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 23
+#define FIRMWARE_VERSION_PATCH 24
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -148,6 +149,24 @@ extern int g_testDisplayIndex;
 #define NOTIFICATION_DISPLAY_TIMEOUT_MS 30000UL  // 通知表示時間（30秒）
 #define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null（ログ/将来用。描画には未使用）
 #define NOTIFY_TEXT_LEN  201   // 通知本文上限 200B + null
+
+// 通知の文字数に応じたフォントサイズと拡大倍率の設定構造体
+struct NotifyFontSetting {
+    int maxChars;          // この文字数以下の場合に適用
+    const uint8_t* font;   // 使用するフォント（u8g2_font_...）
+    int scale;             // 拡大倍率（1〜3）
+};
+
+// ユーザーが簡単にフォントと拡大倍率の段階を設定・調整できる配列（文字数の昇順で定義すること）
+// ※ 配列の最後は、それ以上のすべての長文をカバーするため十分に大きな文字数（例: 999）にしてください。
+static const NotifyFontSetting NOTIFY_FONT_SETTINGS[] = {
+    { 10,  u8g2_font_b16_t_japanese3, 3 },  // 16pxフォント3倍 48px
+    { 24,  u8g2_font_b12_t_japanese3, 3 },  // 12pxフォント3倍 36px
+    { 26,  u8g2_font_b16_t_japanese3, 2 },  // 16pxフォント2倍 32px
+    {999,  u8g2_font_b12_t_japanese3, 2 }   //
+};
+#define NUM_NOTIFY_FONT_SETTINGS (sizeof(NOTIFY_FONT_SETTINGS) / sizeof(NOTIFY_FONT_SETTINGS[0]))
+
 extern volatile bool g_notificationActive;      // 通知表示中フラグ
 extern unsigned long g_notificationEndTime;     // 通知表示の終了時刻（millis()）
 extern char g_notificationApp[];                // アプリ名

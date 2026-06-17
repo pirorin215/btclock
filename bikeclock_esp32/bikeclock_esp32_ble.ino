@@ -277,20 +277,25 @@ void handleNotify(const char* command) {
     memcpy(g_notificationApp, appStart, appLen);
     g_notificationApp[appLen] = '\0';
 
-    // --- 本文コピー（200B上限、UTF-8境界巻き戻し）---
+    // --- 本文コピー（200B上限、UTF-8境界巻き戻しは切り詰め時のみ）---
     size_t textLen = strlen(textStart);
-    if (textLen >= NOTIFY_TEXT_LEN) textLen = NOTIFY_TEXT_LEN - 1;
+    bool truncated = (textLen >= NOTIFY_TEXT_LEN);
+    if (truncated) {
+        textLen = NOTIFY_TEXT_LEN - 1;
+    }
     memcpy(g_notificationText, textStart, textLen);
     g_notificationText[textLen] = '\0';
-    // 末尾が UTF-8 継続バイト(0b10xxxxxx)で終わっていたら、先頭バイトまで巻き戻して切り捨て
-    while (textLen > 0 && (g_notificationText[textLen - 1] & 0xC0) == 0x80) {
-        textLen--;
+
+    if (truncated) {
+        // 切り詰めが発生した時のみ、末尾の不完全なUTF-8バイトを削る
+        while (textLen > 0 && (g_notificationText[textLen - 1] & 0xC0) == 0x80) {
+            textLen--;
+        }
+        if (textLen > 0 && (g_notificationText[textLen - 1] & 0xC0) == 0xC0) {
+            textLen--;
+        }
+        g_notificationText[textLen] = '\0';
     }
-    // 継続バイトを削った結果、先頭バイト単独(0b11xxxxxx)で残っていたらそれも不完全なので削る
-    if (textLen > 0 && (g_notificationText[textLen - 1] & 0xC0) == 0xC0) {
-        textLen--;
-    }
-    g_notificationText[textLen] = '\0';
 
     // --- 通知活性化（タイムスタンプは描画側で millis() を使わず g_currentMillis を使うが、
     //     onWrite は BLE タスクのため millis() を直接使用。loop 側は g_currentMillis で比較）---

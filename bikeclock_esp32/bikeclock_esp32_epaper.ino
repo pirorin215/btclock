@@ -263,6 +263,33 @@ static void drawLeftPanel() {
     drawKanji16x16(dx + dayW + 2, dBaselineY - 14, KANJI_WEEKDAY[0], 1);
 }
 
+// 拡大描画用の Adafruit_GFX ラッパークラス
+class ScaledGFX : public Adafruit_GFX {
+private:
+    Adafruit_GFX& _realGfx;
+    int16_t _scale;
+
+public:
+    ScaledGFX(Adafruit_GFX& realGfx, int16_t scale)
+        : Adafruit_GFX(realGfx.width() / scale, realGfx.height() / scale),
+          _realGfx(realGfx), _scale(scale) {}
+
+    void drawPixel(int16_t x, int16_t y, uint16_t color) override {
+        _realGfx.fillRect(x * _scale, y * _scale, _scale, _scale, color);
+    }
+
+    void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color) override {
+        _realGfx.fillRect(x * _scale, y * _scale, w * _scale, _scale, color);
+    }
+
+    void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color) override {
+        _realGfx.fillRect(x * _scale, y * _scale, _scale, h * _scale, color);
+    }
+
+    void startWrite() override { _realGfx.startWrite(); }
+    void endWrite() override { _realGfx.endWrite(); }
+};
+
 // 中央揃えテキスト（unifont日本語、未同期/スプラッシュ用）
 static void drawCenteredText(const char* text, int16_t baselineY) {
     u8g2Fonts.setFont(u8g2_font_unifont_t_japanese3);
@@ -272,6 +299,24 @@ static void drawCenteredText(const char* text, int16_t baselineY) {
     int w = u8g2Fonts.getUTF8Width(text);
     u8g2Fonts.setCursor((EP_W - w) / 2, baselineY);
     u8g2Fonts.print(text);
+}
+
+// UTF-8 文字列の文字数を返す（バイト数ではない）。
+// 通知フォントサイズの段階切替（Phase 10 拡張）で使用。
+static int utf8CharCount(const char* text) {
+    int count = 0;
+    const char* p = text;
+    while (*p) {
+        uint8_t len = 0;
+        if ((*p & 0x80) == 0) len = 1;
+        else if ((*p & 0xE0) == 0xC0) len = 2;
+        else if ((*p & 0xF0) == 0xE0) len = 3;
+        else if ((*p & 0xF8) == 0xF0) len = 4;
+        else { p++; continue; }
+        count++;
+        p += len;
+    }
+    return count;
 }
 
 // 日本語自動折返し描画（epaper_test.ino から移植、Phase 10 通知表示用）
@@ -399,6 +444,8 @@ static void drawEpaperClock() {
 
 // 通知表示（Phase 10 本実装）: 本文テキストを全画面に自動折返し描画（分割線なし）
 // アプリ名は非表示（ユーザー選択: 本文のみレイアウト）。
+// 文字数に応じてフォントサイズを3段階で切替（短文ほど大きく）。
+//   12字以下 → 16px / 13〜40字 → 12px / 41字以上 → 10px
 // ※ onWrite(BLEタスク) と競合しないよう、ページループ前にローカルコピーを取り、
 //    ループ内ではそのコピーを使う（GxEPD2 の paged update は各ページで再描画するため）。
 static void drawEpaperNotification(const char* text) {
@@ -406,13 +453,36 @@ static void drawEpaperNotification(const char* text) {
     strncpy(safeText, text, NOTIFY_TEXT_LEN - 1);
     safeText[NOTIFY_TEXT_LEN - 1] = '\0';
 
+    // 文字数でフォントサイズとスケーリングを判定（NOTIFY_FONT_SETTINGS 設定配列を使用）
+    const uint8_t* font = u8g2_font_b10_t_japanese2; // デフォルトフォールバック
+    int scale = 1;
+    const int n = utf8CharCount(safeText);
+
+    for (size_t i = 0; i < NUM_NOTIFY_FONT_SETTINGS; i++) {
+        if (n <= NOTIFY_FONT_SETTINGS[i].maxChars) {
+            font = NOTIFY_FONT_SETTINGS[i].font;
+            scale = NOTIFY_FONT_SETTINGS[i].scale;
+            break;
+        }
+    }
+
+    int baseSize = (font == u8g2_font_b16_t_japanese3) ? 16 : ((font == u8g2_font_b12_t_japanese3) ? 12 : 10);
+    logPrint("NOTIFY", "Text: '%s', UTF8 chars: %d, selected font size: %dpx, scale: %dx (effective: %dpx)",
+             safeText, n, baseSize, scale, baseSize * scale);
+
     g_epaper.setFullWindow();
     g_epaper.firstPage();
     do {
         g_epaper.fillScreen(GxEPD_WHITE);
         if (safeText[0] != '\0') {
-            drawWrappedText(0, 0, safeText, u8g2_font_unifont_t_japanese3,
-                            GxEPD_BLACK, GxEPD_WHITE, EP_W);
+            if (scale > 1) {
+                ScaledGFX scaledGfx(g_epaper, scale);
+                u8g2Fonts.begin(scaledGfx);
+                drawWrappedText(0, 0, safeText, font, GxEPD_BLACK, GxEPD_WHITE, EP_W / scale);
+                u8g2Fonts.begin(g_epaper); // 元に戻す
+            } else {
+                drawWrappedText(0, 0, safeText, font, GxEPD_BLACK, GxEPD_WHITE, EP_W);
+            }
         } else {
             drawCenteredText("通知なし", EP_H / 2);
         }
