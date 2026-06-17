@@ -34,14 +34,7 @@ unsigned long g_keyCodeDisplayEndTime = 0;
 unsigned long g_lastModeChangeMillis = 0;
 int g_testDisplayIndex = TEST_DISPLAY_MIN_INDEX;
 
-// --- HID Key Press/Release スタブ ---
-void sendHidKeyPress(uint16_t keyCode, const char* unused) {
-    logPrint("HID_STUB", "KEY PRESS: 0x%04X", keyCode);
-}
-
-void sendHidKeyRelease(const char* unused) {
-    logPrint("HID_STUB", "KEY RELEASE");
-}
+// ※ sendHidKeyPress/Release は bikeclock_esp32_hid.ino（Phase 6）に実装
 
 // --- スイッチの初期化 ---
 void setupSwitches() {

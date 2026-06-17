@@ -29,19 +29,24 @@ static NimBLECharacteristic* g_pCommandChar = nullptr;
 // ====================================================================
 class BikeClockServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
-        (void)pServer;
-        logPrint("BLE", "Device connected (addr=%s)",
-                 std::string(connInfo.getAddress()).c_str());
+        logPrint("BLE", "Device connected (addr=%s, total=%d)",
+                 std::string(connInfo.getAddress()).c_str(),
+                 pServer->getConnectedCount());
+        // HID 接続 / GATT(アプリ) 接続を区別せず、接続有無で管理。
+        // 2接続（HID + アプリ）同時もこの1フラグで「接続中」を表す。
         g_deviceConnected = true;
         updateLedStateBasedOnStatus();
     }
 
     void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-        (void)pServer;
         (void)connInfo;
-        logPrint("BLE", "Device disconnected (reason=%d)", reason);
-        g_deviceConnected = false;
-        updateLedStateBasedOnStatus();
+        logPrint("BLE", "Device disconnected (reason=%d, remaining=%d)",
+                 reason, pServer->getConnectedCount());
+        // 残接続が0になった時だけ未接続扱い（2接続の片方切断でLEDが乱れないよう）
+        if (pServer->getConnectedCount() == 0) {
+            g_deviceConnected = false;
+            updateLedStateBasedOnStatus();
+        }
         // 切断後に再アドバタイズ（アプリの自動再接続用）
         NimBLEDevice::startAdvertising();
     }
@@ -94,6 +99,12 @@ void setupBLE() {
 
     NimBLEDevice::init(BLE_DEVICE_NAME);
 
+    // セキュリティ（Phase 6: HID は暗号化必須のため bonding を有効化）
+    // Just Works（パスキーUI不要）/ bonding 有効 / SC 有効 / MITM 無し。
+    // Android が HID としてペアリング・ボンディングする際の鍵交換に使用。
+    NimBLEDevice::setSecurityAuth(true, false, true);
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);  // Just Works
+
     // Server
     g_pServer = NimBLEDevice::createServer();
     g_pServer->setCallbacks(new BikeClockServerCallbacks());
@@ -111,16 +122,23 @@ void setupBLE() {
     // Service 開始
     g_pService->start();
 
+    // HID サービス群追加（Phase 6: HID 0x1812 + DeviceInfo + Battery をこのサーバーに）
+    setupHID(g_pServer);
+
     // キー設定読込（Phase 4: LittleFS から復元）
     loadSettings();
 
-    // Advertising（デバイス名 + カスタムサービス）
-    // ※ デバイス名を明示的に含めないと、アプリの name フィルタ(BikeClock-0001)で
+    // Advertising（デバイス名 + カスタムサービス + HID）
+    // ※ デバイス名を明示的に含めないと、アプリの name フィルタ(BikeClock- 前方一致)で
     //    検出されない。setName + enableScanResponse で scan response に名前を送る。
+    // ※ Phase 6: appearance=HID Keyboard + HIDサービスUUID(0x1812) を含め、
+    //    Android システムが HID デバイスとして認識・ペアリングするよう促す。
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->setName(BLE_DEVICE_NAME);
+    pAdvertising->setAppearance(0x03C1);  // HID Generic Keyboard (NimBLEHIDDevice.h: HID_KEYBOARD)
+    pAdvertising->addServiceUUID(BLE_SERVICE_UUID);    // カスタムGATT（アプリ時刻同期）
+    pAdvertising->addServiceUUID((uint16_t)0x1812);     // HID サービス（OS ペアリング用）
     pAdvertising->enableScanResponse(true);
-    pAdvertising->addServiceUUID(BLE_SERVICE_UUID);
     pAdvertising->start();
 
     logPrint("BLE", "✅ BLE ready. Advertising started.");

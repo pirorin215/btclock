@@ -9,7 +9,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 19
+#define FIRMWARE_VERSION_PATCH 21
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -199,6 +199,11 @@ void sendResponse(const char* message);
 void handleTimeSync(const char* command);
 void handleGetVersion();
 void handleKeyConfig(const char* command);
+
+// HID（Phase 6）— bikeclock_esp32_hid.ino
+// NimBLEServer は前方宣言のみ（実体は hid.ino で使用時 include）
+class NimBLEServer;
+void setupHID(NimBLEServer* server);
 
 // 設定永続化（Phase 4: LittleFS 実装）
 #define KEYS_FILE_PATH "/keys.dat"
