@@ -3,7 +3,7 @@
 ESP32-S3 SuperMini を使ったバイク搭載用時計デバイス「BikeClock」のファームウェアです。
 XIAO BLE (nRF52840) 版 [`bikeclock/`](../bikeclock/) の **ESP32-S3 移植版** で、Androidアプリ [`BTClockMob`](../BTClockMob/) とは完全互換（アプリ側は変更不要）です。
 
-> **実装状況**: フェーズ別に段階開発中。進捗は [TODO.md](./TODO.md) を参照。
+> **実装状況**: フェーズ別に段階開発中。進捗は [TODO.md](../TODO.md) を参照。
 > ハードウェア構成・配線・BLE仕様は最終形で確定しているため、本ファイルに記載します。
 
 ---
@@ -288,7 +288,7 @@ sh consolelog.sh
 | 7 | WiFi OTA | |
 | 8 | 統合 & 調整 | |
 
-詳細は [TODO.md](./TODO.md) を参照。
+詳細は [TODO.md](../TODO.md) を参照。
 
 ---
 

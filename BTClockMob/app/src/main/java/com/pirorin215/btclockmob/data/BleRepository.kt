@@ -26,6 +26,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch // Add this import
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import com.pirorin215.btclockmob.constants.TimeConstants
@@ -91,6 +93,9 @@ class BleRepository(private val context: Context) {
 
     // For write callback synchronization
     private var pendingWriteResult: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
+
+    // 送信を1件ずつ直列化する（Phase 11: 通知転送で連続書込の取りこぼしを防ぐ）
+    private val writeMutex = Mutex()
 
     private val gattCallback: BluetoothGattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
@@ -352,6 +357,46 @@ class BleRepository(private val context: Context) {
             characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
             bluetoothGatt?.writeCharacteristic(characteristic) ?: false
         }
+    }
+
+    /**
+     * 送信を1件ずつ直列化する版（Phase 11: 通知転送用）。
+     * Write Request（応答あり）は前の書込完了前に次を投げると失敗するため、
+     * Mutex で呼び出しを順序付けし、onCharacteristicWrite の完了を待ってから次へ進む。
+     * 既存 [sendCommand] は UI 由来の呼び出し元に影響させないためそのまま残す。
+     */
+    suspend fun sendCommandSerial(command: String): Boolean = writeMutex.withLock {
+        val characteristic = commandCharacteristic
+        if (characteristic == null) {
+            Log.e(TAG, "Command characteristic not found")
+            return@withLock false
+        }
+        Log.d(TAG, "Sending command (serial): $command")
+
+        val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
+        pendingWriteResult = deferred
+
+        val initiated = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            bluetoothGatt?.writeCharacteristic(
+                characteristic,
+                command.toByteArray(Charsets.UTF_8),
+                BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            ) == BluetoothStatusCodes.SUCCESS
+        } else {
+            characteristic.value = command.toByteArray(Charsets.UTF_8)
+            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            bluetoothGatt?.writeCharacteristic(characteristic) ?: false
+        }
+
+        if (!initiated) {
+            pendingWriteResult = null
+            return@withLock false
+        }
+
+        // 書込完了コールバックを待つ（2秒タイムアウト: デバイス応答遅延で永続ブロックを防ぐ）
+        val ok = withTimeoutOrNull(TimeConstants.SERIAL_WRITE_TIMEOUT_MS) { deferred.await() } ?: false
+        if (pendingWriteResult === deferred) pendingWriteResult = null
+        ok
     }
 
     internal fun sendAck(ackValue: ByteArray): Boolean {

@@ -44,6 +44,15 @@ import com.pirorin215.btclockmob.bondedBikeClockDeviceNames
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.core.app.NotificationManagerCompat
+import android.content.Context
+import android.content.Intent
+import android.provider.Settings
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,6 +71,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentDistance by appSettingsViewModel.historyDistanceM.collectAsState()
     val currentRouteOffset by appSettingsViewModel.routeCenterOffset.collectAsState()
     val currentTargetDeviceName by appSettingsViewModel.targetDeviceName.collectAsState()
+    val currentNotifFwd by appSettingsViewModel.notificationForwardingEnabled.collectAsState()
 
     // ペアリング済みのBikeClockデバイス候補（設定画面の選択リスト／自動選択で使用）
     val context = LocalContext.current
@@ -73,9 +83,23 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     var selectedInterval by remember(currentInterval) { mutableStateOf(currentInterval.toFloat()) }
     var selectedDistance by remember(currentDistance) { mutableStateOf(currentDistance.toFloat()) }
     var selectedRouteOffset by remember(currentRouteOffset) { mutableStateOf(currentRouteOffset) }
+    var notifFwdChecked by remember(currentNotifFwd) { mutableStateOf(currentNotifFwd) }
     // 未選択(空)のときは先頭デバイスを事前選択（アプリが実際に接続しに行く対象と一致させる）
     var targetDeviceNameInput by remember(currentTargetDeviceName, pairedDevices) {
         mutableStateOf(currentTargetDeviceName.ifBlank { pairedDevices.firstOrNull() ?: "" })
+    }
+
+    // 通知アクセス許可状態。ユーザーがシステム設定から戻った時に ON_RESUME で再評価する。
+    var listenerEnabled by remember { mutableStateOf(isNotificationListenerEnabled(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                listenerEnabled = isNotificationListenerEnabled(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val saveSettings: () -> Unit = {
@@ -85,6 +109,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
         appSettingsViewModel.saveHistoryDistanceM(selectedDistance.roundToInt())
         appSettingsViewModel.saveRouteCenterOffset(selectedRouteOffset)
         appSettingsViewModel.saveTargetDeviceName(targetDeviceNameInput.trim())
+        appSettingsViewModel.saveNotificationForwardingEnabled(notifFwdChecked)
         onBack()
     }
 
@@ -155,6 +180,46 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                     onCheckedChange = { autoStartOnBootChecked = it },
                     colors = SwitchDefaults.colors()
                 )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Phase 11: スマホ通知転送 ON/OFF ＋ 通知アクセス許可誘導
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(stringResource(R.string.notification_forwarding), style = MaterialTheme.typography.bodyLarge)
+                Switch(
+                    checked = notifFwdChecked,
+                    onCheckedChange = { notifFwdChecked = it },
+                    colors = SwitchDefaults.colors()
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (listenerEnabled) {
+                Text(
+                    text = stringResource(R.string.notification_access_granted),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text(
+                    text = stringResource(R.string.notification_access_not_granted),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(onClick = {
+                    context.startActivity(
+                        Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                    )
+                }) {
+                    Text(stringResource(R.string.notification_access_permission))
+                }
             }
             
             Spacer(modifier = Modifier.height(16.dp))
@@ -231,3 +296,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
         }
     }
 }
+
+/** 通知アクセスがこのアプリに許可されているか（Phase 11） */
+private fun isNotificationListenerEnabled(context: Context): Boolean =
+    NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)

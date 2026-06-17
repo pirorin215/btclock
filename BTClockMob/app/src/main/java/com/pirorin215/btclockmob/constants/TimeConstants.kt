@@ -18,4 +18,7 @@ object TimeConstants {
 
     // サービス監視
     const val SERVICE_CHECK_INTERVAL_MS = 60000L // 1分
+
+    // 送信シリアライズ（Phase 11: Write Request 完了待ちのタイムアウト）
+    const val SERIAL_WRITE_TIMEOUT_MS = 2000L // 2秒
 }

@@ -86,6 +86,16 @@ object Settings {
         stringPreferencesKey("target_device_name"),
         ""
     )
+
+    /**
+     * スマホ通知のBikeClock転送 ON/OFF（Phase 11）。
+     * NotificationListenerService が onNotificationPosted でこの設定を参照する。
+     * default = true（許可されていれば転送する）。
+     */
+    val NOTIFICATION_FORWARDING_ENABLED = SettingKey.Direct(
+        booleanPreferencesKey("notification_forwarding_enabled"),
+        true
+    )
 }
 
 class AppSettingsRepository(private val context: Context) {

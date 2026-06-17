@@ -66,6 +66,15 @@ class AppSettingsViewModel(
             initialValue = ""
         )
 
+    /** スマホ通知のBikeClock転送 ON/OFF（Phase 11） */
+    val notificationForwardingEnabled: StateFlow<Boolean> =
+        appSettingsRepository.getFlow(Settings.NOTIFICATION_FORWARDING_ENABLED)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = true
+            )
+
     fun saveThemeMode(themeMode: ThemeMode) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.THEME_MODE, themeMode)
@@ -109,6 +118,12 @@ class AppSettingsViewModel(
     fun saveTargetDeviceName(name: String) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.TARGET_DEVICE_NAME, name)
+        }
+    }
+
+    fun saveNotificationForwardingEnabled(enable: Boolean) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.NOTIFICATION_FORWARDING_ENABLED, enable)
         }
     }
 }
