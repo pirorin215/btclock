@@ -72,6 +72,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentRouteOffset by appSettingsViewModel.routeCenterOffset.collectAsState()
     val currentTargetDeviceName by appSettingsViewModel.targetDeviceName.collectAsState()
     val currentNotifFwd by appSettingsViewModel.notificationForwardingEnabled.collectAsState()
+    val currentNotifMaxChars by appSettingsViewModel.notificationMaxChars.collectAsState()
 
     // ペアリング済みのBikeClockデバイス候補（設定画面の選択リスト／自動選択で使用）
     val context = LocalContext.current
@@ -84,6 +85,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     var selectedDistance by remember(currentDistance) { mutableStateOf(currentDistance.toFloat()) }
     var selectedRouteOffset by remember(currentRouteOffset) { mutableStateOf(currentRouteOffset) }
     var notifFwdChecked by remember(currentNotifFwd) { mutableStateOf(currentNotifFwd) }
+    var selectedNotifMaxChars by remember(currentNotifMaxChars) { mutableStateOf(currentNotifMaxChars.toFloat()) }
     // 未選択(空)のときは先頭デバイスを事前選択（アプリが実際に接続しに行く対象と一致させる）
     var targetDeviceNameInput by remember(currentTargetDeviceName, pairedDevices) {
         mutableStateOf(currentTargetDeviceName.ifBlank { pairedDevices.firstOrNull() ?: "" })
@@ -110,6 +112,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
         appSettingsViewModel.saveRouteCenterOffset(selectedRouteOffset)
         appSettingsViewModel.saveTargetDeviceName(targetDeviceNameInput.trim())
         appSettingsViewModel.saveNotificationForwardingEnabled(notifFwdChecked)
+        appSettingsViewModel.saveNotificationMaxChars(selectedNotifMaxChars.roundToInt())
         onBack()
     }
 
@@ -199,6 +202,22 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                     colors = SwitchDefaults.colors()
                 )
             }
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // New: Notification max chars slider
+            Text(
+                text = "${stringResource(R.string.notification_max_chars)}: ${selectedNotifMaxChars.roundToInt()}文字",
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (notifFwdChecked) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            )
+            Slider(
+                value = selectedNotifMaxChars,
+                onValueChange = { selectedNotifMaxChars = it },
+                valueRange = 10f..100f,
+                steps = 90,
+                enabled = notifFwdChecked
+            )
+            
             Spacer(modifier = Modifier.height(8.dp))
             if (listenerEnabled) {
                 Text(

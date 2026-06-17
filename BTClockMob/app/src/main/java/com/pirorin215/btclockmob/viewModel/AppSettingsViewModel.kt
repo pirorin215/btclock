@@ -75,6 +75,14 @@ class AppSettingsViewModel(
                 initialValue = true
             )
 
+    val notificationMaxChars: StateFlow<Int> =
+        appSettingsRepository.getFlow(Settings.NOTIFICATION_MAX_CHARS)
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = Settings.DEFAULT_NOTIFICATION_MAX_CHARS
+            )
+
     fun saveThemeMode(themeMode: ThemeMode) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.THEME_MODE, themeMode)
@@ -124,6 +132,12 @@ class AppSettingsViewModel(
     fun saveNotificationForwardingEnabled(enable: Boolean) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.NOTIFICATION_FORWARDING_ENABLED, enable)
+        }
+    }
+
+    fun saveNotificationMaxChars(maxChars: Int) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.NOTIFICATION_MAX_CHARS, maxChars)
         }
     }
 }

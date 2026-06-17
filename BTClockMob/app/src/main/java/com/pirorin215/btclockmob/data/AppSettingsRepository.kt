@@ -96,6 +96,18 @@ object Settings {
         booleanPreferencesKey("notification_forwarding_enabled"),
         true
     )
+
+    /** 通知の最大表示文字数のデフォルト値（実機調整による最適値） */
+    const val DEFAULT_NOTIFICATION_MAX_CHARS = 47
+
+    /**
+     * 通知の最大文字数（Phase 11 拡張）。
+     * ePaperの視認性を考慮し、この文字数で切り詰め、末尾に「＞」を付与する。
+     */
+    val NOTIFICATION_MAX_CHARS = SettingKey.Direct(
+        intPreferencesKey("notification_max_chars"),
+        DEFAULT_NOTIFICATION_MAX_CHARS
+    )
 }
 
 class AppSettingsRepository(private val context: Context) {

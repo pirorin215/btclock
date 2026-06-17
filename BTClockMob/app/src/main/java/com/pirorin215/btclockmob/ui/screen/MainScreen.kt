@@ -92,6 +92,7 @@ fun MainScreen(
     var showAppSettings by remember { mutableStateOf(false) }
     var showAppLogPanel by remember { mutableStateOf(false) }
     var showKeyCodeSettings by remember { mutableStateOf(false) }
+    var showNotificationDebug by remember { mutableStateOf(false) }
 
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
@@ -112,11 +113,13 @@ fun MainScreen(
     // KeyCodeSettingsViewModelの初期化 (Koin)
     val keyCodeSettingsViewModel: KeyCodeSettingsViewModel = koinViewModel()
 
-    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings) {
+    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug) {
         if (showAppSettings) {
             showAppSettings = false
         } else if (showKeyCodeSettings) {
             showKeyCodeSettings = false
+        } else if (showNotificationDebug) {
+            showNotificationDebug = false
         } else if (isSelectionMode) {
             historyViewModel.exitSelectionMode()
         }
@@ -148,6 +151,12 @@ fun MainScreen(
             KeyCodeSettingsScreen(
                 viewModel = keyCodeSettingsViewModel,
                 onBack = { showKeyCodeSettings = false }
+            )
+        }
+        showNotificationDebug -> {
+            NotificationDebugScreen(
+                mainViewModel = mainViewModel,
+                onBack = { showNotificationDebug = false }
             )
         }
         else -> {
@@ -260,6 +269,13 @@ fun MainScreen(
                                         text = { Text("キー設定") },
                                         onClick = {
                                             showKeyCodeSettings = true
+                                            expanded = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("通知デバッグ") },
+                                        onClick = {
+                                            showNotificationDebug = true
                                             expanded = false
                                         }
                                     )

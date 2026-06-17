@@ -3,33 +3,7 @@
 マイコン firmware（`bikeclock_esp32`）と Android アプリ（`BTClockMob`）の両方を管理するプロジェクト全体のTODO。
 **Phase 0〜9 は ESP32-S3 への移植と ePaper 機能（マイコン完結）**。**Phase 10 以降は両プロジェクトにまたがる機能**（マイコン＋Android 両方の修正が必要）。コアプロトコル（UUID・コマンド・応答）は XIAO 版と互換を維持する。
 
-> **進捗サマリ**: Phase 0〜11 完了（マイコン v2.0.23 / Android 側）。スマホ通知転送は両プロジェクト実装完了。**Phase 7（WiFi OTA）・Phase 8（統合・調整）は保留**。
-
----
-
-## 🟢 残タスク（次に取り組む）
-
-> マイコンとAndroidの両方にまたがる新機能。Phase 9 で実装した ePaper 3モード連動（通知/詳細表示）を、スマホ通知と連動させる。
-
-### Phase 10 — スマホ通知受信・表示（BLE・マイコン側） [リスク:中] ✅ 完了（v2.0.23）
-Phase 9 の通知表示スタブを本実装し、BLE 経由でスマホからの通知を受信して ePaper に表示する（マイコン側）。
-- [x] BLE 受信ハンドラへ通知コマンド追加。プロトコル: `NOTIFY:app=<アプリ名>\n<テキスト>`（UTF-8、上限200バイト、応答なし＝ファイア＆フォーゲット）
-- [x] 通知受信時、現在のモードに関わらず **ePaper を通知表示に自動切替** し、一定時間（30秒）後に **元のモード画面へ自動復帰**
-- [x] 通知表示本体: `epaper_test` の `drawWrappedText()`（u8g2_font_unifont_t_japanese3、自動折り返し）を移植。分割線なしでテキスト埋め
-- [x] 表示中モード管理: 「ユーザ選択のベースビュー」と「通知割り込みで一時表示するビュー」の分離（`g_notificationActive` オーバーライド方式）
-- **設計判断**: 通知タイムアウト後は常に時計(TIME)へ復帰（DATE/WEEKDAY はリセット）／未同期中も通知優先／レイアウトは本文のみ（アプリ名非表示）／MTU 247B 拡大
-- **検証**: ビルド成功 ✅（実機検証は Phase 11 で Android から送信時、または nRF Connect で `NOTIFY:app=Test\nテスト` 送信で確認予定）
-
-### Phase 11 — Android 通知転送（NotificationListenerService） [リスク:中] ✅ 完了
-Phase 10 のプロトコルをアプリ側から送る。スマホの通知を BikeClock の ePaper に転送する。
-- [x] `NotificationListenerService` サブクラスを新規作成（マニフェスト宣言＋`BIND_NOTIFICATION_LISTENER_SERVICE`）
-- [x] `onNotificationPosted` でアプリ名+タイトル+テキストを取り出し `NOTIFY:` ペイロード生成 → `BleRepository.sendCommandSerial()` で送信（DI は Koin の `KoinComponent` 経由。同一プロセス運用）
-- [x] 自己アプリ通知の除外・200バイト切り詰め・簡易デバウンス
-- [x] AppSettings に「通知アクセス」許可誘導 UI 追加（`Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`）
-- **設計判断**: 本文=タイトル＋本文（空白区切り）／転送対象=メッセージ系のみ（音楽/ナビ/通話等の常駐通知は除外）／MessagingStyle は EXTRA_MESSAGES から最新メッセージを抽出／連続書込の取りこぼし防止に Mutex シリアライズ（`sendCommandSerial`）／3秒デバウンス
-- **検証**: ビルド成功 ✅（実機検証は通知アクセス許可後、LINE 等の通知で ePaper 表示を確認予定）
-
-> **通知プロトコル（Phase 10/11 共通）**: プレフィックス `NOTIFY:` ／ アプリ名 `app=<名>` ／ 区切り `\n` 1個 ／ 上限 200バイト(UTF-8) ／ 応答なし（ファイア＆フォーゲット）
+> **進捗サマリ**: Phase 0〜13 完了（マイコン v2.0.24 / Android 側）。スマホ通知転送と ePaper 表示最適化（最大文字数設定・フォント段階切替）が両プロジェクトで実装済み。**Phase 7（WiFi OTA）・Phase 8（統合・調整）は保留**。
 
 ---
 
@@ -103,6 +77,12 @@ Phase 10 のプロトコルをアプリ側から送る。スマホの通知を B
 - 応答: `OK:version:x.y.z`, `OK: Time synced`, `OK: keys updated`, `ERROR: ...`
 - HID(0x1812) をアドバタイズに含め、appearance = HID Keyboard（OS ペアリング用）
 - ※ Response/Switch UUID(`...26a2`/`...26a1`)は**アプリ未使用**。実装しなくてよい（応答は Command char の notify で行う）
+
+### 通知プロトコル（Phase 10/11 共通）
+- プレフィックス `NOTIFY:` ／ アプリ名 `app=<名>` ／ 区切り `\n` 1個 ／ 上限 200バイト(UTF-8) ／ 応答なし（ファイア＆フォーゲット）
+- 例: `NOTIFY:app=com.whatsapp\n山田太郎 これはテスト通知です`
+- Phase 13 拡張: アプリ側で文字数制限（デフォルト47字、超過時は末尾「＞」）を付与して送信
+- Phase 12 拡張: マイコン側は受信文字数に応じてフォントサイズを段階切替して表示
 
 ### プラットフォーム依存の洗い出し（移行マッピング）
 
@@ -197,11 +177,47 @@ FUNCボタン短押しで 7セグLED のモード（TIME/DATE/WEEKDAY）を切�
 - **検証**: 実機確認 ✅ FUNC短押しで ePaper が 標準→通知(なし)→詳細 に切り替わる。詳細は分が変わっても更新されない（スナップショット）
 - **オートリターン**: DATE/WEEKDAY の5秒でTIME強制復帰は **維持（合意）**。モードB/C は5秒間表示後、標準に戻る
 
+### Phase 10 — スマホ通知受信・表示（BLE・マイコン側） [リスク:中] ✅ 完了（v2.0.23）
+Phase 9 の通知表示スタブを本実装し、BLE 経由でスマホからの通知を受信して ePaper に表示する（マイコン側）。
+- [x] BLE 受信ハンドラへ通知コマンド追加。プロトコル: `NOTIFY:app=<アプリ名>\n<テキスト>`（UTF-8、上限200バイト、応答なし＝ファイア＆フォーゲット）
+- [x] 通知受信時、現在のモードに関わらず **ePaper を通知表示に自動切替** し、一定時間（30秒）後に **元のモード画面へ自動復帰**
+- [x] 通知表示本体: `epaper_test` の `drawWrappedText()`（u8g2_font_unifont_t_japanese3、自動折り返し）を移植。分割線なしでテキスト埋め
+- [x] 表示中モード管理: 「ユーザ選択のベースビュー」と「通知割り込みで一時表示するビュー」の分離（`g_notificationActive` オーバーライド方式）
+- **設計判断**: 通知タイムアウト後は常に時計(TIME)へ復帰（DATE/WEEKDAY はリセット）／未同期中も通知優先／レイアウトは本文のみ（アプリ名非表示）／MTU 247B 拡大
+- **検証**: ビルド成功 ✅（実機検証は Phase 11 で Android から送信時、または nRF Connect で `NOTIFY:app=Test\nテスト` 送信で確認予定）
+
+### Phase 11 — Android 通知転送（NotificationListenerService） [リスク:中] ✅ 完了
+Phase 10 のプロトコルをアプリ側から送る。スマホの通知を BikeClock の ePaper に転送する。
+- [x] `NotificationListenerService` サブクラスを新規作成（マニフェスト宣言＋`BIND_NOTIFICATION_LISTENER_SERVICE`）
+- [x] `onNotificationPosted` でアプリ名+タイトル+テキストを取り出し `NOTIFY:` ペイロード生成 → `BleRepository.sendCommandSerial()` で送信（DI は Koin の `KoinComponent` 経由。同一プロセス運用）
+- [x] 自己アプリ通知の除外・200バイト切り詰め・簡易デバウンス
+- [x] AppSettings に「通知アクセス」許可誘導 UI 追加（`Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS`）
+- **設計判断**: 本文=タイトル＋本文（空白区切り）／転送対象=メッセージ系のみ（音楽/ナビ/通話等の常駐通知は除外）／MessagingStyle は EXTRA_MESSAGES から最新メッセージを抽出／連続書込の取りこぼし防止に Mutex シリアライズ（`sendCommandSerial`）／3秒デバウンス
+- **検証**: ビルド成功 ✅（実機検証は通知アクセス許可後、LINE 等の通知で ePaper 表示を確認予定）
+
+### Phase 12 — ePaper 通知表示のフォント段階切替（マイコン側） [リスク:低] ✅ 完了（v2.0.24）
+通知本文の文字数に応じて ePaper のフォントサイズを自動切替し、短い通知ほど大きく表示する（マイコン側）。
+- [x] `NOTIFY_FONT_SETTINGS` 配列で文字数→フォント/倍率の段階を定義（`bikeclock.h`）。10字以下→16px×3 / 24字以下→12px×3 / 26字以下→16px×2 / それ以上→12px×2
+- [x] `ScaledGFX` ラッパークラスで小フォントをピクセル単位で拡大描画（`bikeclock_esp32_epaper.ino`）
+- [x] `utf8CharCount()` でバイト数ではなく文字数をカウントして段階を判定
+- [x] BLE 受信ハンドラの UTF-8 境界巻き戻しを「切り詰め発生時のみ」実行するよう最適化（`bikeclock_esp32_ble.ino`）
+- **設計判断**: フォント倍率は u8g2 のピクセル拡大（ScaledGFX）で実現／段階設定は配列で一元管理し調整容易／200バイト未満の本文は巻き戻し処理を省略
+- **検証**: ビルド成功 ✅（実機検証は Phase 13 のデバッグ画面から各文字数の通知を送信してフォント切替を確認予定）
+
+### Phase 13 — 通知最大表示文字数設定・送信デバッグ画面（Android 側） [リスク:低] ✅ 完了
+アプリ側で通知の最大表示文字数を制御して ePaper 視認性を最適化し、開発用の送信デバッグ画面を追加する。
+- [x] 通知転送時に文字数制限で切り詰め、超過時は末尾に「＞」を付与（`BikeNotificationListener`）。2段階切り詰め: 文字数制限→「＞」付与→180B UTF-8境界切り詰め
+- [x] `DEFAULT_NOTIFICATION_MAX_CHARS`（=47）定数でデフォルト値を一元管理（`Settings`）
+- [x] AppSettingsScreen に最大文字数スライダーを追加（10〜100字、通知転送ON時のみ有効）
+- [x] メニューから遷移する通知送信デバッグ画面（`NotificationDebugScreen`）を追加。アプリ名プリセット・ePaper プレビュー・送信コマンド/バイト数確認・BLE 送信
+- **設計判断**: 47字は実機調整による最適値（最小フォントでも ePaper に収まる範囲）／文字数設定はアプリ側、フォント切替はマイコン側（Phase 12）で役割分担
+- **検証**: ビルド成功 ✅（実機検証は各文字数の通知で ePaper 表示・フォント切替を確認予定）
+
 ---
 
 ## 進め方
 
-1. **Phase 0〜11 完了**。スマホ通知転送機能（BLE受信＋Android通知転送）が両プロジェクトで実装済み。Phase 7（OTA）・Phase 8（統合）は保留。
+1. **Phase 0〜13 完了**。スマホ通知転送機能（BLE受信＋Android通知転送）と ePaper 表示最適化（最大文字数設定・フォント段階切替）が両プロジェクトで実装済み。Phase 7（OTA）・Phase 8（統合）は保留。
 2. **1 フェーズずつ**実装。各フェーズの完了で `sh compile.sh` が通り、実機で検証項目をクリアしてから次へ。
 3. 進捗はこのファイルのチェックボックス `[ ] → [x]` を更新して可視化。
 4. 各フェーズ開始時に「Phase N をやる」と宣言し、TODO の該当項目に取り掛かる。

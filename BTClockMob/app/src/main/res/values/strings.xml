@@ -30,6 +30,7 @@
 
     <!-- Notification forwarding (Phase 11) -->
     <string name="notification_forwarding">スマホ通知をBikeClockに転送</string>
+    <string name="notification_max_chars">通知の最大表示文字数</string>
     <string name="notification_access_permission">通知へのアクセスを許可</string>
     <string name="notification_access_granted">通知へのアクセス: 許可済み</string>
     <string name="notification_access_not_granted">通知転送には通知へのアクセス許可が必要です</string>

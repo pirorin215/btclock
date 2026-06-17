@@ -35,6 +35,9 @@ class MainViewModel(
     val themeMode: StateFlow<ThemeMode> = appSettingsRepository.getFlow(Settings.THEME_MODE)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ThemeMode.SYSTEM)
 
+    val notificationMaxChars: StateFlow<Int> = appSettingsRepository.getFlow(Settings.NOTIFICATION_MAX_CHARS)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Settings.DEFAULT_NOTIFICATION_MAX_CHARS)
+
     val logs = logManager.logs
 
     // --- State exposed from orchestrator and managers ---

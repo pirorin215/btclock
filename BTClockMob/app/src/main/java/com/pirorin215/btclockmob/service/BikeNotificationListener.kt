@@ -73,6 +73,10 @@ class BikeNotificationListener : NotificationListenerService(), KoinComponent {
                 val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
                 val body = extractText(notification).orEmpty()
 
+                // 最大文字数設定を取得
+                val maxChars = appSettingsRepository
+                    .getFlow(Settings.NOTIFICATION_MAX_CHARS).first()
+
                 // 本文構成: タイトル + 空白 + 本文。改行は空白に置換（drawWrappedTextが\nを無視するため）
                 val combined = listOf(title, body)
                     .map { it.replace("\n", " ").replace("\r", " ").trim() }
@@ -80,7 +84,15 @@ class BikeNotificationListener : NotificationListenerService(), KoinComponent {
                     .joinToString(" ")
                 if (combined.isEmpty()) return@launch
 
-                val truncated = truncateUtf8(combined, MAX_BODY_BYTES)
+                // 1) 文字数制限と「続きあり」記号の付与
+                val limitedText = if (combined.length > maxChars) {
+                    combined.take(maxChars - 1) + "＞"
+                } else {
+                    combined
+                }
+
+                // 2) バイト数制限での最終切り詰め
+                val truncated = truncateUtf8(limitedText, MAX_BODY_BYTES)
 
                 // デバウンス: 同一通知で同一本文かつ窓内は送信しない
                 val key = sbn.key ?: sbn.packageName
@@ -96,7 +108,7 @@ class BikeNotificationListener : NotificationListenerService(), KoinComponent {
                 }
 
                 val command = "NOTIFY:app=${sbn.packageName}\n$truncated"
-                logManager.addDebugLog("通知転送: ${sbn.packageName} / ${combined.take(40)}")
+                logManager.addDebugLog("通知転送: ${sbn.packageName} / ${truncated.take(40)}")
                 bleRepository.sendCommandSerial(command)
             }
         } catch (e: Exception) {
