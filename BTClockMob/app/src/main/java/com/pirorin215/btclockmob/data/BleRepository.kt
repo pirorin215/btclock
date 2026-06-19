@@ -57,6 +57,7 @@ sealed class BleEvent {
     data class CharacteristicChanged(val characteristic: BluetoothGattCharacteristic, val value: ByteArray) : BleEvent()
     object Ready : BleEvent()
     data class Error(val message: String) : BleEvent()
+    data class ImuChunk(val data: ByteArray) : BleEvent()   // Phase 14-B: IMUバイナリチャンク（0xAA55マジック）
 }
 
 @SuppressLint("MissingPermission")
@@ -198,6 +199,14 @@ class BleRepository(private val context: Context) {
         }
 
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray) {
+            // Phase 14-B: IMUバイナリチャンク（マジック 0xAA55）は既存の文字列処理（0x00切り詰め）の前で別ルートへ。
+            //   IMU生値に0x00が頻出するため文字列化すると壊れる。マジックで安全に識別（既存のASCII応答 OK:/ERROR:/NOTIFY: は衝突しない）。
+            if (value.size >= 5 &&
+                (value[0].toInt() and 0xFF) == 0xAA &&
+                (value[1].toInt() and 0xFF) == 0x55) {
+                repositoryScope.launch { _events.emit(BleEvent.ImuChunk(value)) }
+                return
+            }
             // ByteArrayを文字列に変換する際、null終端までを正しく処理
             val nullIndex = value.indexOf(0)
             val cleanValue = if (nullIndex >= 0) {

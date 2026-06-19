@@ -332,6 +332,11 @@ void loop() {
     // 最初にファンクションキー（モード切替）の処理
     processFunctionKey();
 
+    // Phase 14-B: IMU は常時サンプリング（メンテナンス中も継続。
+    //   リングバッファへ直近10秒を蓄積。駐車検知 14-C でも常時必須）
+    updateIMU();
+    updateImuDump();   // Phase 14-B: IMU_DUMP チャンク送信の進行（要求時のみ動作）
+
     // メンテナンスモードの処理
     if (!processMaintenanceMode()) {
         // メンテナンスモードがアクティブでない場合のみ、通常処理を行う
@@ -340,7 +345,6 @@ void loop() {
         updateTimestamp();
         updateDisplayAndLedState();
         updateEpaperDisplay();
-        updateIMU();   // Phase 14: BMI160 サンプリング（50Hz）+ 生値ダンプ
     }
 
     delay(10);

@@ -74,6 +74,9 @@ class CommandCharCallbacks : public NimBLECharacteristicCallbacks {
         } else if (command.startsWith("NOTIFY:")) {
             // Phase 10: スマホ通知受信（fire-and-forget：応答しない）
             handleNotify(command.c_str());
+        } else if (command.startsWith("IMU_DUMP")) {
+            // Phase 14-B: リングバッファ（直近10秒）のチャンク転送要求
+            handleImuDump();
         } else {
             logPrint("BLE", "Unknown command");
             sendResponse("ERROR: Unknown command");
@@ -163,6 +166,16 @@ void sendResponse(const char* message) {
         g_pCommandChar->notify();
         logPrint("BLE", "Response: %s", message);
     }
+}
+
+// Phase 14-B: バイナリ notify（IMUチャンク送信）。送信成功で true。
+// NimBLE の notify() は接続がない等で false を返す。呼び出し側（updateImuDump）で
+// リトライ判定する。IMUチャンクは 0xAA55 マジックで始まり、アプリ側はこれを
+// 既存の文字列応答と区別してバイナリ処理する。
+bool sendBinary(const uint8_t* data, size_t len) {
+    if (g_pCommandChar == nullptr || !g_deviceConnected) return false;
+    g_pCommandChar->setValue(data, len);
+    return g_pCommandChar->notify();
 }
 
 // ====================================================================

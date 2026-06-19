@@ -68,21 +68,22 @@ PC をバイクに持って行けないため、**BTClockMob アプリ経由**�
 
 **BLE プロトコル**: コマンド `IMU_DUMP`（アプリ→マイコン）でリングバッファ要求 → マイコンはチャンク分割（MTU 247B）で notify 連続送信（シーケンス番号・総チャンク数・完了マーカー付き）→ アプリで再構築
 
-##### Phase 14-B1 — マイコン側: リングバッファ＋IMU_DUMP 転送 [リスク:中] ※実装待ち
-- [ ] `bikeclock_esp32_imu.ino`: リングバッファ追加（int16・500サンプル×6軸・循環）。`updateIMU` で push。`updateIMU` を loop のメンテナンスブロック外へ移動（常時サンプリング）
-- [ ] `bikeclock_esp32_ble.ino`: `IMU_DUMP` コマンドハンドラ。リングバッファをチャンク分割 notify 送信（シーケンス番号・完了マーカー）
-- [ ] `bikeclock.h`: リングバッファ定義・プロトタイプ、`FIRMWARE_VERSION_PATCH` +1
-- [ ] `sh compile.sh` 成功
-- **設計判断**: int16 で RAM 節約（float なら12KB）。常時サンプリングは検出（14-C）でも必須。チャンク送信の信頼性はシーケンス番号で担保
-- **検証**: nRF Connect / アプリから `IMU_DUMP` 送信で全500サンプル受信・欠損なし
+##### Phase 14-B1 — マイコン側: リングバッファ＋IMU_DUMP 転送 [リスク:中] ✅ 完了（v2.0.31）
+- [x] `bikeclock_esp32_imu.ino`: リングバッファ追加（`ImuSample` int16×6軸×500・循環）。`updateIMU` で push。`updateIMU` を loop のメンテナンスブロック外へ移動（常時サンプリング）。`handleImuDump()`（状態初期化のみ・即リターン）/ `updateImuDump()`（30ms間隔・リングから古い順にチャンク構築・送信）
+- [x] `bikeclock_esp32_ble.ino`: `IMU_DUMP` コマンドハンドラ追加。`sendBinary()`（バイナリ notify）でチャンク分割送信。チャンク = `[0xAA][0x55][seq][total][status] + int16×6×N`（status 0xFF=最終）
+- [x] `bikeclock.h`: リングバッファ定義・プロトタイプ、`FIRMWARE_VERSION_PATCH` 30→31
+- [x] `sh compile.sh` 成功 ✅（v2.0.31, フラッシュ95%, RAM 13% / リングバッファ6000B含む）
+- **設計判断**: int16 で RAM 節約（float なら12KB→6KB）。常時サンプリングは検出（14-C）でも必須。**バイナリ直接方式**（0xAA55マジック）を採用 — Android側の0x00切り詰め問題をマジック判定で回避し効率最大化（28チャンク/約840ms）。送信はBLEコールバック内でブロック不可のため loop 内状態機械で時間分割（30ms間隔＋リトライ最大5回＋アプリ側seq欠損検知の3重防御）
+- **検証**: ビルド成功 ✅（v2.0.31）/ 実機: nRF Connect またはアプリから `IMU_DUMP` 送信で全500サンプル受信・欠損なきこと（Phase 14-B3 採取時に確認）
 
-##### Phase 14-B2 — Android 側: 採取画面＋ラベル＋CSV シェア [リスク:中] ※実装待ち
-- [ ] `ImuDataCaptureScreen`（新規）: 「データ取得」ボタン→`IMU_DUMP` 送信→チャンク受信・再構築・進捗表示
-- [ ] ラベル選択 UI（固定リスト Dropdown）＋自由メモ欄
-- [ ] CSV 生成（列: `timestamp_ms, ax,ay,az, gx,gy,gz` ＋ ヘッダに label/memo）＋ `ACTION_SEND` シェア（FileProvider）
-- [ ] メニューから画面遷移
-- **設計判断**: BLE 受信は BleRepository 経由（notify コールバックで蓄積・完了待ち）。CSV はキャッシュディレクトリに書き出して共有
-- **検証**: バイク各動作で採取 → CSV を PC で開いて値が正しく入っている
+##### Phase 14-B2 — Android 側: 採取画面＋ラベル＋CSV シェア [リスク:中] ✅ 完了（v1.1）
+- [x] `ImuDataCaptureScreen`（新規）: 「データ取得」ボタン→`IMU_DUMP` 送信→チャンク受信・再構築・`LinearProgressIndicator` 進捗表示。`NotificationDebugScreen` をテンプレート
+- [x] ラベル選択 UI（`ExposedDropdownMenuBox` 固定リスト6種: 駐車/解除/走行/カーブ/停車/アイドリング）＋自由メモ欄
+- [x] CSV 生成（列: `timestamp_ms,ax,ay,az,gx,gy,gz` ＋ ヘッダに label/memo/firmware/sample_rate）＋ `ACTION_SEND` シェア（FileProvider、`cache-path imu/`）
+- [x] メニューから画面遷移（`MainScreen` に「IMU採取」追加・`when`分岐・`BackHandler`）
+- [x] `ImuDataCaptureViewModel`（新規）: `BleRepository` 直接注入、`BleEvent.ImuChunk` を `events.collect` で処理・seq順再構築・欠損検出・換算（`/16384`g, `/131.072`dps＝マイコンと同一値）・`generateCsv`
+- **設計判断**: `BleRepository` をDI直接注入（Orchestrator経由よりシンプル・events Flow 直接 collect）。`onCharacteristicChanged` 冒頭でマジック `0xAA55` 判定→既存の0x00切り詰め処理をスキップ（文字列応答 OK:/ERROR:/NOTIFY: は衝突しない）。CSV はキャッシュディレクトリに書出し `ACTION_SEND` で PC へ。seq欠損時は届いた分で完了（学習データは再取得可能）。DI は Koin `ViewModelModule` へ登録
+- **検証**: ビルド成功 ✅（v1.1, versionCode 2）/ 実機: バイク各動作で採取 → CSV を PC で開いて値が正しく入っている（静止時 az≈1g, gx/gy/gz≈0）（Phase 14-B3）
 
 ##### Phase 14-B3 — 実機採取（ユーザー作業）[リスク:最低]
 - [ ] バイクへセンサー・デバイス取り付け。**センサーモジュールの向きを記録**（軸対応を確定）

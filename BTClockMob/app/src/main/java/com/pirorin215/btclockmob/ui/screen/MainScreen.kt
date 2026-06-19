@@ -42,6 +42,7 @@ import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.AppSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.DeviceHistoryViewModel
+import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
 import com.pirorin215.btclockmob.R
 import androidx.compose.ui.res.stringResource
 import org.koin.android.ext.android.get
@@ -93,6 +94,7 @@ fun MainScreen(
     var showAppLogPanel by remember { mutableStateOf(false) }
     var showKeyCodeSettings by remember { mutableStateOf(false) }
     var showNotificationDebug by remember { mutableStateOf(false) }
+    var showImuDataCapture by remember { mutableStateOf(false) }
 
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
@@ -112,14 +114,17 @@ fun MainScreen(
 
     // KeyCodeSettingsViewModelの初期化 (Koin)
     val keyCodeSettingsViewModel: KeyCodeSettingsViewModel = koinViewModel()
+    val imuDataCaptureViewModel: ImuDataCaptureViewModel = koinViewModel()
 
-    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug) {
+    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug || showImuDataCapture) {
         if (showAppSettings) {
             showAppSettings = false
         } else if (showKeyCodeSettings) {
             showKeyCodeSettings = false
         } else if (showNotificationDebug) {
             showNotificationDebug = false
+        } else if (showImuDataCapture) {
+            showImuDataCapture = false
         } else if (isSelectionMode) {
             historyViewModel.exitSelectionMode()
         }
@@ -157,6 +162,12 @@ fun MainScreen(
             NotificationDebugScreen(
                 mainViewModel = mainViewModel,
                 onBack = { showNotificationDebug = false }
+            )
+        }
+        showImuDataCapture -> {
+            ImuDataCaptureScreen(
+                viewModel = imuDataCaptureViewModel,
+                onBack = { showImuDataCapture = false }
             )
         }
         else -> {
@@ -276,6 +287,13 @@ fun MainScreen(
                                         text = { Text("通知デバッグ") },
                                         onClick = {
                                             showNotificationDebug = true
+                                            expanded = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("IMU採取") },
+                                        onClick = {
+                                            showImuDataCapture = true
                                             expanded = false
                                         }
                                     )

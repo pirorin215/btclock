@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 30
+#define FIRMWARE_VERSION_PATCH 31
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -59,6 +59,24 @@
 #define IMU_I2C_ADDR       0x68 // BMI160 I2C アドレス (SDO→GND で固定)
 // デバッグ: 生値をシリアルへ 10Hz でダンプ（Phase 14-A 生値確認用。0 で無効）
 #define IMU_DEBUG_DUMP     1
+
+// --- Phase 14-B: IMU リングバッファ（直近10秒・500サンプル）＋ BLE チャンク転送 ---
+// int16 生LSB（6軸）で保持（float なら12KB消費→int16 で6KBに節約）。
+// updateIMU() で push。IMU_DUMP コマンドで古い順にチャンク分割して BLE notify 送信。
+//   チャンク: [0xAA][0x55][seq][total][status] [int16×6×N LE]（status 0x00=継続, 0xFF=最終）
+struct ImuSample {
+    int16_t ax, ay, az;   // 加速度生LSB
+    int16_t gx, gy, gz;   // 角速度生LSB
+};   // 12B/サンプル
+#define IMU_RING_BUFFER_SIZE    500                  // 50Hz × 10秒
+#define IMU_SAMPLES_PER_CHUNK   18                   // チャンクあたりサンプル数（ヘッダ5B+216B=221B）
+#define IMU_DUMP_INTERVAL_MS    30                   // チャンク送信間隔（NimBLE notify キュー対策）
+#define IMU_DUMP_MAGIC0         0xAA                 // チャンクマジック上位
+#define IMU_DUMP_MAGIC1         0x55                 // チャンクマジック下位
+#define IMU_DUMP_STATUS_MORE    0x00                 // status: 継続
+#define IMU_DUMP_STATUS_LAST    0xFF                 // status: 最終チャンク
+#define IMU_DUMP_MAX_RETRY      5                    // チャンク送信失敗時リトライ上限
+#define IMU_DUMP_CHUNK_HEADER   5                    // magic(2)+seq(1)+total(1)+status(1)
 
 // --- Display Settings ---
 #define DISPLAY_UPDATE_INTERVAL_MS  1000
@@ -191,6 +209,18 @@ extern float g_imuAx, g_imuAy, g_imuAz;       // 加速度 [g]
 extern float g_imuGx, g_imuGy, g_imuGz;       // 角速度 [deg/s]
 extern unsigned long g_imuLastSampleMillis;   // 最終サンプリング時刻（millis()）
 
+// Phase 14-B: リングバッファ（int16 生LSB・6軸×500サンプル・循環）
+extern ImuSample g_imuRingBuffer[IMU_RING_BUFFER_SIZE];  // 6000B
+extern volatile uint16_t g_imuRingHead;                  // 次書込位置（0..499）
+extern volatile uint16_t g_imuRingCount;                 // 有効サンプル数（0..500）
+// Phase 14-B: IMU_DUMP 送信状態機械（loop() 内 updateImuDump() で進行）
+extern bool g_imuDumpActive;             // 送信中フラグ
+extern uint16_t g_imuDumpSeq;            // 次送信チャンク番号
+extern uint16_t g_imuDumpTotal;          // 総チャンク数
+extern uint16_t g_imuDumpSamplesToSend;  // 送信対象サンプル数（= 採取時点の count）
+extern unsigned long g_imuDumpLastSend;  // 最終チャンク送信時刻（millis()）
+extern uint8_t g_imuDumpRetry;           // 現チャンクのリトライ回数
+
 // --- Function Prototypes ---
 // 時刻計算
 int getHours();
@@ -221,8 +251,10 @@ void recordStartupTime();   // 初回時刻同期時に起動時刻(JST)を g_st
 
 // BMI160 IMU（Phase 14）— bikeclock_esp32_imu.ino
 void setupIMU();      // Wire.begin + BMI160 初期化（接続失敗時 g_imuEnabled=false でフォールバック）
-void updateIMU();     // 50Hz(20ms) サンプリング + 生値読出し（loop から毎回呼出）
+void updateIMU();     // 50Hz(20ms) サンプリング + 生値読出し + リングバッファ push（loop から毎回呼出）
 void dumpIMU();       // 生値シリアルダンプ（IMU_DEBUG_DUMP フラグで切替）
+void handleImuDump();      // Phase 14-B: IMU_DUMP 要求受信（送信状態を初期化・即リターン）
+void updateImuDump();      // Phase 14-B: loop内でチャンク分割送信を進行（30ms間隔・リトライ付き）
 
 // 物理スイッチ & メンテナンスモード
 void processHidSwitches();
@@ -267,6 +299,7 @@ void updateLedStateBasedOnStatus();
 void setupBLE();
 void deinitBLE();
 void sendResponse(const char* message);
+bool sendBinary(const uint8_t* data, size_t len);   // Phase 14-B: バイナリ notify（IMUチャンク送信）
 void handleTimeSync(const char* command);
 void handleGetVersion();
 void handleKeyConfig(const char* command);

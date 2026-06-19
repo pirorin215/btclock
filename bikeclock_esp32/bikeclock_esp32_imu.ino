@@ -53,6 +53,19 @@ float g_imuAx = 0, g_imuAy = 0, g_imuAz = 0;   // 加速度 [g]
 float g_imuGx = 0, g_imuGy = 0, g_imuGz = 0;   // 角速度 [deg/s]
 unsigned long g_imuLastSampleMillis = 0;
 
+// Phase 14-B: リングバッファ（int16 生LSB・6軸×500・循環）
+ImuSample g_imuRingBuffer[IMU_RING_BUFFER_SIZE];
+volatile uint16_t g_imuRingHead = 0;
+volatile uint16_t g_imuRingCount = 0;
+
+// Phase 14-B: IMU_DUMP 送信状態機械（loop() 内 updateImuDump() で進行）
+bool g_imuDumpActive = false;
+uint16_t g_imuDumpSeq = 0;
+uint16_t g_imuDumpTotal = 0;
+uint16_t g_imuDumpSamplesToSend = 0;
+unsigned long g_imuDumpLastSend = 0;
+uint8_t g_imuDumpRetry = 0;
+
 // ====================================================================
 // I2C ヘルパ（レジスタ読み書き）
 // ====================================================================
@@ -205,6 +218,15 @@ void updateIMU() {
     int16_t ay = (int16_t)((buf[9]  << 8) | buf[8]);
     int16_t az = (int16_t)((buf[11] << 8) | buf[10]);
 
+    // Phase 14-B: リングバッファへ生LSBを push（常時・循環。古いデータから上書き）
+    {
+        ImuSample& s = g_imuRingBuffer[g_imuRingHead];
+        s.ax = ax; s.ay = ay; s.az = az;
+        s.gx = gx; s.gy = gy; s.gz = gz;
+        g_imuRingHead = (uint16_t)((g_imuRingHead + 1) % IMU_RING_BUFFER_SIZE);
+        if (g_imuRingCount < IMU_RING_BUFFER_SIZE) g_imuRingCount++;
+    }
+
     g_imuGx = gx / BMI160_GYR_LSB_PER_DPS;
     g_imuGy = gy / BMI160_GYR_LSB_PER_DPS;
     g_imuGz = gz / BMI160_GYR_LSB_PER_DPS;
@@ -227,4 +249,75 @@ void dumpIMU() {
 
     logPrint("IMU", "acc[g] x=%+.3f y=%+.3f z=%+.3f | gyr[dps] x=%+.2f y=%+.2f z=%+.2f",
              g_imuAx, g_imuAy, g_imuAz, g_imuGx, g_imuGy, g_imuGz);
+}
+
+// ====================================================================
+// handleImuDump — IMU_DUMP 要求受信（BLE onWrite から・状態初期化のみ）
+//   ※BLEコールバック内で長時間ブロックできないため、ここでは送信状態を
+//     初期化するだけ。実際のチャンク送信は loop() 内 updateImuDump() で進行。
+// ====================================================================
+void handleImuDump() {
+    if (!g_imuEnabled || g_imuRingCount == 0) {
+        sendResponse("ERROR:IMU not ready");
+        logPrint("IMU", "IMU_DUMP requested but not ready (enabled=%d count=%u)",
+                 g_imuEnabled ? 1 : 0, g_imuRingCount);
+        return;
+    }
+    g_imuDumpSamplesToSend = g_imuRingCount;
+    g_imuDumpTotal = (uint16_t)((g_imuDumpSamplesToSend + IMU_SAMPLES_PER_CHUNK - 1) / IMU_SAMPLES_PER_CHUNK);
+    g_imuDumpSeq = 0;
+    g_imuDumpRetry = 0;
+    g_imuDumpLastSend = 0;   // 即送信開始
+    g_imuDumpActive = true;
+    logPrint("IMU", "IMU_DUMP start: %u samples -> %u chunks",
+             g_imuDumpSamplesToSend, g_imuDumpTotal);
+}
+
+// ====================================================================
+// updateImuDump — チャンク分割送信の進行（loop から毎回呼出）
+//   30ms間隔で1チャンクを構築→ sendBinary()。リングバッファから古い順に取り出す。
+//   送信失敗時は同一チャンクを最大 IMU_DUMP_MAX_RETRY 回リトライ。
+//   チャンク: [MAGIC0][MAGIC1][seq][total][status] [int16×6×n LE]
+// ====================================================================
+void updateImuDump() {
+    if (!g_imuDumpActive) return;
+    if (g_currentMillis - g_imuDumpLastSend < IMU_DUMP_INTERVAL_MS) return;
+
+    // リングバッファの最古サンプル位置（古い順に送る）
+    const uint16_t startIdx = (uint16_t)((g_imuRingHead + IMU_RING_BUFFER_SIZE - g_imuRingCount) % IMU_RING_BUFFER_SIZE);
+    const uint16_t offset = (uint16_t)(g_imuDumpSeq * IMU_SAMPLES_PER_CHUNK);
+    const uint16_t remaining = (uint16_t)(g_imuDumpSamplesToSend - offset);
+    const uint16_t n = (remaining > IMU_SAMPLES_PER_CHUNK) ? IMU_SAMPLES_PER_CHUNK : remaining;
+    const bool isLast = (g_imuDumpSeq + 1 >= g_imuDumpTotal);
+
+    // チャンク構築（最大 5 + 18*12 = 221B ≤ MTU ペイロード244B）
+    uint8_t chunk[IMU_DUMP_CHUNK_HEADER + IMU_SAMPLES_PER_CHUNK * sizeof(ImuSample)];
+    chunk[0] = IMU_DUMP_MAGIC0;
+    chunk[1] = IMU_DUMP_MAGIC1;
+    chunk[2] = (uint8_t)g_imuDumpSeq;
+    chunk[3] = (uint8_t)g_imuDumpTotal;
+    chunk[4] = isLast ? IMU_DUMP_STATUS_LAST : IMU_DUMP_STATUS_MORE;
+
+    for (uint16_t i = 0; i < n; i++) {
+        uint16_t idx = (uint16_t)((startIdx + offset + i) % IMU_RING_BUFFER_SIZE);
+        memcpy(chunk + IMU_DUMP_CHUNK_HEADER + i * sizeof(ImuSample),
+               &g_imuRingBuffer[idx], sizeof(ImuSample));
+    }
+    const size_t chunkLen = (size_t)(IMU_DUMP_CHUNK_HEADER + n * sizeof(ImuSample));
+
+    if (sendBinary(chunk, chunkLen)) {
+        g_imuDumpLastSend = g_currentMillis;
+        g_imuDumpSeq++;
+        g_imuDumpRetry = 0;
+        if (isLast) {
+            logPrint("IMU", "IMU_DUMP done: %u/%u chunks sent", g_imuDumpSeq, g_imuDumpTotal);
+            g_imuDumpActive = false;
+        }
+    } else {
+        // 送信失敗（キュー満杯/非接続）→ リトライ。上限超えで中断（アプリ側でseq欠損検知）
+        if (++g_imuDumpRetry > IMU_DUMP_MAX_RETRY) {
+            logPrint("IMU", "IMU_DUMP aborted at chunk %u (retry exhausted)", g_imuDumpSeq);
+            g_imuDumpActive = false;
+        }
+    }
 }

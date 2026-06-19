@@ -10,6 +10,7 @@ import com.pirorin215.btclockmob.viewModel.LocationMonitor
 import com.pirorin215.btclockmob.viewModel.LogManager
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
+import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.KeyCodeSettingsRepository
 import com.pirorin215.btclockmob.data.BleRepository
@@ -44,4 +45,9 @@ val viewModelModule = module {
     }
 
     viewModel { DeviceHistoryViewModel(get(), get<Application>()) }
+
+    // Phase 14-B: IMUデータ採取
+    viewModel {
+        ImuDataCaptureViewModel(get<BleRepository>())
+    }
 }
