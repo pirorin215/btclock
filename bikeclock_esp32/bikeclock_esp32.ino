@@ -290,6 +290,9 @@ void setup() {
     // ePaper 初期化（昼間視認性用、Phase 2.5）— ブートスプラッシュ表示
     setupEpaper();
 
+    // BMI160 IMU 初期化（Phase 14: 両脚スタンド検知用）— 未接続時は g_imuEnabled=false でフォールバック
+    setupIMU();
+
     // バージョン表示（1秒）
     logPrint("INIT", "Displaying firmware version...");
     displayVersion();
@@ -337,6 +340,7 @@ void loop() {
         updateTimestamp();
         updateDisplayAndLedState();
         updateEpaperDisplay();
+        updateIMU();   // Phase 14: BMI160 サンプリング（50Hz）+ 生値ダンプ
     }
 
     delay(10);

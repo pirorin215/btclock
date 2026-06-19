@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 24
+#define FIRMWARE_VERSION_PATCH 30
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -18,8 +18,9 @@
 #define LED_CLK_GPIO     7   // TM1637 CLK
 
 // Physical Switches
-#define SWITCH_SW1_GPIO     4   // Right Arrow
-#define SWITCH_SW2_GPIO     5   // Down Arrow
+// Phase 14: SW1/SW2 を背面端子へ移動。空けた GPIO4/5 を BMI160 I2C(SDA/SCL) に再割当て。
+#define SWITCH_SW1_GPIO     41  // Right Arrow (旧GPIO4 → 背面端子)
+#define SWITCH_SW2_GPIO     47  // Down Arrow  (旧GPIO5 → 背面端子)
 #define SWITCH_SW3_GPIO     13  // Up Arrow
 #define SWITCH_SW4_GPIO     14  // Left Arrow
 #define SWITCH_SW5_GPIO     35  // Enter
@@ -50,6 +51,15 @@
 #define EPD_SPI_SCK_GPIO    12   // 専用 SPI3_HOST
 #define EPD_SPI_MOSI_GPIO   11   // 専用 SPI3_HOST (MISOはePaper不要)
 
+// --- BMI160 IMU (Phase 14: 両脚スタンド検知用) ---
+// GY-BMI160 (BMI160: 3軸加速度＋3軸ジャイロ)。I2C 接続（Wire.h レジスタ直接制御・外部ライブラリ不要）。
+// SW1/SW2 を背面端子へ移動して空けた GPIO4/5 を I2C に再割当て。
+#define IMU_SDA_GPIO       4    // SW1 から再利用（I2C は任意 GPIO にリマップ可能）
+#define IMU_SCL_GPIO       5    // SW2 から再利用
+#define IMU_I2C_ADDR       0x68 // BMI160 I2C アドレス (SDO→GND で固定)
+// デバッグ: 生値をシリアルへ 10Hz でダンプ（Phase 14-A 生値確認用。0 で無効）
+#define IMU_DEBUG_DUMP     1
+
 // --- Display Settings ---
 #define DISPLAY_UPDATE_INTERVAL_MS  1000
 
@@ -75,7 +85,8 @@ enum EpaperView {
     EP_VIEW_CLOCK,            // 標準（7seg = TIME）
     EP_VIEW_NOTIFICATION,     // 通知（7seg = DATE）
     EP_VIEW_DETAIL,           // 詳細（7seg = WEEKDAY）
-    EP_VIEW_UNSYNCED          // 未同期
+    EP_VIEW_UNSYNCED,         // 未同期
+    EP_VIEW_PARKED            // 駐車中（Phase 14: 詳細表示を維持・電源OFF後の残像対策。描画統合は 14-C）
 };
 
 // --- Date Cache (日付計算のキャッシュ) ---
@@ -173,6 +184,13 @@ extern char g_notificationApp[];                // アプリ名
 extern char g_notificationText[];               // 通知本文
 extern volatile bool g_epaperRedrawRequested;   // ePaper 強制再描画要求（ビュー変更検出用）
 
+// --- BMI160 IMU（Phase 14: 両脚スタンド検知用）---
+extern bool g_imuEnabled;        // BMI160 接続・有効フラグ（false で既存機能へフォールバック）
+// 直近のサンプル値（g/deg/s 換算済み）。Phase 14-B でリングバッファ履歴へ拡張予定。
+extern float g_imuAx, g_imuAy, g_imuAz;       // 加速度 [g]
+extern float g_imuGx, g_imuGy, g_imuGz;       // 角速度 [deg/s]
+extern unsigned long g_imuLastSampleMillis;   // 最終サンプリング時刻（millis()）
+
 // --- Function Prototypes ---
 // 時刻計算
 int getHours();
@@ -200,6 +218,11 @@ void updateEpaperDisplay();
 void updateTimestamp();
 void updateDisplayAndLedState();
 void recordStartupTime();   // 初回時刻同期時に起動時刻(JST)を g_startupTimeStr へ記録
+
+// BMI160 IMU（Phase 14）— bikeclock_esp32_imu.ino
+void setupIMU();      // Wire.begin + BMI160 初期化（接続失敗時 g_imuEnabled=false でフォールバック）
+void updateIMU();     // 50Hz(20ms) サンプリング + 生値読出し（loop から毎回呼出）
+void dumpIMU();       // 生値シリアルダンプ（IMU_DEBUG_DUMP フラグで切替）
 
 // 物理スイッチ & メンテナンスモード
 void processHidSwitches();
