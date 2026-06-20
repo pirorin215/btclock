@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 31
+#define FIRMWARE_VERSION_PATCH 32
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -54,8 +54,8 @@
 // --- BMI160 IMU (Phase 14: 両脚スタンド検知用) ---
 // GY-BMI160 (BMI160: 3軸加速度＋3軸ジャイロ)。I2C 接続（Wire.h レジスタ直接制御・外部ライブラリ不要）。
 // SW1/SW2 を背面端子へ移動して空けた GPIO4/5 を I2C に再割当て。
-#define IMU_SDA_GPIO       4    // SW1 から再利用（I2C は任意 GPIO にリマップ可能）
-#define IMU_SCL_GPIO       5    // SW2 から再利用
+#define IMU_SCL_GPIO       4    // SW2 から再利用
+#define IMU_SDA_GPIO       5    // SW1 から再利用
 #define IMU_I2C_ADDR       0x68 // BMI160 I2C アドレス (SDO→GND で固定)
 // デバッグ: 生値をシリアルへ 10Hz でダンプ（Phase 14-A 生値確認用。0 で無効）
 #define IMU_DEBUG_DUMP     1
@@ -291,7 +291,19 @@ void setLedColor(bool red, bool green, bool blue);
 void updateLedStateBasedOnStatus();
 
 // --- BLE Settings (Phase 5) ---
-#define BLE_DEVICE_NAME       "BikeClock-ESP32"
+// デバイス名: ビルドフラグ -DUNIT_NAME=<name> でデバイス個別に指定可能。
+//   未指定             → "BikeClock-ESP32"  (従来互換・テスト用)
+//   -DUNIT_NAME=Living → "BikeClock-Living"
+//   -DUNIT_NAME=0002   → "BikeClock-0002"   (xiao版 BikeClock-0001 と同形式)
+// Androidアプリは "BikeClock-" 前方一致で複数デバイスを認識するため、
+// 複数台のESP32-S3を別名で運用すれば設定画面で切り替えられる。
+#define _BC_STR_INNER(s) #s
+#define _BC_STR(s)       _BC_STR_INNER(s)
+#ifdef UNIT_NAME
+  #define BLE_DEVICE_NAME  "BikeClock-" _BC_STR(UNIT_NAME)
+#else
+  #define BLE_DEVICE_NAME  "BikeClock-ESP32"
+#endif
 #define BLE_SERVICE_UUID      "4fafc201-1fb5-459e-8fcc-c5c9c331914c"
 #define BLE_CHAR_COMMAND_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a0"
 

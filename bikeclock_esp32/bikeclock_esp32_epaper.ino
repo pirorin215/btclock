@@ -585,7 +585,7 @@ void setupEpaper() {
     g_epaper.epd2.selectSPI(epdSPI, SPISettings(4000000, MSBFIRST, SPI_MODE0));
     // init: 第1引数を0にしてライブラリ内部の Serial 出力を停止
     g_epaper.init(0, true, 2, false);
-    g_epaper.setRotation(1);  // 横長 250x122
+    g_epaper.setRotation(3);  // 横長 250x122
 
     u8g2Fonts.begin(g_epaper);
 
