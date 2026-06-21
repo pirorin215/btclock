@@ -181,6 +181,26 @@ void updateDisplayAndLedState() {
         return;
     }
 
+    // モーション検出結果の7セグ表示（3秒間 "MTnn"）
+    if (g_motionDisplayIndex >= 0) {
+        if (g_currentMillis < g_motionDisplayEndTime) {
+            if (g_currentMillis - g_lastScreenMillis >= 1000) {
+                g_lastScreenMillis = g_currentMillis;
+                char buf[5];
+                snprintf(buf, sizeof(buf), "MT%02d", g_motionDisplayIndex);
+                uint8_t data[4] = {0};
+                encodeStringToSegments(buf, data);
+                g_display->setSegments(data);
+            }
+            return;
+        } else {
+            g_motionDisplayIndex = -1;
+            g_motionDisplayEndTime = 0;
+            logPrint("MOTION", "display timeout - resuming clock");
+            g_lastScreenMillis = g_currentMillis - 1000;  // 即時に通常表示へ
+        }
+    }
+
     // キーコード表示中の処理
     if (g_displayingKeyCode != 0) {
         if (g_currentMillis < g_keyCodeDisplayEndTime) {

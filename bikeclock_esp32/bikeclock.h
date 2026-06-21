@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 35
+#define FIRMWARE_VERSION_PATCH 36
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -90,6 +90,7 @@ struct ImuSample {
 #define MOTION_FRAME_MAGIC0      0xAA                // モデル受信フレームマジック
 #define MOTION_FRAME_MAGIC1      0x55
 #define MOTION_FRAME_STATUS_LAST 0xFF
+#define MOTION_DISPLAY_MS        3000UL              // 検出結果の7セグ表示時間
 struct MotionPattern {
     char name[MOTION_NAME_LEN];                      // パターン名（UTF-8）
     float centroid[MOTION_FEAT_DIM];                 // 正規化空間の重心
@@ -247,6 +248,8 @@ extern float g_motionFeatMean[MOTION_FEAT_DIM];              // z-score 正規�
 extern float g_motionFeatStd[MOTION_FEAT_DIM];
 extern bool g_motionModelReady;                              // モデル受信済み
 extern char g_detectedPattern[MOTION_NAME_LEN];              // 直近の検出パターン名（空=不明）
+extern int g_motionDisplayIndex;                             // 7セグ表示中のパターン番号（-1=無効）
+extern unsigned long g_motionDisplayEndTime;                 // 7セグ表示の終了時刻
 
 // --- Function Prototypes ---
 // 時刻計算

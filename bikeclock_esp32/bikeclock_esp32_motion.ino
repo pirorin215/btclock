@@ -20,6 +20,19 @@ float g_motionFeatMean[MOTION_FEAT_DIM];
 float g_motionFeatStd[MOTION_FEAT_DIM];
 bool g_motionModelReady = false;
 char g_detectedPattern[MOTION_NAME_LEN] = "";
+int g_motionDisplayIndex = -1;
+unsigned long g_motionDisplayEndTime = 0;
+
+// パターン名→固定番号（Android IMU_LABELS と同順: 駐車=0..アイドリング=5）
+static const char* MOTION_LABEL_TABLE[] = {"駐車", "解除", "走行", "カーブ", "停車", "アイドリング"};
+#define MOTION_LABEL_COUNT (sizeof(MOTION_LABEL_TABLE) / sizeof(MOTION_LABEL_TABLE[0]))
+
+static int indexOfLabel(const char* name) {
+    for (size_t i = 0; i < MOTION_LABEL_COUNT; i++) {
+        if (strcmp(name, MOTION_LABEL_TABLE[i]) == 0) return (int)i;
+    }
+    return -1;
+}
 
 // --- モデル受信状態（BLE onWrite → フレーム蓄積 → 再構築）---
 static uint8_t s_recvBuf[1024];
@@ -278,6 +291,12 @@ void updateMotionInference() {
             g_detectedPattern[MOTION_NAME_LEN - 1] = '\0';
             logPrint("MOTION", "detected: %s (dist=%.2f)",
                      g_detectedPattern[0] ? g_detectedPattern : "(unknown)", dist);
+            // 7セグへ3秒表示（パターン番号。unknown は表示しない）
+            int idx = indexOfLabel(s_confirmed);
+            if (idx >= 0) {
+                g_motionDisplayIndex = idx;
+                g_motionDisplayEndTime = g_currentMillis + MOTION_DISPLAY_MS;
+            }
         }
     } else {
         strncpy(s_lastCandidate, candidate, MOTION_NAME_LEN - 1);
