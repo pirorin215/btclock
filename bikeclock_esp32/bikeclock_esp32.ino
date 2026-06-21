@@ -276,7 +276,7 @@ void setup() {
 
     // TM1637 初期化
     g_display = new TM1637Display(LED_CLK_GPIO, LED_DIO_GPIO);
-    g_display->setBrightness(0x0F);
+    g_display->setBrightness(0x01);
     g_display->clear();
     logPrint("INIT", "Display OK (CLK=%d, DIO=%d)", LED_CLK_GPIO, LED_DIO_GPIO);
 

@@ -15,7 +15,7 @@
 #include "bikeclock.h"
 
 // LED輝度（0-255）。WS2812は明るすぎるので低めに設定（目視適正・消費電力抑える）
-#define LED_BRIGHTNESS 32
+#define LED_BRIGHTNESS 3
 
 // GPIO48 の RGB LED 1個（NEO_GRB: Green-Red-Byte 順、800kHz）
 Adafruit_NeoPixel g_strip(1, ONBOARD_LED_GPIO, NEO_GRB + NEO_KHZ800);
