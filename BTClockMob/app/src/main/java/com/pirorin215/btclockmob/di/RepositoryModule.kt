@@ -6,6 +6,7 @@ import com.pirorin215.btclockmob.data.BleRepository
 import com.pirorin215.btclockmob.data.DeviceHistoryRepository
 import com.pirorin215.btclockmob.data.KeyCodeSettingsRepository
 import com.pirorin215.btclockmob.data.LastKnownLocationRepository
+import com.pirorin215.btclockmob.data.MotionTrainingRepository
 import org.koin.dsl.module
 
 val repositoryModule = module {
@@ -14,4 +15,5 @@ val repositoryModule = module {
     single { BleRepository(get<Context>()) }
     single { LastKnownLocationRepository(get<Context>()) }
     single { DeviceHistoryRepository(get<Context>()) }
+    single { MotionTrainingRepository(get<Context>()) }
 }

@@ -43,6 +43,7 @@ import com.pirorin215.btclockmob.viewModel.AppSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.DeviceHistoryViewModel
 import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
+import com.pirorin215.btclockmob.viewModel.MotionLearningViewModel
 import com.pirorin215.btclockmob.R
 import androidx.compose.ui.res.stringResource
 import org.koin.android.ext.android.get
@@ -95,6 +96,7 @@ fun MainScreen(
     var showKeyCodeSettings by remember { mutableStateOf(false) }
     var showNotificationDebug by remember { mutableStateOf(false) }
     var showImuDataCapture by remember { mutableStateOf(false) }
+    var showMotionLearning by remember { mutableStateOf(false) }
 
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
@@ -115,8 +117,9 @@ fun MainScreen(
     // KeyCodeSettingsViewModelの初期化 (Koin)
     val keyCodeSettingsViewModel: KeyCodeSettingsViewModel = koinViewModel()
     val imuDataCaptureViewModel: ImuDataCaptureViewModel = koinViewModel()
+    val motionLearningViewModel: MotionLearningViewModel = koinViewModel()
 
-    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug || showImuDataCapture) {
+    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug || showImuDataCapture || showMotionLearning) {
         if (showAppSettings) {
             showAppSettings = false
         } else if (showKeyCodeSettings) {
@@ -125,6 +128,8 @@ fun MainScreen(
             showNotificationDebug = false
         } else if (showImuDataCapture) {
             showImuDataCapture = false
+        } else if (showMotionLearning) {
+            showMotionLearning = false
         } else if (isSelectionMode) {
             historyViewModel.exitSelectionMode()
         }
@@ -168,6 +173,12 @@ fun MainScreen(
             ImuDataCaptureScreen(
                 viewModel = imuDataCaptureViewModel,
                 onBack = { showImuDataCapture = false }
+            )
+        }
+        showMotionLearning -> {
+            MotionLearningScreen(
+                viewModel = motionLearningViewModel,
+                onBack = { showMotionLearning = false }
             )
         }
         else -> {
@@ -294,6 +305,13 @@ fun MainScreen(
                                         text = { Text("IMU採取") },
                                         onClick = {
                                             showImuDataCapture = true
+                                            expanded = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("モーション学習") },
+                                        onClick = {
+                                            showMotionLearning = true
                                             expanded = false
                                         }
                                     )

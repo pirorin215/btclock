@@ -12,9 +12,11 @@ import com.pirorin215.btclockmob.viewModel.LogManager
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
+import com.pirorin215.btclockmob.viewModel.MotionLearningViewModel
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.KeyCodeSettingsRepository
 import com.pirorin215.btclockmob.data.BleRepository
+import com.pirorin215.btclockmob.data.MotionTrainingRepository
 import org.koin.androidx.viewmodel.dsl.viewModel
 import org.koin.dsl.module
 
@@ -49,6 +51,11 @@ val viewModelModule = module {
 
     // Phase 14-B: IMUデータ採取
     viewModel {
-        ImuDataCaptureViewModel(get<BleRepository>(), get<Context>())
+        ImuDataCaptureViewModel(get<BleRepository>(), get<Context>(), get<MotionTrainingRepository>())
+    }
+
+    // モーション学習
+    viewModel {
+        MotionLearningViewModel(get<MotionTrainingRepository>(), get<BleRepository>())
     }
 }

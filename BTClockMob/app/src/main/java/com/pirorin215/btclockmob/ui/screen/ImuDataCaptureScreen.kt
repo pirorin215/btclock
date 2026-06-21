@@ -247,6 +247,18 @@ fun ImuDataCaptureScreen(
                 Text("CSVをシェア")
             }
 
+            // 学習データに追加（Complete時）
+            if (state is ImuDataCaptureViewModel.CaptureState.Complete) {
+                val cs = state as ImuDataCaptureViewModel.CaptureState.Complete
+                Button(
+                    onClick = { viewModel.addToTraining() },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !cs.addedToTraining
+                ) {
+                    Text(if (cs.addedToTraining) "✅ 学習データに追加済み" else "学習データに追加")
+                }
+            }
+
             // 再取得用リセット
             if (state is ImuDataCaptureViewModel.CaptureState.Complete ||
                 state is ImuDataCaptureViewModel.CaptureState.Error

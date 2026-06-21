@@ -13,6 +13,9 @@ import androidx.lifecycle.viewModelScope
 import com.pirorin215.btclockmob.data.BleEvent
 import com.pirorin215.btclockmob.data.BleRepository
 import com.pirorin215.btclockmob.data.ConnectionState
+import com.pirorin215.btclockmob.data.ImuSample
+import com.pirorin215.btclockmob.data.MotionFeatures
+import com.pirorin215.btclockmob.data.MotionTrainingRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +41,8 @@ import java.util.Locale
  */
 class ImuDataCaptureViewModel(
     private val repository: BleRepository,
-    private val appContext: Context
+    private val appContext: Context,
+    private val trainingRepository: MotionTrainingRepository
 ) : ViewModel() {
 
     companion object {
@@ -51,12 +55,6 @@ class ImuDataCaptureViewModel(
         private const val STATUS_LAST = 0xFF
     }
 
-    /** 換算済みサンプル（g / deg/s） */
-    data class ImuSample(
-        val ax: Float, val ay: Float, val az: Float,
-        val gx: Float, val gy: Float, val gz: Float
-    )
-
     /** 採取状態 */
     sealed class CaptureState {
         object Idle : CaptureState()
@@ -66,7 +64,8 @@ class ImuDataCaptureViewModel(
             val sampleCount: Int,
             val missingChunks: List<Int>,
             val savedFileName: String?,
-            val saving: Boolean
+            val saving: Boolean,
+            val addedToTraining: Boolean = false
         ) : CaptureState()
         data class Error(val message: String) : CaptureState()
     }
@@ -211,6 +210,17 @@ class ImuDataCaptureViewModel(
         chunks.clear()
         savedShareUri = null
         _state.value = CaptureState.Idle
+    }
+
+    /** 採取したデータの特徴量を抽出して学習データに追加（ラベル=pendingLabel） */
+    fun addToTraining() {
+        val features = MotionFeatures.extract(lastSamples) ?: return
+        val label = pendingLabel
+        viewModelScope.launch { trainingRepository.addSample(label, features.toList()) }
+        val cur = _state.value
+        if (cur is CaptureState.Complete) {
+            _state.value = cur.copy(addedToTraining = true)
+        }
     }
 
     /** 採取済みデータから CSV 文字列を生成（Complete 状態で呼ぶ） */

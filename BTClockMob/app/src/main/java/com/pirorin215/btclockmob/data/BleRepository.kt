@@ -436,4 +436,91 @@ class BleRepository(private val context: Context) {
         return sendCommand(BleConstants.CMD_GET_VERSION)
     }
 
+    /**
+     * 学習済みモーションモデルをマイコンへ送信（セグメント化バイナリ）。
+     * COMMAND特性へ [0xAA][0x55][seq][total][status][payload] フレームを順次書き込む。
+     * Write Request（応答あり）のため writeMutex で直列化し、各フレームの onCharacteristicWrite 完了を待つ。
+     * ※ 受信側（マイコン onWrite で再構築 → LittleFS 保存）は Phase 2 で対応。
+     */
+    suspend fun sendMotionModel(model: com.pirorin215.btclockmob.data.MotionModel): Boolean = writeMutex.withLock {
+        val characteristic = commandCharacteristic
+        if (characteristic == null) {
+            Log.e(TAG, "Command characteristic not found")
+            return@withLock false
+        }
+        val payload = buildMotionModelPayload(model)
+        val frames = chunkFrames(payload)
+        Log.d(TAG, "Sending motion model: ${model.patternCount} patterns, ${payload.size}B in ${frames.size} frames")
+
+        for ((idx, frame) in frames.withIndex()) {
+            val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            pendingWriteResult = deferred
+            val initiated = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                bluetoothGatt?.writeCharacteristic(
+                    characteristic,
+                    frame,
+                    BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                ) == BluetoothStatusCodes.SUCCESS
+            } else {
+                characteristic.value = frame
+                characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                bluetoothGatt?.writeCharacteristic(characteristic) ?: false
+            }
+            if (!initiated) {
+                pendingWriteResult = null
+                return@withLock false
+            }
+            val ok = withTimeoutOrNull(TimeConstants.SERIAL_WRITE_TIMEOUT_MS) { deferred.await() } ?: false
+            if (pendingWriteResult === deferred) pendingWriteResult = null
+            if (!ok) {
+                Log.e(TAG, "motion model frame ${idx + 1}/${frames.size} failed")
+                return@withLock false
+            }
+        }
+        Log.d(TAG, "Motion model sent successfully")
+        true
+    }
+
+    /** モデルを送信ペイロード(リトルエンディアン)へシリアライズ */
+    private fun buildMotionModelPayload(model: com.pirorin215.btclockmob.data.MotionModel): ByteArray {
+        val dim = com.pirorin215.btclockmob.data.MotionFeatures.DIM
+        val nameBytes = model.labels.map { it.toByteArray(Charsets.UTF_8) }
+        var size = 2                              // N, D
+        size += 4 * dim * 2                       // featMean[D], featStd[D]
+        for (nb in nameBytes) size += 1 + nb.size + 4 * dim
+        val bb = java.nio.ByteBuffer.allocate(size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        bb.put(model.patternCount.toByte())
+        bb.put(dim.toByte())
+        for (v in model.featMean) bb.putFloat(v)
+        for (v in model.featStd) bb.putFloat(v)
+        for (i in model.labels.indices) {
+            val nb = nameBytes[i]
+            bb.put(nb.size.toByte())
+            bb.put(nb)
+            for (v in model.centroids[i]) bb.putFloat(v)
+        }
+        return bb.array()
+    }
+
+    /** ペイロードを BLEフレーム [0xAA][0x55][seq][total][status][chunk] に分割 */
+    private fun chunkFrames(payload: ByteArray): List<ByteArray> {
+        val chunkSize = 180   // MTUネゴ後を想定しつつ余裕を持つ
+        val total = (payload.size + chunkSize - 1) / chunkSize
+        check(total in 1..255) { "motion model too large: ${payload.size}B / $total frames" }
+        val frames = ArrayList<ByteArray>(total)
+        var seq = 0
+        var off = 0
+        while (off < payload.size) {
+            val len = minOf(chunkSize, payload.size - off)
+            val status: Byte = if (off + len >= payload.size) 0xFF.toByte() else 0x00
+            val frame = ByteArray(5 + len)
+            frame[0] = 0xAA.toByte(); frame[1] = 0x55.toByte()
+            frame[2] = seq.toByte(); frame[3] = total.toByte(); frame[4] = status
+            System.arraycopy(payload, off, frame, 5, len)
+            frames.add(frame)
+            off += len; seq++
+        }
+        return frames
+    }
+
 }
