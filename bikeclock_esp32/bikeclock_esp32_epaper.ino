@@ -650,9 +650,11 @@ void updateEpaperDisplay() {
     }
 
     const EpaperView target = displayModeToEpaperView(g_displayMode);
+    EpaperView effective = target;
+    if (g_parkedDisplayActive) effective = EP_VIEW_DETAIL;   // 駐車中は詳細表示で維持
 
     // 標準ビュー: 分/日変化でも更新（時計は毎分更新）
-    if (target == EP_VIEW_CLOCK) {
+    if (effective == EP_VIEW_CLOCK) {
         const int h = getHours();
         const int m = getMinutes();
         const int d = getDay();
@@ -669,12 +671,12 @@ void updateEpaperDisplay() {
 
     // 通知/詳細ビュー: ビューが変わった時だけ描画（スナップショット1回）
     // 通知ビュー(DATE手動切替時): 直近の通知本文があれば再表示、なければ「通知なし」
-    if (target != ep_lastView) {
-        if (target == EP_VIEW_NOTIFICATION) {
+    if (effective != ep_lastView) {
+        if (effective == EP_VIEW_NOTIFICATION) {
             drawEpaperNotification(g_notificationText);
         } else {  // EP_VIEW_DETAIL
             drawEpaperDetail();
         }
-        ep_lastView = target;
+        ep_lastView = effective;
     }
 }

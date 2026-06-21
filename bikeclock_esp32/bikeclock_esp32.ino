@@ -15,7 +15,7 @@
 // === テスト設定 ===
 // 1: 固定時刻で表示確認（時刻/日付/曜日計算の検証）
 // 0: 未同期モード（8888 点滅）— Phase 5 で BLE 時刻同期が実装されるまでの実運用時は 0 にする
-#define TEST_FIXED_TIME 1
+#define TEST_FIXED_TIME 0
 
 // --- Global Variables ---
 TM1637Display* g_display = nullptr;

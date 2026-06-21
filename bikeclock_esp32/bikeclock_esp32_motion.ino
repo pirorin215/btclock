@@ -22,6 +22,7 @@ bool g_motionModelReady = false;
 char g_detectedPattern[MOTION_NAME_LEN] = "";
 int g_motionDisplayIndex = -1;
 unsigned long g_motionDisplayEndTime = 0;
+bool g_parkedDisplayActive = false;   // 駐車中は ePaper を詳細表示で維持（走行検知で解除）
 
 // パターン名→固定番号（Android IMU_LABELS と同順: 駐車=0..アイドリング=5）
 static const char* MOTION_LABEL_TABLE[] = {"駐車", "解除", "走行", "カーブ", "停車", "アイドリング"};
@@ -296,6 +297,16 @@ void updateMotionInference() {
             if (idx >= 0) {
                 g_motionDisplayIndex = idx;
                 g_motionDisplayEndTime = g_currentMillis + MOTION_DISPLAY_MS;
+            }
+            // ePaper 駐車表示連携：駐車で詳細表示へ、走行で時計へ戻す
+            if (strcmp(s_confirmed, "駐車") == 0 && !g_parkedDisplayActive) {
+                g_parkedDisplayActive = true;
+                g_epaperRedrawRequested = true;
+                logPrint("MOTION", "parked -> ePaper detail");
+            } else if (strcmp(s_confirmed, "走行") == 0 && g_parkedDisplayActive) {
+                g_parkedDisplayActive = false;
+                g_epaperRedrawRequested = true;
+                logPrint("MOTION", "riding -> ePaper clock");
             }
         }
     } else {

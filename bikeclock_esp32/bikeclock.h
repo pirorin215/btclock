@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 36
+#define FIRMWARE_VERSION_PATCH 39
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -58,7 +58,7 @@
 #define IMU_SDA_GPIO       5    // SW1 から再利用
 #define IMU_I2C_ADDR       0x68 // BMI160 I2C アドレス (SDO→GND で固定)
 // デバッグ: 生値をシリアルへ 10Hz でダンプ（Phase 14-A 生値確認用。0 で無効）
-#define IMU_DEBUG_DUMP     1
+#define IMU_DEBUG_DUMP     0
 
 // --- Phase 14-B: IMU リングバッファ（直近10秒・500サンプル）＋ BLE チャンク転送 ---
 // int16 生LSB（6軸）で保持（float なら12KB消費→int16 で6KBに節約）。
@@ -250,6 +250,7 @@ extern bool g_motionModelReady;                              // モデル受信�
 extern char g_detectedPattern[MOTION_NAME_LEN];              // 直近の検出パターン名（空=不明）
 extern int g_motionDisplayIndex;                             // 7セグ表示中のパターン番号（-1=無効）
 extern unsigned long g_motionDisplayEndTime;                 // 7セグ表示の終了時刻
+extern bool g_parkedDisplayActive;                          // 駐車中: ePaperを詳細表示で維持（走行検知で解除）
 
 // --- Function Prototypes ---
 // 時刻計算
