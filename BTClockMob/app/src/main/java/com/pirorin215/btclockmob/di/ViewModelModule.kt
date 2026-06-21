@@ -1,6 +1,7 @@
 package com.pirorin215.btclockmob.di
 
 import android.app.Application
+import android.content.Context
 import org.koin.android.ext.koin.androidApplication
 import com.pirorin215.btclockmob.viewModel.AppSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.BleConnectionManager
@@ -48,6 +49,6 @@ val viewModelModule = module {
 
     // Phase 14-B: IMUデータ採取
     viewModel {
-        ImuDataCaptureViewModel(get<BleRepository>())
+        ImuDataCaptureViewModel(get<BleRepository>(), get<Context>())
     }
 }

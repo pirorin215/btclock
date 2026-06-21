@@ -20,13 +20,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import com.pirorin215.btclockmob.data.ConnectionState
 import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 private val IMU_LABELS = listOf("駐車", "解除", "走行", "カーブ", "停車", "アイドリング")
 
@@ -48,7 +43,7 @@ fun ImuDataCaptureScreen(
     var memo by remember { mutableStateOf("") }
     var labelExpanded by remember { mutableStateOf(false) }
 
-    val isConnected = connectionState is ConnectionState.Connected || connectionState is ConnectionState.Paired
+    val isConnected = connectionState is ConnectionState.Connected
 
     Scaffold(
         topBar = {
@@ -73,7 +68,6 @@ fun ImuDataCaptureScreen(
             // 接続ステータス
             val statusText = when (val c = connectionState) {
                 is ConnectionState.Connected -> "接続中: ${c.device.name ?: "BikeClock"}"
-                is ConnectionState.Paired -> "接続中: ${c.device.name ?: "BikeClock"}"
                 else -> "未接続"
             }
             val statusColor = if (isConnected) Color(0xFF4CAF50) else Color(0xFFF44336)
@@ -148,7 +142,7 @@ fun ImuDataCaptureScreen(
             val busy = state is ImuDataCaptureViewModel.CaptureState.Requesting ||
                 state is ImuDataCaptureViewModel.CaptureState.Receiving
             Button(
-                onClick = { viewModel.requestDump() },
+                onClick = { viewModel.requestDump(selectedLabel, memo) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = isConnected && !busy
             ) {
@@ -194,6 +188,24 @@ fun ImuDataCaptureScreen(
                                     color = Color(0xFFFF9800)
                                 )
                             }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            when {
+                                s.saving -> Text(
+                                    "ダウンロードに保存中...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                s.savedFileName != null -> Text(
+                                    "✅ ダウンロードに保存: ${s.savedFileName}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFF2E7D32)
+                                )
+                                else -> Text(
+                                    "⚠ 保存に失敗しました",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color(0xFFF44336)
+                                )
+                            }
                         }
                     }
                 }
@@ -207,18 +219,28 @@ fun ImuDataCaptureScreen(
                 ImuDataCaptureViewModel.CaptureState.Idle -> { /* 初期状態 */ }
             }
 
-            // CSVシェアボタン（完了時のみ）
+            // CSVシェアボタン（保存済みファイルを共有）
             Button(
                 onClick = {
-                    val csv = viewModel.generateCsv(selectedLabel, memo)
-                    if (csv.isEmpty()) {
-                        Toast.makeText(context, "データがありません", Toast.LENGTH_SHORT).show()
+                    val uri = viewModel.savedShareUri
+                    if (uri != null) {
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/csv"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        runCatching {
+                            context.startActivity(Intent.createChooser(intent, "IMUデータを共有"))
+                        }.onFailure {
+                            Toast.makeText(context, "共有に失敗: ${it.message}", Toast.LENGTH_SHORT).show()
+                        }
                     } else {
-                        shareImuCsv(context, csv, selectedLabel)
+                        Toast.makeText(context, "保存されたファイルがありません", Toast.LENGTH_SHORT).show()
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = state is ImuDataCaptureViewModel.CaptureState.Complete
+                enabled = state is ImuDataCaptureViewModel.CaptureState.Complete &&
+                    (state as ImuDataCaptureViewModel.CaptureState.Complete).savedFileName != null
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -234,25 +256,5 @@ fun ImuDataCaptureScreen(
                 }
             }
         }
-    }
-}
-
-/** CSV をキャッシュに書き出し、FileProvider 経由で ACTION_SEND 共有 */
-private fun shareImuCsv(context: Context, csv: String, label: String) {
-    try {
-        val dir = File(context.cacheDir, "imu").apply { mkdirs() }
-        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val safeLabel = label.ifEmpty { "capture" }
-        val file = File(dir, "imu_${safeLabel}_$ts.csv")
-        file.writeText(csv)
-        val uri = FileProvider.getUriForFile(context, "com.pirorin215.btclockmob.provider", file)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, "IMUデータを共有"))
-    } catch (e: Exception) {
-        Toast.makeText(context, "共有に失敗: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }

@@ -1,18 +1,29 @@
 package com.pirorin215.btclockmob.viewModel
 
+import android.content.ContentValues
+import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.btclockmob.data.BleEvent
 import com.pirorin215.btclockmob.data.BleRepository
 import com.pirorin215.btclockmob.data.ConnectionState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -26,7 +37,8 @@ import java.util.Locale
  *   status: 0x00=継続, 0xFF=最終
  */
 class ImuDataCaptureViewModel(
-    private val repository: BleRepository
+    private val repository: BleRepository,
+    private val appContext: Context
 ) : ViewModel() {
 
     companion object {
@@ -50,7 +62,12 @@ class ImuDataCaptureViewModel(
         object Idle : CaptureState()
         object Requesting : CaptureState()
         data class Receiving(val receivedChunks: Int, val totalChunks: Int) : CaptureState()
-        data class Complete(val sampleCount: Int, val missingChunks: List<Int>) : CaptureState()
+        data class Complete(
+            val sampleCount: Int,
+            val missingChunks: List<Int>,
+            val savedFileName: String?,
+            val saving: Boolean
+        ) : CaptureState()
         data class Error(val message: String) : CaptureState()
     }
 
@@ -67,6 +84,14 @@ class ImuDataCaptureViewModel(
     private var lastChunkTimeMs = 0L
     private var finalized = false
     private var lastSamples: List<ImuSample> = emptyList()
+
+    /** 採取時のラベル/メモ（取得完了時の自動保存で使用） */
+    private var pendingLabel: String = ""
+    private var pendingMemo: String = ""
+
+    /** 自動保存したファイルの共有用 Uri（MediaStore Uri または FileProvider Uri） */
+    var savedShareUri: Uri? = null
+        private set
 
     init {
         // ImuChunk チャンク受信の監視（GATT コールバックスレッド → SharedFlow → ここで消費）
@@ -98,12 +123,15 @@ class ImuDataCaptureViewModel(
     }
 
     /** 「データ取得」ボタン押下: IMU_DUMP 要求を送信 */
-    fun requestDump() {
+    fun requestDump(label: String, memo: String) {
         val conn = repository.connectionState.value
-        if (conn !is ConnectionState.Paired && conn !is ConnectionState.Connected) {
+        if (conn !is ConnectionState.Connected) {
             _state.value = CaptureState.Error("デバイスに接続されていません")
             return
         }
+        pendingLabel = label
+        pendingMemo = memo
+        savedShareUri = null
         chunks.clear()
         expectedTotal = 0
         finalized = false
@@ -163,8 +191,16 @@ class ImuDataCaptureViewModel(
         if (samples.isEmpty()) {
             _state.value = CaptureState.Error("データを受信できませんでした")
         } else {
-            _state.value = CaptureState.Complete(samples.size, missing)
+            _state.value = CaptureState.Complete(samples.size, missing, savedFileName = null, saving = true)
             Log.d(TAG, "capture complete: ${samples.size} samples, ${missing.size} chunks missing=$missing")
+            // ダウンロードへ自動保存（IO スレッドで実行）
+            viewModelScope.launch(Dispatchers.IO) {
+                val name = saveToDownloads(pendingLabel, pendingMemo)
+                val cur = _state.value
+                if (cur is CaptureState.Complete) {
+                    _state.value = cur.copy(savedFileName = name, saving = false)
+                }
+            }
         }
     }
 
@@ -173,6 +209,7 @@ class ImuDataCaptureViewModel(
         finalized = false
         lastSamples = emptyList()
         chunks.clear()
+        savedShareUri = null
         _state.value = CaptureState.Idle
     }
 
@@ -195,5 +232,57 @@ class ImuDataCaptureViewModel(
                 i * 20, s.ax, s.ay, s.az, s.gx, s.gy, s.gz))
         }
         return sb.toString()
+    }
+
+    /** 採取済みデータをダウンロードへ自動保存。保存ファイル名（失敗時 null）を返す */
+    private fun saveToDownloads(label: String, memo: String): String? {
+        val csv = generateCsv(label, memo)
+        if (csv.isEmpty()) return null
+        val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val safeLabel = label.ifEmpty { "capture" }
+        val fileName = "imu_${safeLabel}_$ts.csv"
+        val bytes = csv.toByteArray(Charsets.UTF_8)
+        savedShareUri = null
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                saveViaMediaStore(fileName, bytes)
+            } else {
+                saveViaExternalFiles(fileName, bytes)
+            }
+            fileName
+        } catch (e: Exception) {
+            Log.e(TAG, "saveToDownloads failed", e)
+            null
+        }
+    }
+
+    /** API29+: MediaStore.Downloads へ保存。ファイルアプリの「ダウンロード」に現れる */
+    private fun saveViaMediaStore(fileName: String, bytes: ByteArray) {
+        val resolver = appContext.contentResolver
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val values = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(MediaStore.Downloads.MIME_TYPE, "text/csv")
+            put(MediaStore.Downloads.RELATIVE_PATH, "Download/")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(collection, values)
+            ?: throw IllegalStateException("MediaStore insert failed")
+        resolver.openOutputStream(uri)?.use { it.write(bytes) }
+            ?: throw IllegalStateException("openOutputStream failed")
+        values.clear()
+        values.put(MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        savedShareUri = uri
+    }
+
+    /** API<29 フォールバック: アプリ固有外部ストレージの Download/imu へ保存 */
+    private fun saveViaExternalFiles(fileName: String, bytes: ByteArray) {
+        val dir = File(appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "imu").apply { mkdirs() }
+        val file = File(dir, fileName)
+        file.writeBytes(bytes)
+        savedShareUri = FileProvider.getUriForFile(
+            appContext, "com.pirorin215.btclockmob.provider", file
+        )
     }
 }
