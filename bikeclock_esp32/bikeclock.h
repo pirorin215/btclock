@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 39
+#define FIRMWARE_VERSION_PATCH 40
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display

@@ -199,6 +199,12 @@ void processFunctionKey() {
                             g_displayMode = (DisplayMode)(g_displayMode + 1);
                         }
 
+                        // 駐車中表示中でもFUNC押下は尊重：駐車表示を解除し普段通りに切替
+                        if (g_parkedDisplayActive) {
+                            g_parkedDisplayActive = false;
+                            g_epaperRedrawRequested = true;
+                            logPrint("MOTION", "FUNC pressed - exit parked display");
+                        }
                         g_lastModeChangeMillis = millis();
                         updateDisplayForCurrentMode();
                         logPrint("FUNC", "Mode changed to: %d", g_displayMode);
