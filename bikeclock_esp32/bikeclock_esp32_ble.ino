@@ -61,6 +61,14 @@ class CommandCharCallbacks : public NimBLECharacteristicCallbacks {
         std::string value = pChar->getValue();
         if (value.empty()) return;
 
+        // Phase 2: モデルフレーム（バイナリ 0xAA55...）は先頭マジックで判別
+        if (value.size() >= 5 &&
+            (uint8_t)value[0] == MOTION_FRAME_MAGIC0 &&
+            (uint8_t)value[1] == MOTION_FRAME_MAGIC1) {
+            handleMotionModelFrame(reinterpret_cast<const uint8_t*>(value.data()), value.size());
+            return;
+        }
+
         // null終端化して解析
         String command = String(value.c_str());
         logPrint("BLE", "Received: %s", command.c_str());
@@ -74,6 +82,9 @@ class CommandCharCallbacks : public NimBLECharacteristicCallbacks {
         } else if (command.startsWith("NOTIFY:")) {
             // Phase 10: スマホ通知受信（fire-and-forget：応答しない）
             handleNotify(command.c_str());
+        } else if (command.startsWith("IMU_RECORD_START")) {
+            // 未来録り: 10秒録音してからリングバッファ送信
+            handleImuRecordStart();
         } else if (command.startsWith("IMU_DUMP")) {
             // Phase 14-B: リングバッファ（直近10秒）のチャンク転送要求
             handleImuDump();

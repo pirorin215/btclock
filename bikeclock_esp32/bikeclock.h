@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 32
+#define FIRMWARE_VERSION_PATCH 35
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -76,7 +76,24 @@ struct ImuSample {
 #define IMU_DUMP_STATUS_MORE    0x00                 // status: 継続
 #define IMU_DUMP_STATUS_LAST    0xFF                 // status: 最終チャンク
 #define IMU_DUMP_MAX_RETRY      5                    // チャンク送信失敗時リトライ上限
+#define IMU_RECORD_DURATION_MS  10000UL              // IMU_RECORD_START: 10秒録音後に送信
 #define IMU_DUMP_CHUNK_HEADER   5                    // magic(2)+seq(1)+total(1)+status(1)
+
+// --- Phase 2: モーションパターン認識（スマホ学習モデルを受信・推論）---
+// Android MotionFeatures.kt と特徴量定義(DIM/計算/順序)を完全一致させること。
+#define MOTION_MODEL_FILE_PATH   "/motion_model.bin"
+#define MOTION_FEAT_DIM          9                   // 特徴量次元（Android と共通）
+#define MAX_MOTION_PATTERNS      12                  // 保持上限
+#define MOTION_NAME_LEN          16                  // パターン名バッファ
+#define MOTION_INFER_INTERVAL_MS 1000UL              // 推論周期
+#define MOTION_DISTANCE_THRESH   3.0f                // 最近傍距離の閾値（正規化空間）。超過は「不明」
+#define MOTION_FRAME_MAGIC0      0xAA                // モデル受信フレームマジック
+#define MOTION_FRAME_MAGIC1      0x55
+#define MOTION_FRAME_STATUS_LAST 0xFF
+struct MotionPattern {
+    char name[MOTION_NAME_LEN];                      // パターン名（UTF-8）
+    float centroid[MOTION_FEAT_DIM];                 // 正規化空間の重心
+};
 
 // --- Display Settings ---
 #define DISPLAY_UPDATE_INTERVAL_MS  1000
@@ -220,6 +237,16 @@ extern uint16_t g_imuDumpTotal;          // 総チャンク数
 extern uint16_t g_imuDumpSamplesToSend;  // 送信対象サンプル数（= 採取時点の count）
 extern unsigned long g_imuDumpLastSend;  // 最終チャンク送信時刻（millis()）
 extern uint8_t g_imuDumpRetry;           // 現チャンクのリトライ回数
+extern bool g_imuRecordPending;            // IMU_RECORD_START: 10秒録音待機中
+extern unsigned long g_imuRecordStartMillis; // 録音開始時刻
+
+// Phase 2: モーション認識（bikeclock_esp32_motion.ino）
+extern MotionPattern g_motionPatterns[MAX_MOTION_PATTERNS];  // 学習済みパターン
+extern uint8_t g_motionPatternCount;                         // パターン数
+extern float g_motionFeatMean[MOTION_FEAT_DIM];              // z-score 正規化パラメータ
+extern float g_motionFeatStd[MOTION_FEAT_DIM];
+extern bool g_motionModelReady;                              // モデル受信済み
+extern char g_detectedPattern[MOTION_NAME_LEN];              // 直近の検出パターン名（空=不明）
 
 // --- Function Prototypes ---
 // 時刻計算
@@ -255,6 +282,13 @@ void updateIMU();     // 50Hz(20ms) サンプリング + 生値読出し + リ�
 void dumpIMU();       // 生値シリアルダンプ（IMU_DEBUG_DUMP フラグで切替）
 void handleImuDump();      // Phase 14-B: IMU_DUMP 要求受信（送信状態を初期化・即リターン）
 void updateImuDump();      // Phase 14-B: loop内でチャンク分割送信を進行（30ms間隔・リトライ付き）
+void handleImuRecordStart(); // 未来録り要求受信（10秒後に handleImuDump を起動）
+void updateImuRecord();      // loop内で10秒経過を監視し handleImuDump へ
+
+// モーションパターン認識（Phase 2）— bikeclock_esp32_motion.ino
+void loadMotionModel();                 // LittleFS からモデルをロード（起動時）
+void handleMotionModelFrame(const uint8_t* data, size_t len);  // BLE onWrite からモデルフレーム受信
+void updateMotionInference();           // loop から定周期で推論（結果を g_detectedPattern へ）
 
 // 物理スイッチ & メンテナンスモード
 void processHidSwitches();

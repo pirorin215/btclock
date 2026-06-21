@@ -303,6 +303,7 @@ void setup() {
 
     // BLE 初期化（Phase 5）
     setupBLE();
+    loadMotionModel();  // Phase 2: 学習済みモーションモデルをLittleFSから復元
 
 #if TEST_FIXED_TIME
     // テスト用固定時刻: 2026-06-15(月) 12:34:56 JST換算
@@ -336,6 +337,8 @@ void loop() {
     //   リングバッファへ直近10秒を蓄積。駐車検知 14-C でも常時必須）
     updateIMU();
     updateImuDump();   // Phase 14-B: IMU_DUMP チャンク送信の進行（要求時のみ動作）
+    updateImuRecord();  // 未来録り: 10秒経過で handleImuDump 起動
+    updateMotionInference();  // Phase 2: モーションパターン推論（モデル受信済み・1秒周期）
 
     // メンテナンスモードの処理
     if (!processMaintenanceMode()) {

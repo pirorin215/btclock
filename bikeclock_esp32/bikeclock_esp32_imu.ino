@@ -66,6 +66,10 @@ uint16_t g_imuDumpSamplesToSend = 0;
 unsigned long g_imuDumpLastSend = 0;
 uint8_t g_imuDumpRetry = 0;
 
+// 未来録り（IMU_RECORD_START → 10秒後にリングバッファ送信）
+bool g_imuRecordPending = false;
+unsigned long g_imuRecordStartMillis = 0;
+
 // ====================================================================
 // I2C ヘルパ（レジスタ読み書き）
 // ====================================================================
@@ -320,4 +324,26 @@ void updateImuDump() {
             g_imuDumpActive = false;
         }
     }
+}
+
+// ====================================================================
+// handleImuRecordStart — 未来録り要求（BLE onWrite から・状態初期化のみ）
+//   10秒後に updateImuRecord() が handleImuDump() を起動し、その時点の
+//   リングバッファ（＝開始〜10秒のデータ）を送信する。
+// ====================================================================
+void handleImuRecordStart() {
+    g_imuRecordPending = true;
+    g_imuRecordStartMillis = g_currentMillis;
+    logPrint("IMU", "IMU_RECORD_START: recording 10s...");
+}
+
+// ====================================================================
+// updateImuRecord — 10秒経過で handleImuDump 起動（loop から毎回呼出）
+// ====================================================================
+void updateImuRecord() {
+    if (!g_imuRecordPending) return;
+    if (g_currentMillis - g_imuRecordStartMillis < IMU_RECORD_DURATION_MS) return;
+    g_imuRecordPending = false;
+    logPrint("IMU", "IMU_RECORD done, sending buffer");
+    handleImuDump();
 }
