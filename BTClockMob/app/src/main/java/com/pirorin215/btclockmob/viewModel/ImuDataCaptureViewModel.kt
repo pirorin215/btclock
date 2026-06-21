@@ -59,6 +59,7 @@ class ImuDataCaptureViewModel(
     sealed class CaptureState {
         object Idle : CaptureState()
         object Requesting : CaptureState()
+        data class Recording(val progress: Float) : CaptureState()
         data class Receiving(val receivedChunks: Int, val totalChunks: Int) : CaptureState()
         data class Complete(
             val sampleCount: Int,
@@ -138,11 +139,30 @@ class ImuDataCaptureViewModel(
         requestTimeMs = System.currentTimeMillis()
         lastChunkTimeMs = requestTimeMs
         _state.value = CaptureState.Requesting
-        val ok = repository.sendCommand("IMU_DUMP")
+        val ok = repository.sendCommand("IMU_RECORD_START")
         if (!ok) {
-            _state.value = CaptureState.Error("IMU_DUMP コマンドの送信に失敗しました")
+            _state.value = CaptureState.Error("IMU_RECORD_START コマンドの送信に失敗しました")
+            return
         }
-        Log.d(TAG, "IMU_DUMP requested (sendOk=$ok)")
+        Log.d(TAG, "IMU_RECORD_START requested")
+        // 10秒録音タイマー（進捗ゲージ用）。完了で Receiving（チャンク受信待ち）へ遷移。
+        viewModelScope.launch {
+            val durationMs = 10_000L
+            val stepMs = 100L
+            var elapsed = 0L
+            while (elapsed < durationMs) {
+                delay(stepMs)
+                elapsed += stepMs
+                val s = _state.value
+                if (s !is CaptureState.Recording) break
+                _state.value = CaptureState.Recording(elapsed.toFloat() / durationMs)
+            }
+            if (_state.value is CaptureState.Recording) {
+                lastChunkTimeMs = System.currentTimeMillis()
+                _state.value = CaptureState.Receiving(0, 0)
+            }
+        }
+        _state.value = CaptureState.Recording(0f)
     }
 
     private fun handleChunk(data: ByteArray) {
@@ -200,6 +220,8 @@ class ImuDataCaptureViewModel(
                     _state.value = cur.copy(savedFileName = name, saving = false)
                 }
             }
+            // 学習データへ自動追加（学習データに追加ボタン廃止に伴う）
+            addToTraining()
         }
     }
 

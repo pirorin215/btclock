@@ -77,6 +77,14 @@ class MotionLearningViewModel(
         viewModelScope.launch { repository.clearSamples() }
     }
 
+    /** 学習サンプルと学習済みモデルを全削除（完全リセット） */
+    fun clearAll() {
+        viewModelScope.launch {
+            repository.clearSamples()
+            repository.clearModel()
+        }
+    }
+
     /** 学習済みモデルをマイコンへ送信 */
     fun sendToMcu() {
         val m = model.value ?: run {

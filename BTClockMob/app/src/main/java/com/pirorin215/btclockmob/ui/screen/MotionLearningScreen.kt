@@ -175,12 +175,12 @@ fun MotionLearningScreen(
                 }
             }
 
-            // 学習データ全削除
-            if (samples.isNotEmpty()) {
-                TextButton(onClick = { viewModel.clearSamples() }, modifier = Modifier.fillMaxWidth()) {
+            // 学習データ・モデル全削除
+            if (samples.isNotEmpty() || model != null) {
+                TextButton(onClick = { viewModel.clearAll() }, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Delete, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("学習データを全削除")
+                    Text("学習データとモデルを全削除")
                 }
             }
         }

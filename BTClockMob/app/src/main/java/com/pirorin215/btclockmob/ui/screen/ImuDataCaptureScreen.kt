@@ -140,6 +140,7 @@ fun ImuDataCaptureScreen(
 
             // 取得ボタン
             val busy = state is ImuDataCaptureViewModel.CaptureState.Requesting ||
+                state is ImuDataCaptureViewModel.CaptureState.Recording ||
                 state is ImuDataCaptureViewModel.CaptureState.Receiving
             Button(
                 onClick = { viewModel.requestDump(selectedLabel, memo) },
@@ -148,13 +149,24 @@ fun ImuDataCaptureScreen(
             ) {
                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("データ取得")
+                Text("データ取得開始")
             }
 
             // 進捗・結果
             when (val s = state) {
                 is ImuDataCaptureViewModel.CaptureState.Requesting -> {
                     Text("デバイスに要求中...", style = MaterialTheme.typography.bodyMedium)
+                }
+                is ImuDataCaptureViewModel.CaptureState.Recording -> {
+                    val remaining = ((1f - s.progress) * 10f).toInt().coerceAtLeast(0)
+                    Column {
+                        Text("録音中... 残り ${remaining} 秒", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        LinearProgressIndicator(
+                            progress = { s.progress },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
                 is ImuDataCaptureViewModel.CaptureState.Receiving -> {
                     val total = s.totalChunks.coerceAtLeast(1)
@@ -195,11 +207,18 @@ fun ImuDataCaptureScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                s.savedFileName != null -> Text(
-                                    "✅ ダウンロードに保存: ${s.savedFileName}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF2E7D32)
-                                )
+                                s.savedFileName != null -> Column {
+                                    Text(
+                                        "✅ ダウンロードに保存: ${s.savedFileName}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF2E7D32)
+                                    )
+                                    if (s.addedToTraining) Text(
+                                        "✅ 学習データに追加済み",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF2E7D32)
+                                    )
+                                }
                                 else -> Text(
                                     "⚠ 保存に失敗しました",
                                     style = MaterialTheme.typography.bodySmall,
@@ -245,27 +264,6 @@ fun ImuDataCaptureScreen(
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("CSVをシェア")
-            }
-
-            // 学習データに追加（Complete時）
-            if (state is ImuDataCaptureViewModel.CaptureState.Complete) {
-                val cs = state as ImuDataCaptureViewModel.CaptureState.Complete
-                Button(
-                    onClick = { viewModel.addToTraining() },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !cs.addedToTraining
-                ) {
-                    Text(if (cs.addedToTraining) "✅ 学習データに追加済み" else "学習データに追加")
-                }
-            }
-
-            // 再取得用リセット
-            if (state is ImuDataCaptureViewModel.CaptureState.Complete ||
-                state is ImuDataCaptureViewModel.CaptureState.Error
-            ) {
-                TextButton(onClick = { viewModel.reset() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("クリアして再取得")
-                }
             }
         }
     }
