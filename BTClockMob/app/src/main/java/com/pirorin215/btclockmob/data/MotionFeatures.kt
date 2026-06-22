@@ -27,6 +27,9 @@ object MotionFeatures {
     val FEATURE_SCALE = floatArrayOf(1f, 3f, 10f, 100f, 45f, 2f, 1f, 1f, 1f)
 
     private const val FS = 50f                     // サンプリングレート[Hz]
+    /** 特徴量抽出の窓長（サンプル数）。マイコン MOTION_FEAT_WINDOW_SAMPLES と一致させること。
+     *  50Hz×2秒=100。学習・推論で同一窓長にしないと特徴量空間が不一致になるので注意。 */
+    const val WINDOW_SAMPLES = 100
     private const val GRAV_FC = 0.5f               // 重力抽出LPFのカットオフ[Hz]
     private val GRAV_ALPHA: Float = run {
         val dt = 1f / FS

@@ -85,7 +85,8 @@ struct ImuSample {
 #define MOTION_FEAT_DIM          9                   // 特徴量次元（Android と共通）
 #define MAX_MOTION_PATTERNS      12                  // 保持上限
 #define MOTION_NAME_LEN          16                  // パターン名バッファ
-#define MOTION_INFER_INTERVAL_MS 1000UL              // 推論周期
+#define MOTION_INFER_INTERVAL_MS 500UL               // 推論周期（窓短縮に伴い 1秒→0.5秒）
+#define MOTION_FEAT_WINDOW_SAMPLES 100               // 特徴量抽出窓長（50Hz×2秒=100サンプル）。Android MotionFeatures.WINDOW_SAMPLES と一致させること
 #define MOTION_DISTANCE_THRESH   0.5f                // 最近傍距離の閾値（スケール正規化空間）。超過は「不明」。実機調整
 // 固定スケール正規化の除数（Android MotionFeatures.FEATURE_SCALE と完全一致させること）。
 // z-score はサンプル少＋高再現性で std が過小評価され破綻するため廃止。

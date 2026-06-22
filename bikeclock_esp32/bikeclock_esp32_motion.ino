@@ -177,12 +177,15 @@ void handleMotionModelFrame(const uint8_t* data, size_t len) {
 }
 
 // ====================================================================
-// extractFeatures — リングバッファの直近データから9次元特徴量を抽出
+// extractFeatures — リングバッファの直近 MOTION_FEAT_WINDOW_SAMPLES サンプルから9次元特徴量を抽出
 //   MotionFeatures.kt（Android）と完全一致。1次IIR LPF(0.5Hz)で重力抽出。
 // ====================================================================
 static bool extractFeatures(float out[MOTION_FEAT_DIM]) {
-    int n = (int)g_imuRingCount;
-    if (n < 10) return false;
+    // 直近 MOTION_FEAT_WINDOW_SAMPLES サンプルで特徴量計算（リングバッファ全量ではない）。
+    // 短窓化で駐車動作の信号が窓を素早く支配し、検出レイテンシを下げる。
+    int avail = (int)g_imuRingCount;
+    if (avail < 10) return false;
+    int n = (avail < MOTION_FEAT_WINDOW_SAMPLES) ? avail : MOTION_FEAT_WINDOW_SAMPLES;
     int startIdx = (int)((g_imuRingHead + IMU_RING_BUFFER_SIZE - n) % IMU_RING_BUFFER_SIZE);
 
     // 1次IIR LPF 定数（0.5Hz @ 50Hz）— Android GRAV_ALPHA と同一

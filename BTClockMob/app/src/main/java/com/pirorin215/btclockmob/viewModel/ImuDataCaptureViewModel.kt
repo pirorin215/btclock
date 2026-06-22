@@ -234,11 +234,29 @@ class ImuDataCaptureViewModel(
         _state.value = CaptureState.Idle
     }
 
-    /** 採取したデータの特徴量を抽出して学習データに追加（ラベル=pendingLabel） */
+    /** 採取したデータからスライド窓で特徴量を抽出し学習データに追加（ラベル=pendingLabel）。
+     *  採取10秒(500) を MotionFeatures.WINDOW_SAMPLES(100) 窓・step 50(50%重複) で分割し、
+     *  各窓から1件ずつ学習サンプルを生成。推論時の「直近2秒の様々な局面」を学習に取り込む。 */
     fun addToTraining() {
-        val features = MotionFeatures.extract(lastSamples) ?: return
         val label = pendingLabel
-        viewModelScope.launch { trainingRepository.addSample(label, features.toList()) }
+        val samples = lastSamples
+        val window = MotionFeatures.WINDOW_SAMPLES
+        val step = (window / 2).coerceAtLeast(1)
+        viewModelScope.launch {
+            if (samples.size < 10) return@launch
+            // 窓長に満たない場合は全量で1件（短い採取のフォールバック）
+            if (samples.size < window) {
+                val feat = MotionFeatures.extract(samples)
+                if (feat != null) trainingRepository.addSample(label, feat.toList())
+            } else {
+                var i = 0
+                while (i + window <= samples.size) {
+                    val feat = MotionFeatures.extract(samples.subList(i, i + window))
+                    if (feat != null) trainingRepository.addSample(label, feat.toList())
+                    i += step
+                }
+            }
+        }
         val cur = _state.value
         if (cur is CaptureState.Complete) {
             _state.value = cur.copy(addedToTraining = true)
