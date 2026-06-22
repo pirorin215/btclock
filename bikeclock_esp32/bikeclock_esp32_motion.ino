@@ -16,13 +16,12 @@
 // --- Globals（bikeclock.h で extern 宣言）---
 MotionPattern g_motionPatterns[MAX_MOTION_PATTERNS];
 uint8_t g_motionPatternCount = 0;
-float g_motionFeatMean[MOTION_FEAT_DIM];
-float g_motionFeatStd[MOTION_FEAT_DIM];
 bool g_motionModelReady = false;
 char g_detectedPattern[MOTION_NAME_LEN] = "";
 int g_motionDisplayIndex = -1;
 unsigned long g_motionDisplayEndTime = 0;
 bool g_parkedDisplayActive = false;   // 駐車中は ePaper を詳細表示で維持（走行検知で解除）
+bool g_inferLogEnabled = false;       // 推論ログBLE送信（INFER_LOG:1 でON・精度チューニング用）
 
 // パターン名→固定番号（Android IMU_LABELS と同順: 駐車=0..アイドリング=5）
 static const char* MOTION_LABEL_TABLE[] = {"駐車", "解除", "走行", "カーブ", "停車", "アイドリング"};
@@ -60,8 +59,6 @@ void saveMotionModel() {
     File file = LittleFS.open(MOTION_MODEL_FILE_PATH, "w");
     if (!file) { logPrint("MOTION", "save failed (open)"); return; }
     file.write(&g_motionPatternCount, 1);
-    file.write((const uint8_t*)g_motionFeatMean, sizeof(g_motionFeatMean));
-    file.write((const uint8_t*)g_motionFeatStd, sizeof(g_motionFeatStd));
     for (int p = 0; p < g_motionPatternCount; p++) {
         file.write((const uint8_t*)g_motionPatterns[p].name, MOTION_NAME_LEN);
         file.write((const uint8_t*)g_motionPatterns[p].centroid, sizeof(float) * MOTION_FEAT_DIM);
@@ -84,8 +81,6 @@ void loadMotionModel() {
     if (file.read(&n, 1) != 1 || n > MAX_MOTION_PATTERNS) {
         file.close(); logPrint("MOTION", "load failed (count)"); return;
     }
-    if (file.read((uint8_t*)g_motionFeatMean, sizeof(g_motionFeatMean)) != sizeof(g_motionFeatMean)) { file.close(); return; }
-    if (file.read((uint8_t*)g_motionFeatStd, sizeof(g_motionFeatStd)) != sizeof(g_motionFeatStd)) { file.close(); return; }
     for (int p = 0; p < n; p++) {
         if (file.read((uint8_t*)g_motionPatterns[p].name, MOTION_NAME_LEN) != MOTION_NAME_LEN) { file.close(); return; }
         if (file.read((uint8_t*)g_motionPatterns[p].centroid, sizeof(float) * MOTION_FEAT_DIM) != sizeof(float) * MOTION_FEAT_DIM) { file.close(); return; }
@@ -116,8 +111,8 @@ static void parseAndStoreModel(const uint8_t* buf, size_t len) {
         sendResponse("ERROR: too many patterns"); return;
     }
     // 長さ検証
-    size_t check = 2 + (size_t)2 * 4 * d;
-    size_t p = check;   // featMean/featStd の後から（N,D + mean + std のサイズ）
+    size_t check = 2;   // N, D（featMean/featStd は廃止）
+    size_t p = check;
     for (int i = 0; i < n; i++) {
         if (p >= len) {
             logPrint("MOTION", "truncated(loop): i=%d p=%u len=%u", i, (unsigned)p, (unsigned)len);
@@ -132,8 +127,6 @@ static void parseAndStoreModel(const uint8_t* buf, size_t len) {
         sendResponse("ERROR: motion model truncated"); return;
     }
 
-    for (int i = 0; i < d; i++) g_motionFeatMean[i] = readFloatLE(buf, off);
-    for (int i = 0; i < d; i++) g_motionFeatStd[i] = readFloatLE(buf, off);
     for (int pi = 0; pi < n; pi++) {
         uint8_t nl = buf[off++];
         size_t copyLen = (nl < MOTION_NAME_LEN - 1) ? nl : (MOTION_NAME_LEN - 1);
@@ -260,12 +253,10 @@ void updateMotionInference() {
     float feat[MOTION_FEAT_DIM];
     if (!extractFeatures(feat)) return;
 
-    // z-score 正規化
+    // スケール正規化（z-score 廃止・サンプル少での std 過小評価対策）
     float norm[MOTION_FEAT_DIM];
     for (int i = 0; i < MOTION_FEAT_DIM; i++) {
-        float sd = g_motionFeatStd[i];
-        if (sd < 1e-6f) sd = 1e-6f;
-        norm[i] = (feat[i] - g_motionFeatMean[i]) / sd;
+        norm[i] = feat[i] / MOTION_FEATURE_SCALE[i];
     }
 
     // 最近傍
@@ -283,6 +274,20 @@ void updateMotionInference() {
 
     const char* candidate = (best >= 0 && dist < MOTION_DISTANCE_THRESH)
                             ? g_motionPatterns[best].name : "";
+
+    // 推論ログをBLE送信（INFER_LOG:1 で有効化時のみ・毎推論=1Hz）。スマホで時系列記録→CSV分析。
+    //   形式: INFER:<ms>,<candidate>,<dist>,<f0>..<f8>（candidate は空を"-"で送信）
+    if (g_inferLogEnabled) {
+        char logBuf[160];
+        snprintf(logBuf, sizeof(logBuf),
+                 "INFER:%lu,%s,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.3f,%.3f,%.3f",
+                 (unsigned long)g_currentMillis,
+                 candidate[0] ? candidate : "-",
+                 dist,
+                 feat[0], feat[1], feat[2], feat[3], feat[4],
+                 feat[5], feat[6], feat[7], feat[8]);
+        sendResponse(logBuf);
+    }
 
     if (strcmp(candidate, s_lastCandidate) == 0) {
         if (strcmp(candidate, s_confirmed) != 0) {

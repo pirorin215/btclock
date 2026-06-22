@@ -13,6 +13,7 @@ import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.KeyCodeSettingsViewModel
 import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
 import com.pirorin215.btclockmob.viewModel.MotionLearningViewModel
+import com.pirorin215.btclockmob.viewModel.InferenceLogViewModel
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.KeyCodeSettingsRepository
 import com.pirorin215.btclockmob.data.BleRepository
@@ -57,5 +58,10 @@ val viewModelModule = module {
     // モーション学習
     viewModel {
         MotionLearningViewModel(get<MotionTrainingRepository>(), get<BleRepository>())
+    }
+
+    // 推論ログ取得（精度チューニング用）
+    viewModel {
+        InferenceLogViewModel(get<BleRepository>(), get<Context>())
     }
 }

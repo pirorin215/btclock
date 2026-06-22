@@ -88,6 +88,11 @@ class CommandCharCallbacks : public NimBLECharacteristicCallbacks {
         } else if (command.startsWith("IMU_DUMP")) {
             // Phase 14-B: リングバッファ（直近10秒）のチャンク転送要求
             handleImuDump();
+        } else if (command.startsWith("INFER_LOG:")) {
+            // 推論ログのBLE送信 ON/OFF（精度チューニング用。1=ON, 0=OFF）
+            g_inferLogEnabled = (command.charAt(10) == '1');
+            logPrint("BLE", "INFER_LOG %s", g_inferLogEnabled ? "ON" : "OFF");
+            sendResponse(g_inferLogEnabled ? "OK: infer log on" : "OK: infer log off");
         } else {
             logPrint("BLE", "Unknown command");
             sendResponse("ERROR: Unknown command");

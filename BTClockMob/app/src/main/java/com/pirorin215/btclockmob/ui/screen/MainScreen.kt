@@ -44,6 +44,7 @@ import com.pirorin215.btclockmob.viewModel.MainViewModel
 import com.pirorin215.btclockmob.viewModel.DeviceHistoryViewModel
 import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
 import com.pirorin215.btclockmob.viewModel.MotionLearningViewModel
+import com.pirorin215.btclockmob.viewModel.InferenceLogViewModel
 import com.pirorin215.btclockmob.R
 import androidx.compose.ui.res.stringResource
 import org.koin.android.ext.android.get
@@ -97,6 +98,7 @@ fun MainScreen(
     var showNotificationDebug by remember { mutableStateOf(false) }
     var showImuDataCapture by remember { mutableStateOf(false) }
     var showMotionLearning by remember { mutableStateOf(false) }
+    var showInferenceLog by remember { mutableStateOf(false) }
 
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
@@ -118,8 +120,9 @@ fun MainScreen(
     val keyCodeSettingsViewModel: KeyCodeSettingsViewModel = koinViewModel()
     val imuDataCaptureViewModel: ImuDataCaptureViewModel = koinViewModel()
     val motionLearningViewModel: MotionLearningViewModel = koinViewModel()
+    val inferenceLogViewModel: InferenceLogViewModel = koinViewModel()
 
-    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug || showImuDataCapture || showMotionLearning) {
+    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug || showImuDataCapture || showMotionLearning || showInferenceLog) {
         if (showAppSettings) {
             showAppSettings = false
         } else if (showKeyCodeSettings) {
@@ -130,6 +133,8 @@ fun MainScreen(
             showImuDataCapture = false
         } else if (showMotionLearning) {
             showMotionLearning = false
+        } else if (showInferenceLog) {
+            showInferenceLog = false
         } else if (isSelectionMode) {
             historyViewModel.exitSelectionMode()
         }
@@ -179,6 +184,12 @@ fun MainScreen(
             MotionLearningScreen(
                 viewModel = motionLearningViewModel,
                 onBack = { showMotionLearning = false }
+            )
+        }
+        showInferenceLog -> {
+            InferenceLogScreen(
+                viewModel = inferenceLogViewModel,
+                onBack = { showInferenceLog = false }
             )
         }
         else -> {
@@ -312,6 +323,13 @@ fun MainScreen(
                                         text = { Text("モーション学習") },
                                         onClick = {
                                             showMotionLearning = true
+                                            expanded = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("推論ログ") },
+                                        onClick = {
+                                            showInferenceLog = true
                                             expanded = false
                                         }
                                     )

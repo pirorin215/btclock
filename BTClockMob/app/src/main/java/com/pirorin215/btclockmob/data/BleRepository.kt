@@ -58,6 +58,7 @@ sealed class BleEvent {
     object Ready : BleEvent()
     data class Error(val message: String) : BleEvent()
     data class ImuChunk(val data: ByteArray) : BleEvent()   // Phase 14-B: IMUバイナリチャンク（0xAA55マジック）
+    data class InferenceLog(val line: String) : BleEvent()  // 推論ログ行（INFER:...・精度チューニング用）
 }
 
 @SuppressLint("MissingPermission")
@@ -222,6 +223,12 @@ class BleRepository(private val context: Context) {
                 val version = response.substringAfter("OK:version:")
                 Log.d(TAG, "Device version: $version")
                 _deviceVersion.value = version
+            }
+
+            // 推論ログ（INFER:...）は専用イベントへ分離（精度チューニング用・毎秒到着するため CharacteristicChanged と混ぜない）
+            if (response.startsWith("INFER:")) {
+                repositoryScope.launch { _events.emit(BleEvent.InferenceLog(response)) }
+                return
             }
 
             repositoryScope.launch {
@@ -486,13 +493,10 @@ class BleRepository(private val context: Context) {
         val dim = com.pirorin215.btclockmob.data.MotionFeatures.DIM
         val nameBytes = model.labels.map { it.toByteArray(Charsets.UTF_8) }
         var size = 2                              // N, D
-        size += 4 * dim * 2                       // featMean[D], featStd[D]
         for (nb in nameBytes) size += 1 + nb.size + 4 * dim
         val bb = java.nio.ByteBuffer.allocate(size).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         bb.put(model.patternCount.toByte())
         bb.put(dim.toByte())
-        for (v in model.featMean) bb.putFloat(v)
-        for (v in model.featStd) bb.putFloat(v)
         for (i in model.labels.indices) {
             val nb = nameBytes[i]
             bb.put(nb.size.toByte())

@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 40
+#define FIRMWARE_VERSION_PATCH 42
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -86,7 +86,11 @@ struct ImuSample {
 #define MAX_MOTION_PATTERNS      12                  // 保持上限
 #define MOTION_NAME_LEN          16                  // パターン名バッファ
 #define MOTION_INFER_INTERVAL_MS 1000UL              // 推論周期
-#define MOTION_DISTANCE_THRESH   3.0f                // 最近傍距離の閾値（正規化空間）。超過は「不明」
+#define MOTION_DISTANCE_THRESH   0.5f                // 最近傍距離の閾値（スケール正規化空間）。超過は「不明」。実機調整
+// 固定スケール正規化の除数（Android MotionFeatures.FEATURE_SCALE と完全一致させること）。
+// z-score はサンプル少＋高再現性で std が過小評価され破綻するため廃止。
+// 順序: accRms, accPeak, gyroRms, gyroPeak, tilt, jerkPk, gravAx, gravAy, gravAz
+static const float MOTION_FEATURE_SCALE[MOTION_FEAT_DIM] = {1.0f, 3.0f, 10.0f, 100.0f, 45.0f, 2.0f, 1.0f, 1.0f, 1.0f};
 #define MOTION_FRAME_MAGIC0      0xAA                // モデル受信フレームマジック
 #define MOTION_FRAME_MAGIC1      0x55
 #define MOTION_FRAME_STATUS_LAST 0xFF
@@ -244,13 +248,12 @@ extern unsigned long g_imuRecordStartMillis; // 録音開始時刻
 // Phase 2: モーション認識（bikeclock_esp32_motion.ino）
 extern MotionPattern g_motionPatterns[MAX_MOTION_PATTERNS];  // 学習済みパターン
 extern uint8_t g_motionPatternCount;                         // パターン数
-extern float g_motionFeatMean[MOTION_FEAT_DIM];              // z-score 正規化パラメータ
-extern float g_motionFeatStd[MOTION_FEAT_DIM];
 extern bool g_motionModelReady;                              // モデル受信済み
 extern char g_detectedPattern[MOTION_NAME_LEN];              // 直近の検出パターン名（空=不明）
 extern int g_motionDisplayIndex;                             // 7セグ表示中のパターン番号（-1=無効）
 extern unsigned long g_motionDisplayEndTime;                 // 7セグ表示の終了時刻
 extern bool g_parkedDisplayActive;                          // 駐車中: ePaperを詳細表示で維持（走行検知で解除）
+extern bool g_inferLogEnabled;                              // 推論ログBLE送信（INFER_LOG:1 でON・精度チューニング用）
 
 // --- Function Prototypes ---
 // 時刻計算

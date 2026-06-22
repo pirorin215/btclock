@@ -18,6 +18,14 @@ object MotionFeatures {
     /** 特徴量次元数（順序は extract() の戻り値に対応・固定） */
     const val DIM = 9
 
+    /**
+     * 固定スケール正規化の除数（各特徴量の物理的フルスケール想定）。
+     * マイコン（bikeclock.h MOTION_FEATURE_SCALE）と完全一致させること。
+     * z-score はサンプル少＋高再現性で std が過小評価され破綻するため廃止。
+     * 順序は DIM に準拠: accRms, accPeak, gyroRms, gyroPeak, tilt, jerkPk, gravAx, gravAy, gravAz
+     */
+    val FEATURE_SCALE = floatArrayOf(1f, 3f, 10f, 100f, 45f, 2f, 1f, 1f, 1f)
+
     private const val FS = 50f                     // サンプリングレート[Hz]
     private const val GRAV_FC = 0.5f               // 重力抽出LPFのカットオフ[Hz]
     private val GRAV_ALPHA: Float = run {
