@@ -205,6 +205,14 @@ void processFunctionKey() {
                             g_epaperRedrawRequested = true;
                             logPrint("MOTION", "FUNC pressed - exit parked display");
                         }
+                        // 通知表示中でもFUNC押下は尊重：通知を終了し普段通りに切替
+                        // （モード切替自体は上のロジックが担う。ここは通知オーバーライドの解除のみ）
+                        if (g_notificationActive) {
+                            g_notificationActive = false;
+                            g_notificationEndTime = 0;
+                            g_epaperRedrawRequested = true;
+                            logPrint("NOTIFY", "FUNC pressed - dismiss notification");
+                        }
                         g_lastModeChangeMillis = millis();
                         updateDisplayForCurrentMode();
                         logPrint("FUNC", "Mode changed to: %d", g_displayMode);
