@@ -64,11 +64,28 @@ class MotionLearningViewModel(
         viewModelScope.launch { repository.addSample(label, f.toList()) }
     }
 
-    /** 学習実行: 蓄積サンプルからラベル別重心＋正規化パラメータを計算して保存 */
-    fun train() {
+    /** 学習してマイコンへ送信（学習は一瞬・決定的論理なので分離の意味なし・統合） */
+    fun trainAndSend() {
+        if (samples.value.isEmpty()) {
+            _sendState.value = SendState.Error("学習データがありません。採取してください。")
+            return
+        }
+        if (connectionState.value !is ConnectionState.Connected) {
+            _sendState.value = SendState.Error("デバイスに接続されていません")
+            return
+        }
+        _sendState.value = SendState.Sending
         viewModelScope.launch {
             val trained = MotionModel.train(samples.value)
-            if (trained != null) repository.saveModel(trained)
+            if (trained == null) {
+                _sendState.value = SendState.Error("学習に失敗しました")
+                return@launch
+            }
+            repository.saveModel(trained)
+            val ok = bleRepository.sendMotionModel(trained)
+            _sendState.value =
+                if (ok) SendState.Success(trained.patternCount)
+                else SendState.Error("送信に失敗しました")
         }
     }
 
@@ -90,25 +107,6 @@ class MotionLearningViewModel(
         viewModelScope.launch {
             repository.clearSamples()
             repository.clearModel()
-        }
-    }
-
-    /** 学習済みモデルをマイコンへ送信 */
-    fun sendToMcu() {
-        val m = model.value ?: run {
-            _sendState.value = SendState.Error("学習済みモデルがありません。先に学習してください。")
-            return
-        }
-        if (connectionState.value !is ConnectionState.Connected) {
-            _sendState.value = SendState.Error("デバイスに接続されていません")
-            return
-        }
-        _sendState.value = SendState.Sending
-        viewModelScope.launch {
-            val ok = bleRepository.sendMotionModel(m)
-            _sendState.value =
-                if (ok) SendState.Success(m.patternCount)
-                else SendState.Error("送信に失敗しました")
         }
     }
 

@@ -18,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -147,21 +146,30 @@ fun MotionLearningScreen(
                             }
                         }
                     }
+                    // 学習データ・モデル全削除（データのそばに配置）
+                    if (samples.isNotEmpty() || model != null) {
+                        TextButton(onClick = { viewModel.clearAll() }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.Delete, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("学習データとモデルを全削除")
+                        }
+                    }
                 }
             }
 
-            // 学習ボタン
+            // 学習してマイコンへ送信（統合ボタン：学習は一瞬・決定的論理なので分離不要）
             Button(
-                onClick = { viewModel.train() },
+                onClick = { viewModel.trainAndSend() },
                 modifier = Modifier.fillMaxWidth(),
-                enabled = samples.isNotEmpty()
+                enabled = isConnected && samples.isNotEmpty() &&
+                    sendState !is MotionLearningViewModel.SendState.Sending
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null)
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("学習する（重心を計算）")
+                Text("学習してマイコンへ送信")
             }
 
-            // 学習済みモデル情報と送信
+            // 学習済みモデル情報（送信後に表示）
             model?.let { m ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -178,35 +186,19 @@ fun MotionLearningScreen(
                         }
                     }
                 }
-
-                Button(
-                    onClick = { viewModel.sendToMcu() },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = isConnected && sendState !is MotionLearningViewModel.SendState.Sending
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("マイコンへ送信")
-                }
-                when (val s = sendState) {
-                    is MotionLearningViewModel.SendState.Sending ->
-                        Text("送信中...", style = MaterialTheme.typography.bodySmall)
-                    is MotionLearningViewModel.SendState.Success ->
-                        Text("✅ 送信完了: ${s.patterns} パターン", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodySmall)
-                    is MotionLearningViewModel.SendState.Error ->
-                        Text("⚠ ${s.message}", color = Color(0xFFF44336), style = MaterialTheme.typography.bodySmall)
-                    MotionLearningViewModel.SendState.Idle -> { /* nothing */ }
-                }
             }
 
-            // 学習データ・モデル全削除
-            if (samples.isNotEmpty() || model != null) {
-                TextButton(onClick = { viewModel.clearAll() }, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Delete, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("学習データとモデルを全削除")
-                }
+            // 送信結果
+            when (val s = sendState) {
+                is MotionLearningViewModel.SendState.Sending ->
+                    Text("送信中...", style = MaterialTheme.typography.bodySmall)
+                is MotionLearningViewModel.SendState.Success ->
+                    Text("✅ 送信完了: ${s.patterns} パターン", color = Color(0xFF2E7D32), style = MaterialTheme.typography.bodySmall)
+                is MotionLearningViewModel.SendState.Error ->
+                    Text("⚠ ${s.message}", color = Color(0xFFF44336), style = MaterialTheme.typography.bodySmall)
+                MotionLearningViewModel.SendState.Idle -> { /* nothing */ }
             }
+
 
             // ラベル単位削除の確認ダイアログ
             labelToDelete?.let { lc ->
