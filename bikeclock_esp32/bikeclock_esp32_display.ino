@@ -51,6 +51,11 @@ const int TEST_PATTERN_COUNT = sizeof(TEST_PATTERNS) / sizeof(TEST_PATTERNS[0]);
 
 // --- モード別表示のディスパッチ ---
 void updateDisplayForCurrentMode() {
+    // 駐車中は ePaper とともに 7セグもモード4相当(秒表示)で維持（駐車オーバーライド）
+    if (g_parkedDisplayActive) {
+        updateSecondsDisplay();
+        return;
+    }
     switch (g_displayMode) {
         case DISPLAY_MODE_TIME:
             updateTimeDisplay();
