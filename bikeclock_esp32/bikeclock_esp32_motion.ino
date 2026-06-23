@@ -24,13 +24,18 @@ bool g_parkedDisplayActive = false;   // 駐車中は ePaper を詳細表示で�
 bool g_inferLogEnabled = false;       // 推論ログBLE送信（INFER_LOG:1 でON・精度チューニング用）
 bool g_motionModelSaveRequested = false;   // モデル保存要求（BLEコールバック→loop でFlash書き込み）
 
-// パターン名→固定番号（Android IMU_LABELS と同順: 駐車=0..アイドリング=5）
-static const char* MOTION_LABEL_TABLE[] = {"駐車", "解除", "走行", "カーブ", "停車", "アイドリング"};
+// パターン名→固定番号（3グループ×3: 駐車系=0, 走行開始系=1, 停車系=2）
+// indexOfLabel は i/3 でグループ番号を返す。7セグ表示・ePaper連携はグループ単位。
+static const char* MOTION_LABEL_TABLE[] = {
+    "駐車A", "駐車B", "駐車C",
+    "走行開始A", "走行開始B", "走行開始C",
+    "停車A", "停車B", "停車C"
+};
 #define MOTION_LABEL_COUNT (sizeof(MOTION_LABEL_TABLE) / sizeof(MOTION_LABEL_TABLE[0]))
 
 static int indexOfLabel(const char* name) {
     for (size_t i = 0; i < MOTION_LABEL_COUNT; i++) {
-        if (strcmp(name, MOTION_LABEL_TABLE[i]) == 0) return (int)i;
+        if (strcmp(name, MOTION_LABEL_TABLE[i]) == 0) return (int)(i / 3);  // グループ番号(0,1,2)
     }
     return -1;
 }
@@ -361,12 +366,12 @@ void updateMotionInference() {
                 g_motionDisplayIndex = idx;
                 g_motionDisplayEndTime = g_currentMillis + MOTION_DISPLAY_MS;
             }
-            // ePaper 駐車表示連携：駐車で詳細表示へ、走行で時計へ戻す
-            if (strcmp(s_confirmed, "駐車") == 0 && !g_parkedDisplayActive) {
+            // ePaper 駐車表示連携：駐車系(idx=0)で詳細表示へ、走行開始系(idx=1)で時計へ戻す
+            if (idx == 0 && !g_parkedDisplayActive) {
                 g_parkedDisplayActive = true;
                 g_epaperRedrawRequested = true;
                 logPrint("MOTION", "parked -> ePaper detail");
-            } else if (strcmp(s_confirmed, "走行") == 0 && g_parkedDisplayActive) {
+            } else if (idx == 1 && g_parkedDisplayActive) {
                 g_parkedDisplayActive = false;
                 g_epaperRedrawRequested = true;
                 logPrint("MOTION", "riding -> ePaper clock");

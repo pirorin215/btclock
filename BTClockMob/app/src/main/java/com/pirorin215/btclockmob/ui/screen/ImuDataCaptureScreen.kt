@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import com.pirorin215.btclockmob.data.ConnectionState
 import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
 
-private val IMU_LABELS = listOf("駐車", "解除", "走行", "カーブ", "停車", "アイドリング")
+private val IMU_LABELS = listOf("駐車A", "駐車B", "駐車C", "走行開始A", "走行開始B", "走行開始C", "停車A", "停車B", "停車C")
 
 /**
  * Phase 14-B: IMU データ採取画面

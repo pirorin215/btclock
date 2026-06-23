@@ -74,6 +74,7 @@ Seeed XIAO BLE (nRF52840) 版 `bikeclock/` を ESP32-S3 SuperMini へ移植。
 - Phase 15 関連 — g_motionPatterns の .bss 配置重複（リングバッファ破壊）をヒープ割当で解消 ✅（v2.0.46）
 - Phase 15 関連 — スタックオーバーフロー解消: updateMotionInference を独立FreeRTOSタスク(16KB)へ分離（extractFeatures のスタック肥大で loopTask 8KB超過→変数破壊・ハング） ✅（v2.0.47）
 - Phase 15 関連 — extractFeatures の return true 欠落修正（全クラッシュの真因・未定義動作でスタック破壊）＋logPrintミューテックス化（マルチタスク安全） ✅（v2.0.48）
+- Phase 15 関連 — ラベル構成を9ラベル3グループ(駐車A/B/C・走行開始A/B/C・停車A/B/C)に再編成・3重心でロバスト化 ✅（v2.0.49）
 
 ### その他（実質完了）
 - `NVIC_SystemReset()` → `ESP.restart()` 全置換 ✅（移植時点で対応済み）
