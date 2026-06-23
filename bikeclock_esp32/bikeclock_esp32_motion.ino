@@ -21,6 +21,7 @@ char g_detectedPattern[MOTION_NAME_LEN] = "";
 int g_motionDisplayIndex = -1;
 unsigned long g_motionDisplayEndTime = 0;
 bool g_parkedDisplayActive = false;   // 駐車中は ePaper を詳細表示で維持（走行検知で解除）
+unsigned long g_parkedDisplayStartMillis = 0;   // 駐車詳細表示の開始時刻（PARKED_DISPLAY_TIMEOUT_MS で自動復帰）
 bool g_inferLogEnabled = false;       // 推論ログBLE送信（INFER_LOG:1 でON・精度チューニング用）
 bool g_motionModelSaveRequested = false;   // モデル保存要求（BLEコールバック→loop でFlash書き込み）
 
@@ -369,6 +370,7 @@ void updateMotionInference() {
             // ePaper 駐車表示連携：駐車系(idx=0)で詳細表示へ、走行開始系(idx=1)で時計へ戻す
             if (idx == 0 && !g_parkedDisplayActive) {
                 g_parkedDisplayActive = true;
+                g_parkedDisplayStartMillis = g_currentMillis;
                 g_epaperRedrawRequested = true;
                 logPrint("MOTION", "parked -> ePaper detail");
             } else if (idx == 1 && g_parkedDisplayActive) {

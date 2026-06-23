@@ -192,12 +192,16 @@ void processFunctionKey() {
                         updateTestDisplay();
                         logPrint("TEST", "Display pattern cycle: %d", g_testDisplayIndex);
                     } else {
-                        // 通常表示（TIME -> DATE -> WEEKDAY）
-                        if (g_displayMode >= DISPLAY_MODE_WEEKDAY) {
-                            g_displayMode = DISPLAY_MODE_TIME;
-                        } else {
-                            g_displayMode = (DisplayMode)(g_displayMode + 1);
+                        // 通常表示: FUNCモードを1つ進める（FUNC_MODE_TABLE が循環順の唯一の正）
+                        int curFuncIdx = 0;
+                        for (int i = 0; i < FUNC_MODE_COUNT; i++) {
+                            if (FUNC_MODE_TABLE[i].segDisplay == g_displayMode) {
+                                curFuncIdx = i;
+                                break;
+                            }
                         }
+                        int nextFuncIdx = (curFuncIdx + 1) % FUNC_MODE_COUNT;
+                        g_displayMode = FUNC_MODE_TABLE[nextFuncIdx].segDisplay;
 
                         // 駐車中表示中でもFUNC押下は尊重：駐車表示を解除し普段通りに切替
                         if (g_parkedDisplayActive) {

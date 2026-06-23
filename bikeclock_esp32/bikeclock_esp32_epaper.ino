@@ -545,6 +545,52 @@ static void drawEpaperDetail() {
     } while (g_epaper.nextPage());
 }
 
+// 詳細大表示（モード4）: 開始 / 経過 / 現在 を2倍拡大(b16→32px相当)で3行表示。
+// 日付は画面幅の制約で省略（モード3 詳細表示で確認可）。スナップショット（切替時1回のみ描画）。
+static void drawEpaperDetailLarge() {
+    const int scale = 2;
+
+    g_epaper.setFullWindow();
+    g_epaper.firstPage();
+    do {
+        g_epaper.fillScreen(GxEPD_WHITE);
+
+        ScaledGFX scaledGfx(g_epaper, scale);
+        u8g2Fonts.begin(scaledGfx);
+        u8g2Fonts.setFont(u8g2_font_b16_t_japanese3);
+        u8g2Fonts.setFontMode(1);
+        u8g2Fonts.setForegroundColor(GxEPD_BLACK);
+        u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+
+        const int16_t lh = 19;   // 16pxフォント + 余白
+        int16_t y = 18;          // 1行目ベースライン（仮想61px内で3行を中央寄せ）
+        char buf[32];
+
+        // ① 開始時刻（起動時刻 "YYYY/MM/DD HH:MM" の HH:MM を抽出）
+        const char* st = g_startupTimeStr[0] ? (g_startupTimeStr + 11) : "--:--";
+        snprintf(buf, sizeof(buf), "開始 %s", st);
+        u8g2Fonts.setCursor(3, y);
+        u8g2Fonts.print(buf);
+        y += lh;
+
+        // ② 経過時間（電源ONから、millisベース）
+        int rh, rm;
+        getRideTime(&rh, &rm);
+        snprintf(buf, sizeof(buf), "経過 %d時間%02d分", rh, rm);
+        u8g2Fonts.setCursor(3, y);
+        u8g2Fonts.print(buf);
+        y += lh;
+
+        // ③ 現在時刻（HH:MM:SS）
+        snprintf(buf, sizeof(buf), "現在 %02d:%02d:%02d",
+                 getHours(), getMinutes(), getSeconds());
+        u8g2Fonts.setCursor(3, y);
+        u8g2Fonts.print(buf);
+
+        u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
+    } while (g_epaper.nextPage());
+}
+
 // 未同期画面
 static void drawEpaperUnsynced() {
     g_epaper.setFullWindow();
@@ -596,13 +642,14 @@ void setupEpaper() {
     drawEpaperSplash();
 }
 
-// 7セグ表示モード → ePaper表示ビュー の対応
+// 7セグ表示モード → ePaper表示ビュー の対応（FUNC_MODE_TABLE から導出・唯一の正）
 static EpaperView displayModeToEpaperView(DisplayMode mode) {
-    switch (mode) {
-        case DISPLAY_MODE_DATE:    return EP_VIEW_NOTIFICATION;
-        case DISPLAY_MODE_WEEKDAY: return EP_VIEW_DETAIL;
-        default:                   return EP_VIEW_CLOCK;  // TIME / TEST / その他は標準
+    for (int i = 0; i < FUNC_MODE_COUNT; i++) {
+        if (FUNC_MODE_TABLE[i].segDisplay == mode) {
+            return FUNC_MODE_TABLE[i].epaperView;
+        }
     }
+    return EP_VIEW_CLOCK;  // TEST / その他は標準
 }
 
 // loop から毎回呼ばれる。表示すべきビューまたは内容が変わった時だけ描画。
@@ -618,8 +665,9 @@ void updateEpaperDisplay() {
         logPrint("NOTIFY", "Timeout - returning to clock");
         g_notificationActive = false;
         g_epaperRedrawRequested = true;
-        // ベースが DATE/WEEKDAY なら時計に戻す（合意: 通知終了で常に標準時計へ）
-        if (g_displayMode == DISPLAY_MODE_DATE || g_displayMode == DISPLAY_MODE_WEEKDAY) {
+        // ベースが DATE/WEEKDAY/SECONDS なら時計に戻す（合意: 通知終了で常に標準時計へ）
+        if (g_displayMode == DISPLAY_MODE_DATE || g_displayMode == DISPLAY_MODE_WEEKDAY ||
+            g_displayMode == DISPLAY_MODE_SECONDS) {
             g_displayMode = DISPLAY_MODE_TIME;
             g_lastModeChangeMillis = g_currentMillis;
         }
@@ -651,7 +699,7 @@ void updateEpaperDisplay() {
 
     const EpaperView target = displayModeToEpaperView(g_displayMode);
     EpaperView effective = target;
-    if (g_parkedDisplayActive) effective = EP_VIEW_DETAIL;   // 駐車中は詳細表示で維持
+    if (g_parkedDisplayActive) effective = EP_VIEW_DETAIL_LARGE;   // 駐車中は詳細大(モード4)で維持
 
     // 標準ビュー: 分/日変化でも更新（時計は毎分更新）
     if (effective == EP_VIEW_CLOCK) {
@@ -674,6 +722,8 @@ void updateEpaperDisplay() {
     if (effective != ep_lastView) {
         if (effective == EP_VIEW_NOTIFICATION) {
             drawEpaperNotification(g_notificationText);
+        } else if (effective == EP_VIEW_DETAIL_LARGE) {
+            drawEpaperDetailLarge();
         } else {  // EP_VIEW_DETAIL
             drawEpaperDetail();
         }

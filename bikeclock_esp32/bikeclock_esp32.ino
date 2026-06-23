@@ -216,8 +216,9 @@ void updateDisplayAndLedState() {
         }
     }
 
-    // オートリターン (DATE / WEEKDAY モードで 5秒無操作で TIME に戻る)
-    if ((g_displayMode == DISPLAY_MODE_DATE || g_displayMode == DISPLAY_MODE_WEEKDAY) &&
+    // オートリターン (DATE / WEEKDAY / SECONDS モードで 10秒無操作で TIME に戻る)
+    if ((g_displayMode == DISPLAY_MODE_DATE || g_displayMode == DISPLAY_MODE_WEEKDAY ||
+         g_displayMode == DISPLAY_MODE_SECONDS) &&
         (g_currentMillis - g_lastModeChangeMillis >= MODE_AUTO_RETURN_TIMEOUT_MS)) {
         logPrint("MODE", "Auto-returning to time mode (timeout)");
         g_displayMode = DISPLAY_MODE_TIME;
@@ -225,6 +226,13 @@ void updateDisplayAndLedState() {
         updateDisplayForCurrentMode();
         updateLedStateBasedOnStatus();
         return;
+    }
+    // 駐車詳細表示のタイムアウト (20秒経過で時計表示へ戻す)
+    if (g_parkedDisplayActive &&
+        g_currentMillis - g_parkedDisplayStartMillis >= PARKED_DISPLAY_TIMEOUT_MS) {
+        g_parkedDisplayActive = false;
+        g_epaperRedrawRequested = true;
+        logPrint("MOTION", "parked display timeout -> clock");
     }
 
     if (!g_timeSynced && g_displayMode != DISPLAY_MODE_TEST) {

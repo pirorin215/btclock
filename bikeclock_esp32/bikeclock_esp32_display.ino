@@ -61,6 +61,9 @@ void updateDisplayForCurrentMode() {
         case DISPLAY_MODE_WEEKDAY:
             updateWeekdayDisplay();
             break;
+        case DISPLAY_MODE_SECONDS:
+            updateSecondsDisplay();
+            break;
         case DISPLAY_MODE_TEST:
             updateTestDisplay();
             break;
@@ -110,6 +113,17 @@ void updateWeekdayDisplay() {
 
     uint8_t data[] = { 0x00, 0x00, 0x00, 0x00 };
     encodeStringToSegments(name, data);
+    g_display->setSegments(data);
+}
+
+// --- 秒表示 SS（モード4: 現在秒を右2桁に表示）---
+void updateSecondsDisplay() {
+    int seconds = getSeconds();
+
+    uint8_t data[] = { 0x00, 0x00, 0x00, 0x00 };
+    data[2] = g_display->encodeDigit(seconds / 10);
+    data[3] = g_display->encodeDigit(seconds % 10);
+
     g_display->setSegments(data);
 }
 

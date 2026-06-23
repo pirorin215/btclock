@@ -126,21 +126,45 @@ enum DisplayMode {
     DISPLAY_MODE_TIME,      // HH:MM
     DISPLAY_MODE_DATE,      // MMDD
     DISPLAY_MODE_WEEKDAY,   // MON/TUE/...
+    DISPLAY_MODE_SECONDS,   // SS（モード4: 秒表示）
     DISPLAY_MODE_TEST,      // テスト（Phase 3 で使用）
     DISPLAY_MODE_COUNT
 };
 
-// --- ePaper 表示ビュー（Phase 9: 7セグ表示モードに連動）---
-//   7seg=TIME    → EP_VIEW_CLOCK（標準）
-//   7seg=DATE    → EP_VIEW_NOTIFICATION（通知。Phase 9 は「通知なし」スタブ）
-//   7seg=WEEKDAY → EP_VIEW_DETAIL（詳細: 開始時刻/経過/現在日時/HIDキー）
+// --- ePaper 表示ビュー ---
+// FUNCモードとの対応（どのモードでどのビューか）は下記 FUNC_MODE_TABLE が唯一の正。
+// 通知・駐車はこのビュー選択とは別の一時オーバーライド（下記 g_notificationActive / g_parkedDisplayActive）。
 enum EpaperView {
     EP_VIEW_NONE = -1,        // 未描画（初回強制描画用の番兵）
     EP_VIEW_CLOCK,            // 標準（7seg = TIME）
     EP_VIEW_NOTIFICATION,     // 通知（7seg = DATE）
     EP_VIEW_DETAIL,           // 詳細（7seg = WEEKDAY）
+    EP_VIEW_DETAIL_LARGE,     // 詳細大（モード4: 開始/経過/現在 を大フォント）
     EP_VIEW_UNSYNCED,         // 未同期
-    EP_VIEW_PARKED            // 駐車中（Phase 14: 詳細表示を維持・電源OFF後の残像対策。描画統合は 14-C）
+};
+// --- FUNCキーで切り替わる表示モード（統一名: モード1 / モード2 / モード3 / モード4）---
+// 1つのFUNCモードが、7セグ(DisplayMode) と ePaper(EpaperView) の両方の表示内容を同時に規定する。
+// モードの追加・変更は FUNC_MODE_TABLE を唯一の正とする。
+enum FuncMode {
+    FUNC_MODE_1,    // モード1
+    FUNC_MODE_2,    // モード2
+    FUNC_MODE_3,    // モード3
+    FUNC_MODE_4,    // モード4
+    FUNC_MODE_COUNT
+};
+
+// FUNCモード → 各ディスプレイ表示 のバインディング表（表示内容の唯一の正）
+struct FuncModeBinding {
+    FuncMode    funcMode;     // 統一モード名
+    DisplayMode segDisplay;   // 7セグ表示内容
+    EpaperView  epaperView;   // ePaper表示内容
+};
+
+static const FuncModeBinding FUNC_MODE_TABLE[FUNC_MODE_COUNT] = {
+    { FUNC_MODE_1, DISPLAY_MODE_TIME,    EP_VIEW_CLOCK        },  // モード1: 時刻(HH:MM)  / 標準時計
+    { FUNC_MODE_2, DISPLAY_MODE_DATE,    EP_VIEW_NOTIFICATION },  // モード2: 日付(MMDD)   / 通知
+    { FUNC_MODE_3, DISPLAY_MODE_WEEKDAY, EP_VIEW_DETAIL       },  // モード3: 曜日(MON/TUE)/ 詳細
+    { FUNC_MODE_4, DISPLAY_MODE_SECONDS, EP_VIEW_DETAIL_LARGE },  // モード4: 秒(SS)        / 詳細大(開始/経過/現在)
 };
 
 // --- Date Cache (日付計算のキャッシュ) ---
@@ -205,7 +229,7 @@ extern bool g_showingCountdown;
 extern uint16_t g_displayingKeyCode;
 extern unsigned long g_keyCodeDisplayEndTime;
 extern unsigned long g_lastModeChangeMillis;
-#define MODE_AUTO_RETURN_TIMEOUT_MS 5000
+#define MODE_AUTO_RETURN_TIMEOUT_MS 10000
 extern int g_testDisplayIndex;
 
 // --- スマホ通知表示（Phase 10: BLE受信→ePaper一時表示）---
@@ -266,7 +290,10 @@ extern bool g_motionModelReady;                              // モデル受信�
 extern char g_detectedPattern[MOTION_NAME_LEN];              // 直近の検出パターン名（空=不明）
 extern int g_motionDisplayIndex;                             // 7セグ表示中のパターン番号（-1=無効）
 extern unsigned long g_motionDisplayEndTime;                 // 7セグ表示の終了時刻
+// 駐車詳細表示の自動復帰タイムアウト（20秒経過で時計表示へ戻す）
+#define PARKED_DISPLAY_TIMEOUT_MS 20000UL
 extern bool g_parkedDisplayActive;                          // 駐車中: ePaperを詳細表示で維持（走行検知で解除）
+extern unsigned long g_parkedDisplayStartMillis;            // 駐車詳細表示の開始時刻（millis()）
 extern bool g_inferLogEnabled;                              // 推論ログBLE送信（INFER_LOG:1 でON・精度チューニング用）
 extern bool g_motionModelSaveRequested;   // モデル保存要求（BLEコールバック→loopでFlash書き込み）
 
@@ -284,6 +311,7 @@ int getYear();
 void updateTimeDisplay();
 void updateDateDisplay();
 void updateWeekdayDisplay();
+void updateSecondsDisplay();
 void updateDisplayForCurrentMode();
 void displayVersion();
 void encodeStringToSegments(const char* str, uint8_t* data);
