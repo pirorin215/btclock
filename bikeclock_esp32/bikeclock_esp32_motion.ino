@@ -132,20 +132,18 @@ static void parseAndStoreModel(const uint8_t* buf, size_t len) {
         logPrint("MOTION", "parse error: patterns=%u > %d", n, MAX_MOTION_PATTERNS);
         sendResponse("ERROR: too many patterns"); return;
     }
-    // 長さ検証
-    size_t check = 2;   // N, D（featMean/featStd は廃止）
-    size_t p = check;
+    // 長さ検証（p = 期待バイト長。nameLen(1)+name(nl)+centroid(4*d) を積算）
+    size_t p = 2;   // N, D（featMean/featStd は廃止）
     for (int i = 0; i < n; i++) {
         if (p >= len) {
             logPrint("MOTION", "truncated(loop): i=%d p=%u len=%u", i, (unsigned)p, (unsigned)len);
             sendResponse("ERROR: motion model truncated"); return;
         }
         uint8_t nl = buf[p];
-        check += 1 + nl + (size_t)4 * d;
         p += 1 + nl + (size_t)4 * d;
     }
-    if (check > len) {
-        logPrint("MOTION", "truncated(final): check=%u len=%u", (unsigned)check, (unsigned)len);
+    if (p > len) {
+        logPrint("MOTION", "truncated(final): p=%u len=%u", (unsigned)p, (unsigned)len);
         sendResponse("ERROR: motion model truncated"); return;
     }
 

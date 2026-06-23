@@ -45,7 +45,6 @@
 
 // サンプリング設定
 #define IMU_SAMPLE_INTERVAL_MS  20    // 50Hz（loop=100Hz から間引き）
-#define IMU_DUMP_INTERVAL_MS    100   // 10Hz ダンプ（シリアル溢れ防止）
 
 // --- Global Variables ---
 bool g_imuEnabled = false;
