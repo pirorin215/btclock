@@ -33,6 +33,50 @@ uint16_t g_displayingKeyCode = 0;
 unsigned long g_keyCodeDisplayEndTime = 0;
 unsigned long g_lastModeChangeMillis = 0;
 int g_testDisplayIndex = TEST_DISPLAY_MIN_INDEX;
+volatile uint32_t g_funcClicks = 0;               // funcInputTask→loop: 未消費クリック数
+volatile uint32_t g_lastFuncEdgeMs = 0;           // 最終クリック(解放)確定時刻: ePaper描画合成用
+volatile bool     g_funcLongPressPending = false; // funcInputTask→loop: 長押し通知
+static portMUX_TYPE g_funcMux = portMUX_INITIALIZER_UNLOCKED;
+
+// FUNC入力デバウンスタスク(サンプリング統合方式):
+//   5ms周期でレベルをサンプリングし、N回連続一致で確定 → チャタリング(押下/解放バウンス)を完全無視。
+//   独立タスク(core0)のため、ePaper描画でloopTask(core1)がブロックされても
+//   プリエンプト動作し、押下を取りこぼさない。
+//   短押し(2秒未満)の解放でクリック計上。長押し(2秒以上)は g_funcLongPressPending で通知(クリックにはしない)。
+void funcInputTask(void* arg) {
+    const TickType_t SAMPLE_TICKS = pdMS_TO_TICKS(FUNC_SAMPLE_MS);
+    const int STABLE_REQ = FUNC_DEBOUNCE_SAMPLES;
+    int debounced = HIGH;     // 確定レベル(起動時=解放)
+    int cnt = 0;              // 連続不一致カウンタ
+    uint32_t pressMs = 0;
+    bool longPressSignaled = false;
+    for (;;) {
+        int raw = digitalRead(SWITCH_FUNC_GPIO);
+        if (raw == debounced) {
+            cnt = 0;
+        } else if (++cnt >= STABLE_REQ) {
+            debounced = raw;            // 新レベルが安定 → 確定
+            cnt = 0;
+            if (debounced == LOW) {
+                pressMs = millis();     // 押下確定
+                longPressSignaled = false;
+            } else if (!longPressSignaled) {
+                // 解放確定: 長押しでなければクリック計上
+                portENTER_CRITICAL(&g_funcMux);
+                g_funcClicks++;
+                g_lastFuncEdgeMs = millis();
+                portEXIT_CRITICAL(&g_funcMux);
+            }
+        }
+        // 長押し検出(保持中): main loopへ通知
+        if (debounced == LOW && !longPressSignaled &&
+            millis() - pressMs >= FUNC_LONGPRESS_MS) {
+            longPressSignaled = true;
+            g_funcLongPressPending = true;
+        }
+        vTaskDelay(SAMPLE_TICKS);
+    }
+}
 
 // ※ sendHidKeyPress/Release は bikeclock_esp32_hid.ino（Phase 6）に実装
 
@@ -45,6 +89,7 @@ void setupSwitches() {
         pinMode(hidSwitches[i].gpio, INPUT_PULLUP);
     }
     pinMode(SWITCH_FUNC_GPIO, INPUT_PULLUP);
+    xTaskCreatePinnedToCore(funcInputTask, "funcIn", 4096, NULL, 1, NULL, 0);  // core0で独立動作(ePaper描画ブロックに影響されない)
     
     delay(10); // プルアップ上昇時間待ち
     
@@ -143,119 +188,95 @@ bool performCountdown(int startSeconds, int totalSeconds) {
 }
 
 // --- FUNCキー（モード切替）の処理 ---
+// 入力検出(デバウンス＋長押し判定)は funcInputTask が担う。ここではイベント消費のみ。
 void processFunctionKey() {
-    static unsigned long lastDebounce = 0;
-    static bool lastState = HIGH;
-    static bool debouncedState = HIGH;
-    static bool inLongPressSequence = false;
-    static unsigned long pressStartTime = 0;
+    // === 長押し(>=2秒)通知 → メンテナンスカウントダウン ===
+    if (g_funcLongPressPending) {
+        g_funcLongPressPending = false;
+        portENTER_CRITICAL(&g_funcMux);
+        g_funcClicks = 0;                          // 長押し中のクリックは無効
+        portEXIT_CRITICAL(&g_funcMux);
+        g_showingCountdown = true;
+        logPrint("FUNC", "Long press detected - starting countdown");
 
-    bool reading = digitalRead(SWITCH_FUNC_GPIO);
-
-    // チャタリング防止
-    if (reading != lastState) {
-        lastDebounce = millis();
-        lastState = reading;
+        bool completed = performCountdown(3, 3);
+        if (completed) {
+            logPrint("FUNC", "Maintenance mode triggered successfully");
+            g_display->showNumberDec(0000);         // "0000" 表示
+            setLedColor(true, false, false);        // 赤LED
+            delay(500);
+            enterMaintenanceMode();
+        } else {
+            logPrint("FUNC", "Countdown aborted by user release");
+            updateDisplayForCurrentMode();          // 中断時は通常表示へ復帰
+            updateLedStateBasedOnStatus();
+        }
+        g_showingCountdown = false;
+        return;
     }
 
-    if ((millis() - lastDebounce) > HID_DEBOUNCE_DELAY_MS && reading != debouncedState) {
-        debouncedState = reading;
+    // === クリック消費（funcInputTaskが計上した解放クリック。連打分はまとめて処理）===
+    if (g_funcClicks == 0) return;
 
-        if (debouncedState == LOW) {
-            // FUNCキー押下
-            pressStartTime = millis();
-            inLongPressSequence = false;
-            logPrint("FUNC", "FUNC key pressed");
-        } else {
-            // FUNCキー解放
-            if (!inLongPressSequence) {
-                // 短押し処理
-                if (g_maintenanceState.active) {
-                    // メンテナンスモード中：メニューの切り替え
-                    logPrint("FUNC", "Maintenance menu cycle");
-                    g_maintenanceState.selectedMenuIndex++;
-                    if (g_maintenanceState.selectedMenuIndex >= MAINTENANCE_MENU_COUNT) {
-                        g_maintenanceState.selectedMenuIndex = 0;
-                    }
-                    g_maintenanceState.currentMenu = static_cast<MaintenanceMenu>(g_maintenanceState.selectedMenuIndex);
-                    g_maintenanceState.lastInteractionMillis = millis();
-                    updateMaintenanceDisplay();
-                } else {
-                    // 通常モード：表示モードの切り替え
-                    logPrint("FUNC", "Short press - Mode change triggered");
-                    if (g_displayMode == DISPLAY_MODE_TEST) {
-                        // テスト表示パターンの切り替え
-                        g_testDisplayIndex++;
-                        if (g_testDisplayIndex > TEST_PATTERN_COUNT) {
-                            g_testDisplayIndex = TEST_DISPLAY_MIN_INDEX;
-                        }
-                        updateTestDisplay();
-                        logPrint("TEST", "Display pattern cycle: %d", g_testDisplayIndex);
-                    } else {
-                        // 通常表示: FUNCモードを1つ進める（FUNC_MODE_TABLE が循環順の唯一の正）
-                        int curFuncIdx = 0;
-                        for (int i = 0; i < FUNC_MODE_COUNT; i++) {
-                            if (FUNC_MODE_TABLE[i].segDisplay == g_displayMode) {
-                                curFuncIdx = i;
-                                break;
-                            }
-                        }
-                        int nextFuncIdx = (curFuncIdx + 1) % FUNC_MODE_COUNT;
-                        g_displayMode = FUNC_MODE_TABLE[nextFuncIdx].segDisplay;
+    portENTER_CRITICAL(&g_funcMux);
+    uint32_t clicks = g_funcClicks;
+    g_funcClicks = 0;
+    portEXIT_CRITICAL(&g_funcMux);
+    if (clicks == 0) return;
 
-                        // 駐車中表示中でもFUNC押下は尊重：駐車表示を解除し普段通りに切替
-                        if (g_parkedDisplayActive) {
-                            g_parkedDisplayActive = false;
-                            g_epaperRedrawRequested = true;
-                            logPrint("MOTION", "FUNC pressed - exit parked display");
-                        }
-                        // 通知表示中でもFUNC押下は尊重：通知を終了し普段通りに切替
-                        // （モード切替自体は上のロジックが担う。ここは通知オーバーライドの解除のみ）
-                        if (g_notificationActive) {
-                            g_notificationActive = false;
-                            g_notificationEndTime = 0;
-                            g_epaperRedrawRequested = true;
-                            logPrint("NOTIFY", "FUNC pressed - dismiss notification");
-                        }
-                        g_lastModeChangeMillis = millis();
-                        updateDisplayForCurrentMode();
-                        logPrint("FUNC", "Mode changed to: %d", g_displayMode);
-                    }
-                }
-            } else {
-                // カウントダウンシーケンス中に離されたら通常表示に戻す
-                updateDisplayForCurrentMode();
-                updateLedStateBasedOnStatus();
+    logPrint("FUNC", "Draining %lu FUNC click(s)", (unsigned long)clicks);
+    for (uint32_t i = 0; i < clicks; i++) {
+        if (g_maintenanceState.active) {
+            // メンテナンス中: メニュー切替
+            g_maintenanceState.selectedMenuIndex++;
+            if (g_maintenanceState.selectedMenuIndex >= MAINTENANCE_MENU_COUNT) {
+                g_maintenanceState.selectedMenuIndex = 0;
             }
-            inLongPressSequence = false;
-            g_showingCountdown = false;
+            g_maintenanceState.currentMenu = static_cast<MaintenanceMenu>(g_maintenanceState.selectedMenuIndex);
+            g_maintenanceState.lastInteractionMillis = millis();
+            updateMaintenanceDisplay();
+        } else if (g_displayMode == DISPLAY_MODE_TEST) {
+            // テスト表示パターンの切り替え
+            g_testDisplayIndex++;
+            if (g_testDisplayIndex > TEST_PATTERN_COUNT) {
+                g_testDisplayIndex = TEST_DISPLAY_MIN_INDEX;
+            }
+        } else {
+            // 通常表示: FUNCモードを1つ進める（FUNC_MODE_TABLE が循環順の唯一の正）
+            int curFuncIdx = 0;
+            for (int j = 0; j < FUNC_MODE_COUNT; j++) {
+                if (FUNC_MODE_TABLE[j].segDisplay == g_displayMode) {
+                    curFuncIdx = j;
+                    break;
+                }
+            }
+            int nextFuncIdx = (curFuncIdx + 1) % FUNC_MODE_COUNT;
+            g_displayMode = FUNC_MODE_TABLE[nextFuncIdx].segDisplay;
+            g_lastModeChangeMillis = g_currentMillis;
         }
     }
 
-    // 長押し（2秒）でカウントダウン開始
-    if (debouncedState == LOW && !inLongPressSequence) {
-        unsigned long pressDuration = millis() - pressStartTime;
-
-        if (pressDuration >= 2000) {
-            inLongPressSequence = true;
-            g_showingCountdown = true;
-            logPrint("FUNC", "Long press detected - starting countdown");
-
-            // カウントダウン開始 (3秒)
-            bool completed = performCountdown(3, 3);
-
-            if (completed) {
-                logPrint("FUNC", "Maintenance mode triggered successfully");
-                g_display->showNumberDec(0000);  // "0000" 表示
-                setLedColor(true, false, false); // 赤LED
-                delay(500);
-
-                enterMaintenanceMode();
-            } else {
-                logPrint("FUNC", "Countdown aborted by user release");
-                inLongPressSequence = false;
-                g_showingCountdown = false;
+    // バースト後の共通処理: 7セグ即時更新 + オーバーライド解除
+    if (!g_maintenanceState.active) {
+        if (g_displayMode == DISPLAY_MODE_TEST) {
+            updateTestDisplay();
+            logPrint("TEST", "Display pattern cycle: %d", g_testDisplayIndex);
+        } else {
+            // 駐車中表示中でもFUNC押下は尊重: 駐車表示を解除し普段通りに切替
+            if (g_parkedDisplayActive) {
+                g_parkedDisplayActive = false;
+                g_epaperRedrawRequested = true;
+                logPrint("MOTION", "FUNC pressed - exit parked display");
             }
+            // 通知表示中でもFUNC押下は尊重: 通知を終了し普段通りに切替
+            if (g_notificationActive) {
+                g_notificationActive = false;
+                g_notificationEndTime = 0;
+                g_epaperRedrawRequested = true;
+                logPrint("NOTIFY", "FUNC pressed - dismiss notification");
+            }
+            updateDisplayForCurrentMode();
+            logPrint("FUNC", "Mode changed to: %d", g_displayMode);
         }
     }
 }

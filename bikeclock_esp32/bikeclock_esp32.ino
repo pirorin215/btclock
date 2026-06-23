@@ -28,6 +28,7 @@ unsigned long g_lastCounterMillis = 0;
 DateCache g_dateCache = {0, 0, 0, 0, 0, false};
 unsigned long g_startupMillis = 0;
 char g_startupTimeStr[EP_STARTUP_TIME_LEN] = "";   // 初回時刻同期時に "YYYY/MM/DD HH:MM" を記録
+int g_startupWeekday = -1;   // 初回時刻同期時に getWeekday() を記録（-1=未記録）
 
 // --- スマホ通知表示状態（Phase 10） ---
 // BLE(NimBLE別タスク)の onWrite で書き込み、loop(main task)で読む。
@@ -175,6 +176,7 @@ void recordStartupTime() {
     if (!g_timeSynced) return;                  // 未同期では記録しない
     snprintf(g_startupTimeStr, EP_STARTUP_TIME_LEN, "%04d/%02d/%02d %02d:%02d",
              getYear(), getMonth(), getDay(), getHours(), getMinutes());
+    g_startupWeekday = getWeekday();   // 開始日の曜日を記録（日をまたいでも開始日付表示に使用）
     logPrint("TIME", "Startup time recorded: %s", g_startupTimeStr);
 }
 

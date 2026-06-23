@@ -545,8 +545,9 @@ static void drawEpaperDetail() {
     } while (g_epaper.nextPage());
 }
 
-// 詳細大表示（モード4）: 開始 / 経過 / 現在 を2倍拡大(b16→32px相当)で3行表示。
-// 日付は画面幅の制約で省略（モード3 詳細表示で確認可）。スナップショット（切替時1回のみ描画）。
+// 詳細大表示（モード4）: 日付＋曜日 / 経過 / 開始〜現在 を2倍拡大(b16→32px相当)で3行表示。
+// 日付は画面幅(250px)の制約でスラッシュ短縮形 "2026/06/24 水" とし32pxに収める。
+// スナップショット（FUNC切替時に1回のみ描画・以降更新なし）。
 static void drawEpaperDetailLarge() {
     const int scale = 2;
 
@@ -564,11 +565,15 @@ static void drawEpaperDetailLarge() {
 
         const int16_t lh = 19;   // 16pxフォント + 余白
         int16_t y = 18;          // 1行目ベースライン（仮想61px内で3行を中央寄せ）
-        char buf[32];
+        char buf[40];
 
-        // ① 開始時刻（起動時刻 "YYYY/MM/DD HH:MM" の HH:MM を抽出）
-        const char* st = g_startupTimeStr[0] ? (g_startupTimeStr + 11) : "--:--";
-        snprintf(buf, sizeof(buf), "開始 %s", st);
+        // ① 開始日付＋曜日（起動時刻の日付。日をまたいでも開始日。例: "2026/06/24 水"）
+        if (g_startupTimeStr[0]) {
+            snprintf(buf, sizeof(buf), "%.10s %s", g_startupTimeStr, WEEKDAY_JP[g_startupWeekday]);
+        } else {
+            snprintf(buf, sizeof(buf), "%04d/%02d/%02d %s",
+                     getYear(), getMonth(), getDay(), WEEKDAY_JP[getWeekday()]);
+        }
         u8g2Fonts.setCursor(3, y);
         u8g2Fonts.print(buf);
         y += lh;
@@ -581,9 +586,18 @@ static void drawEpaperDetailLarge() {
         u8g2Fonts.print(buf);
         y += lh;
 
-        // ③ 現在時刻（HH:MM:SS）
-        snprintf(buf, sizeof(buf), "現在 %02d:%02d:%02d",
-                 getHours(), getMinutes(), getSeconds());
+        // ③ 開始〜現在（日をまたぐと終端を24時超えで表示。例: "22:00〜26:30"）
+        const char* st = g_startupTimeStr[0] ? (g_startupTimeStr + 11) : "--:--";
+        int eh = getHours(), em = getMinutes();
+        if (g_startupTimeStr[0]) {
+            int sh = (g_startupTimeStr[11] - '0') * 10 + (g_startupTimeStr[12] - '0');
+            int sm = (g_startupTimeStr[14] - '0') * 10 + (g_startupTimeStr[15] - '0');
+            int endMin = eh * 60 + em;
+            if (endMin < sh * 60 + sm) endMin += 24 * 60;   // 日をまたいだ → 24時間超え表示
+            eh = endMin / 60;
+            em = endMin % 60;
+        }
+        snprintf(buf, sizeof(buf), "%s〜%02d:%02d", st, eh, em);
         u8g2Fonts.setCursor(3, y);
         u8g2Fonts.print(buf);
 
@@ -657,6 +671,10 @@ static EpaperView displayModeToEpaperView(DisplayMode mode) {
 //   - 標準(CLOCK)  → 分/日が変わるかビュー切替時に毎分フル更新
 //   - 通知/詳細    → ビューが切り替わった瞬間の1回だけ描画（スナップショット）
 void updateEpaperDisplay() {
+    // 案4: FUNC連打中は最終モードが確定するまで描画を遅延（連打の無駄な再描画を抑制）
+    if (g_currentMillis - g_lastFuncEdgeMs < EPAPER_FUNC_COALESCE_MS) {
+        return;
+    }
     // === Phase 10: 通知表示の自動切替・自動復帰 ===
     // 「ユーザ選択のベースビュー(g_displayMode)」を触らず、通知を優先オーバーライド。
 

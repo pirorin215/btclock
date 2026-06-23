@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 49
+#define FIRMWARE_VERSION_PATCH 56
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -29,6 +29,11 @@
 #define SWITCH_FUNC_GPIO    8   // Function / Mode / Maintenance
 
 #define HID_DEBOUNCE_DELAY_MS     50   // Switch debounce delay
+// FUNCキー: サンプリング統合デバウンス(独立タスク) + 描画合成（連打取りこぼし防止: 案1+4）
+#define FUNC_SAMPLE_MS          5    // デバウンスタスクのサンプリング周期(ms)
+#define FUNC_DEBOUNCE_SAMPLES   8    // 連続一致回数(8×5ms=40ms安定で確定)
+#define FUNC_LONGPRESS_MS       2000 // 長押し判定 → メンテナンスカウントダウン
+#define EPAPER_FUNC_COALESCE_MS 250  // FUNC連打中のePaper描画遅延（最終モードを1回だけ描画）
 
 // --- HID Key Codes (Keyboard Page) ---
 #define DEFAULT_SW1_KEYCODE    0x4F  // Right Arrow
@@ -70,7 +75,7 @@ struct ImuSample {
 };   // 12B/サンプル
 #define IMU_RING_BUFFER_SIZE    500                  // 50Hz × 10秒
 #define IMU_SAMPLES_PER_CHUNK   18                   // チャンクあたりサンプル数（ヘッダ5B+216B=221B）
-#define IMU_DUMP_INTERVAL_MS    30                   // チャンク送信間隔（NimBLE notify キュー対策）
+#define IMU_DUMP_INTERVAL_MS    100                  // IMU_DUMP チャンク送信間隔(ms)・dumpIMU シリアル絞りも共通。旧実装は imu.ino で 100 へ再定義しており 30 は死んでいた（再定義で後者が勝つ）
 #define IMU_DUMP_MAGIC0         0xAA                 // チャンクマジック上位
 #define IMU_DUMP_MAGIC1         0x55                 // チャンクマジック下位
 #define IMU_DUMP_STATUS_MORE    0x00                 // status: 継続
@@ -139,7 +144,7 @@ enum EpaperView {
     EP_VIEW_CLOCK,            // 標準（7seg = TIME）
     EP_VIEW_NOTIFICATION,     // 通知（7seg = DATE）
     EP_VIEW_DETAIL,           // 詳細（7seg = WEEKDAY）
-    EP_VIEW_DETAIL_LARGE,     // 詳細大（モード4: 開始/経過/現在 を大フォント）
+    EP_VIEW_DETAIL_LARGE,     // 詳細大（モード4: 日付/経過/開始〜現在）
     EP_VIEW_UNSYNCED,         // 未同期
 };
 // --- FUNCキーで切り替わる表示モード（統一名: モード1 / モード2 / モード3 / モード4）---
@@ -164,7 +169,7 @@ static const FuncModeBinding FUNC_MODE_TABLE[FUNC_MODE_COUNT] = {
     { FUNC_MODE_1, DISPLAY_MODE_TIME,    EP_VIEW_CLOCK        },  // モード1: 時刻(HH:MM)  / 標準時計
     { FUNC_MODE_2, DISPLAY_MODE_DATE,    EP_VIEW_NOTIFICATION },  // モード2: 日付(MMDD)   / 通知
     { FUNC_MODE_3, DISPLAY_MODE_WEEKDAY, EP_VIEW_DETAIL       },  // モード3: 曜日(MON/TUE)/ 詳細
-    { FUNC_MODE_4, DISPLAY_MODE_SECONDS, EP_VIEW_DETAIL_LARGE },  // モード4: 秒(SS)        / 詳細大(開始/経過/現在)
+    { FUNC_MODE_4, DISPLAY_MODE_SECONDS, EP_VIEW_DETAIL_LARGE },  // モード4: 秒(SS)        / 詳細大(日付/経過/開始〜現在)
 };
 
 // --- Date Cache (日付計算のキャッシュ) ---
@@ -220,6 +225,7 @@ extern unsigned long g_lastCounterMillis;
 extern DateCache g_dateCache;
 extern unsigned long g_startupMillis;
 extern char g_startupTimeStr[];   // 起動時刻(JST) "YYYY/MM/DD HH:MM"。初回時刻同期時に記録
+extern int g_startupWeekday;      // 起動(初回同期)時の曜日 0=日..6=土。日をまたいでも開始日付に使用
 #define EP_STARTUP_TIME_LEN 17    // "YYYY/MM/DD HH:MM" + null
 
 #define NUM_HID_SWITCHES 7
@@ -231,6 +237,9 @@ extern unsigned long g_keyCodeDisplayEndTime;
 extern unsigned long g_lastModeChangeMillis;
 #define MODE_AUTO_RETURN_TIMEOUT_MS 10000
 extern int g_testDisplayIndex;
+extern volatile uint32_t g_funcClicks;           // funcInputTask→loop: 未消費クリック数
+extern volatile uint32_t g_lastFuncEdgeMs;       // 最終クリック時刻: ePaper描画合成用
+extern volatile bool     g_funcLongPressPending; // funcInputTask→loop: 長押し(>=2秒)通知
 
 // --- スマホ通知表示（Phase 10: BLE受信→ePaper一時表示）---
 // プロトコル: NOTIFY:app=<アプリ名>\n<テキスト>（UTF-8、上限200バイト、応答なし）
