@@ -328,17 +328,18 @@ void updateImuDump() {
 
 // ====================================================================
 // handleImuRecordStart — 未来録り要求（BLE onWrite から・状態初期化のみ）
-//   10秒後に updateImuRecord() が handleImuDump() を起動し、その時点の
-//   リングバッファ（＝開始〜10秒のデータ）を送信する。
+//   4秒後に updateImuRecord() が handleImuDump() を起動し、その時点の
+//   リングバッファ（＝開始〜4秒のデータ）を送信する。
 // ====================================================================
 void handleImuRecordStart() {
     g_imuRecordPending = true;
     g_imuRecordStartMillis = g_currentMillis;
-    logPrint("IMU", "IMU_RECORD_START: recording 10s...");
+    g_imuRingCount = 0;   // リングバッファ論理クリア（開始時刻からのサンプルだけ送信するため）
+    logPrint("IMU", "IMU_RECORD_START: recording 4s...");
 }
 
 // ====================================================================
-// updateImuRecord — 10秒経過で handleImuDump 起動（loop から毎回呼出）
+// updateImuRecord — 4秒経過で handleImuDump 起動（loop から毎回呼出）
 // ====================================================================
 void updateImuRecord() {
     if (!g_imuRecordPending) return;

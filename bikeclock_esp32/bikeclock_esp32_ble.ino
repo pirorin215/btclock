@@ -83,7 +83,7 @@ class CommandCharCallbacks : public NimBLECharacteristicCallbacks {
             // Phase 10: スマホ通知受信（fire-and-forget：応答しない）
             handleNotify(command.c_str());
         } else if (command.startsWith("IMU_RECORD_START")) {
-            // 未来録り: 10秒録音してからリングバッファ送信
+            // 未来録り: 4秒録音してからリングバッファ送信
             handleImuRecordStart();
         } else if (command.startsWith("IMU_DUMP")) {
             // Phase 14-B: リングバッファ（直近10秒）のチャンク転送要求

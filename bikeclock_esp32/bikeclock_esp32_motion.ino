@@ -14,7 +14,7 @@
 #include <math.h>
 
 // --- Globals（bikeclock.h で extern 宣言）---
-MotionPattern g_motionPatterns[MAX_MOTION_PATTERNS];
+MotionPattern* g_motionPatterns = nullptr;   // ヒープ割当（setup→loadMotionModel で new）
 uint8_t g_motionPatternCount = 0;
 bool g_motionModelReady = false;
 char g_detectedPattern[MOTION_NAME_LEN] = "";
@@ -22,6 +22,7 @@ int g_motionDisplayIndex = -1;
 unsigned long g_motionDisplayEndTime = 0;
 bool g_parkedDisplayActive = false;   // 駐車中は ePaper を詳細表示で維持（走行検知で解除）
 bool g_inferLogEnabled = false;       // 推論ログBLE送信（INFER_LOG:1 でON・精度チューニング用）
+bool g_motionModelSaveRequested = false;   // モデル保存要求（BLEコールバック→loop でFlash書き込み）
 
 // パターン名→固定番号（Android IMU_LABELS と同順: 駐車=0..アイドリング=5）
 static const char* MOTION_LABEL_TABLE[] = {"駐車", "解除", "走行", "カーブ", "停車", "アイドリング"};
@@ -68,9 +69,24 @@ void saveMotionModel() {
 }
 
 // ====================================================================
+// updateMotionSave — loop内でモデル保存(Flash書き込み)を実行
+//   BLE onWriteコールバック内でFlash書き込みするとCore間cache競合でクラッシュするため、
+//   parseAndStoreModel でフラグを立て、ここでloopタスクから安全に書き込む。
+// ====================================================================
+void updateMotionSave() {
+    if (!g_motionModelSaveRequested) return;
+    g_motionModelSaveRequested = false;
+    saveMotionModel();
+}
+
+// ====================================================================
 // loadMotionModel — 起動時に LittleFS からモデルを復元
 // ====================================================================
 void loadMotionModel() {
+    if (!g_motionPatterns) {
+        g_motionPatterns = new MotionPattern[MAX_MOTION_PATTERNS];
+        if (!g_motionPatterns) { logPrint("MOTION", "alloc failed"); return; }
+    }
     if (!LittleFS.exists(MOTION_MODEL_FILE_PATH)) {
         logPrint("MOTION", "no model file (first run)");
         return;
@@ -138,10 +154,16 @@ static void parseAndStoreModel(const uint8_t* buf, size_t len) {
     g_motionPatternCount = n;
     g_motionModelReady = true;
 
-    saveMotionModel();
+    g_motionModelSaveRequested = true;   // Flash書き込みは BLEコールバック外(loop)で実行
     sendResponse("OK: motion model stored");
     logPrint("MOTION", "model received: %u patterns", n);
     for (int pi = 0; pi < n; pi++) logPrint("MOTION", "  [%s]", g_motionPatterns[pi].name);
+    // ePaper へ学習データ受信を表示（notification システム流用・5秒）
+    snprintf(g_notificationApp, NOTIFY_APP_LEN, "学習データ");
+    snprintf(g_notificationText, NOTIFY_TEXT_LEN, "受信: %uパターン", n);
+    g_notificationEndTime = millis() + 5000UL;
+    g_notificationActive = true;
+    g_epaperRedrawRequested = true;
 }
 
 // ====================================================================
@@ -177,10 +199,10 @@ void handleMotionModelFrame(const uint8_t* data, size_t len) {
 }
 
 // ====================================================================
-// extractFeatures — リングバッファの直近 MOTION_FEAT_WINDOW_SAMPLES サンプルから9次元特徴量を抽出
+// extractFeatures — リングバッファの直近 MOTION_FEAT_WINDOW_SAMPLES サンプルから21次元特徴量を抽出
 //   MotionFeatures.kt（Android）と完全一致。1次IIR LPF(0.5Hz)で重力抽出。
 // ====================================================================
-static bool extractFeatures(float out[MOTION_FEAT_DIM]) {
+static bool __attribute__((noinline)) extractFeatures(float out[MOTION_FEAT_DIM]) {
     // 直近 MOTION_FEAT_WINDOW_SAMPLES サンプルで特徴量計算（リングバッファ全量ではない）。
     // 短窓化で駐車動作の信号が窓を素早く支配し、検出レイテンシを下げる。
     int avail = (int)g_imuRingCount;
@@ -193,10 +215,24 @@ static bool extractFeatures(float out[MOTION_FEAT_DIM]) {
     const float rc = 1.0f / (2.0f * PI * 0.5f);
     const float alpha = dt / (rc + dt);
 
-    float gax = 0, gay = 0, gaz = 0;          // 重力（IIR）
-    float prevDax = 0, prevDay = 0, prevDaz = 0;
-    double sumDyn = 0, sumGyro = 0, sumGax = 0, sumGay = 0, sumGaz = 0;
-    float peakDyn = 0, peakGyro = 0, peakJerk = 0;
+    // static 化でスタック消費を抑制（extractFeatures は単一スレッドからのみ呼出）
+    static float gax, gay, gaz;          // 重力（IIR）
+    static float daxMax, dayMax, dazMax; // 動的acc 符号付きピーク(max)
+    static float daxMin, dayMin, dazMin; // 動的acc 符号付きピーク(min)
+    static double sdax2, sday2, sdaz2;   // 動的acc 各軸 RMS用
+    static double sgx, sgy, sgz;         // gyro 各軸 平均用
+    static double sgx2, sgy2, sgz2;      // gyro 各軸 RMS用
+    static double sgax, sgay, sgaz;      // 重力 各軸平均用
+    static float peakDyn, peakGyro;      // ノルムpeak
+    // 毎呼出で0クリア（static は初回のみ初期化のため明示）
+    gax = gay = gaz = 0;
+    daxMax = dayMax = dazMax = 0;
+    daxMin = dayMin = dazMin = 0;
+    sdax2 = sday2 = sdaz2 = 0;
+    sgx = sgy = sgz = 0;
+    sgx2 = sgy2 = sgz2 = 0;
+    sgax = sgay = sgaz = 0;
+    peakDyn = peakGyro = 0;
     bool first = true;
 
     for (int i = 0; i < n; i++) {
@@ -212,34 +248,49 @@ static bool extractFeatures(float out[MOTION_FEAT_DIM]) {
         else { gax += alpha * (ax - gax); gay += alpha * (ay - gay); gaz += alpha * (az - gaz); }
 
         float dax = ax - gax, day = ay - gay, daz = az - gaz;
+
+        // 動的acc 各軸 符号付きピーク(max/min) / RMS
+        if (dax > daxMax) daxMax = dax;
+        if (day > dayMax) dayMax = day;
+        if (daz > dazMax) dazMax = daz;
+        if (dax < daxMin) daxMin = dax;
+        if (day < dayMin) dayMin = day;
+        if (daz < dazMin) dazMin = daz;
+        sdax2 += dax * dax; sday2 += day * day; sdaz2 += daz * daz;
+
+        // gyro 各軸 平均/RMS
+        sgx += gx; sgy += gy; sgz += gz;
+        sgx2 += gx * gx; sgy2 += gy * gy; sgz2 += gz * gz;
+
+        // 重力 各軸平均
+        sgax += gax; sgay += gay; sgaz += gaz;
+
+        // ノルムpeak
         float dm = sqrtf(dax * dax + day * day + daz * daz);
-        sumDyn += dm; if (dm > peakDyn) peakDyn = dm;
-        sumGax += gax; sumGay += gay; sumGaz += gaz;
-
+        if (dm > peakDyn) peakDyn = dm;
         float gm = sqrtf(gx * gx + gy * gy + gz * gz);
-        sumGyro += gm; if (gm > peakGyro) peakGyro = gm;
-
-        if (i > 0) {
-            float jx = dax - prevDax, jy = day - prevDay, jz = daz - prevDaz;
-            float jm = sqrtf(jx * jx + jy * jy + jz * jz);
-            if (jm > peakJerk) peakJerk = jm;
-        }
-        prevDax = dax; prevDay = day; prevDaz = daz;
+        if (gm > peakGyro) peakGyro = gm;
     }
 
-    float accRms = sqrtf((float)(sumDyn / n));
-    float gyroRms = sqrtf((float)(sumGyro / n));
-    float mgax = (float)(sumGax / n), mgay = (float)(sumGay / n), mgaz = (float)(sumGaz / n);
+    float mgax = (float)(sgax / n), mgay = (float)(sgay / n), mgaz = (float)(sgaz / n);
     float gmag = sqrtf(mgax * mgax + mgay * mgay + mgaz * mgaz);
     if (gmag < 1e-6f) gmag = 1e-6f;
     float ratio = fabsf(mgaz) / gmag;
     if (ratio > 1.0f) ratio = 1.0f;
     float tilt = acosf(ratio) * 180.0f / PI;
 
-    out[0] = accRms;   out[1] = peakDyn;
-    out[2] = gyroRms;  out[3] = peakGyro;
-    out[4] = tilt;     out[5] = peakJerk;
-    out[6] = mgax;     out[7] = mgay;     out[8] = mgaz;
+    // [0-2] accDyn max, [3-5] accDyn min, [6-8] accDyn rms,
+    // [9-11] gyro mean, [12-14] gyro rms,
+    // [15] accDyn ノルムpeak, [16] gyro ノルムpeak, [17] tilt, [18-20] grav
+    out[0] = daxMax;  out[1] = dayMax;  out[2] = dazMax;
+    out[3] = daxMin;  out[4] = dayMin;  out[5] = dazMin;
+    out[6] = sqrtf((float)(sdax2 / n));  out[7] = sqrtf((float)(sday2 / n));  out[8] = sqrtf((float)(sdaz2 / n));
+    out[9] = (float)(sgx / n);   out[10] = (float)(sgy / n);  out[11] = (float)(sgz / n);
+    out[12] = sqrtf((float)(sgx2 / n));  out[13] = sqrtf((float)(sgy2 / n));  out[14] = sqrtf((float)(sgz2 / n));
+    out[15] = peakDyn;
+    out[16] = peakGyro;
+    out[17] = tilt;
+    out[18] = mgax;  out[19] = mgay;  out[20] = mgaz;
     return true;
 }
 
@@ -253,11 +304,11 @@ void updateMotionInference() {
     if (g_currentMillis - s_lastInferMillis < MOTION_INFER_INTERVAL_MS) return;
     s_lastInferMillis = g_currentMillis;
 
-    float feat[MOTION_FEAT_DIM];
+    static float feat[MOTION_FEAT_DIM];
     if (!extractFeatures(feat)) return;
 
     // スケール正規化（z-score 廃止・サンプル少での std 過小評価対策）
-    float norm[MOTION_FEAT_DIM];
+    static float norm[MOTION_FEAT_DIM];
     for (int i = 0; i < MOTION_FEAT_DIM; i++) {
         norm[i] = feat[i] / MOTION_FEATURE_SCALE[i];
     }
@@ -279,16 +330,20 @@ void updateMotionInference() {
                             ? g_motionPatterns[best].name : "";
 
     // 推論ログをBLE送信（INFER_LOG:1 で有効化時のみ・毎推論=1Hz）。スマホで時系列記録→CSV分析。
-    //   形式: INFER:<ms>,<candidate>,<dist>,<f0>..<f8>（candidate は空を"-"で送信）
+    //   形式: INFER:<ms>,<candidate>,<dist>,<f0>..<f20>（candidate は空を"-"で送信）
     if (g_inferLogEnabled) {
-        char logBuf[160];
+        static char logBuf[256];   // static: スタック消費抑制（loop単独スレッドで安全）
         snprintf(logBuf, sizeof(logBuf),
-                 "INFER:%lu,%s,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.3f,%.3f,%.3f",
+                 "INFER:%lu,%s,%.2f,"
+                 "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+                 "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+                 "%.3f,%.3f,%.2f,%.3f,%.3f,%.3f",
                  (unsigned long)g_currentMillis,
                  candidate[0] ? candidate : "-",
                  dist,
-                 feat[0], feat[1], feat[2], feat[3], feat[4],
-                 feat[5], feat[6], feat[7], feat[8]);
+                 feat[0], feat[1], feat[2], feat[3], feat[4], feat[5], feat[6],
+                 feat[7], feat[8], feat[9], feat[10], feat[11], feat[12], feat[13],
+                 feat[14], feat[15], feat[16], feat[17], feat[18], feat[19], feat[20]);
         sendResponse(logBuf);
     }
 
@@ -320,5 +375,18 @@ void updateMotionInference() {
     } else {
         strncpy(s_lastCandidate, candidate, MOTION_NAME_LEN - 1);
         s_lastCandidate[MOTION_NAME_LEN - 1] = '\0';
+    }
+}
+
+// ====================================================================
+// motionTask — updateMotionInference を独立 FreeRTOS タスク(16KB)で実行
+//   extractFeatures のスタック使用量大→loopTask(8KB)でスタックオーバーフロー。
+//   専用タスクで分離。logPrint はミューテックス保護でデッドロック回避。
+// ====================================================================
+void motionTask(void* arg) {
+    (void)arg;
+    while (true) {
+        updateMotionInference();
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

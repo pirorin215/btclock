@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 42
+#define FIRMWARE_VERSION_PATCH 48
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -76,13 +76,13 @@ struct ImuSample {
 #define IMU_DUMP_STATUS_MORE    0x00                 // status: 継続
 #define IMU_DUMP_STATUS_LAST    0xFF                 // status: 最終チャンク
 #define IMU_DUMP_MAX_RETRY      5                    // チャンク送信失敗時リトライ上限
-#define IMU_RECORD_DURATION_MS  10000UL              // IMU_RECORD_START: 10秒録音後に送信
+#define IMU_RECORD_DURATION_MS  4000UL               // IMU_RECORD_START: 4秒録音後に送信
 #define IMU_DUMP_CHUNK_HEADER   5                    // magic(2)+seq(1)+total(1)+status(1)
 
 // --- Phase 2: モーションパターン認識（スマホ学習モデルを受信・推論）---
 // Android MotionFeatures.kt と特徴量定義(DIM/計算/順序)を完全一致させること。
 #define MOTION_MODEL_FILE_PATH   "/motion_model.bin"
-#define MOTION_FEAT_DIM          9                   // 特徴量次元（Android と共通）
+#define MOTION_FEAT_DIM          21                  // 特徴量次元（Android と共通）
 #define MAX_MOTION_PATTERNS      12                  // 保持上限
 #define MOTION_NAME_LEN          16                  // パターン名バッファ
 #define MOTION_INFER_INTERVAL_MS 500UL               // 推論周期（窓短縮に伴い 1秒→0.5秒）
@@ -90,8 +90,21 @@ struct ImuSample {
 #define MOTION_DISTANCE_THRESH   0.5f                // 最近傍距離の閾値（スケール正規化空間）。超過は「不明」。実機調整
 // 固定スケール正規化の除数（Android MotionFeatures.FEATURE_SCALE と完全一致させること）。
 // z-score はサンプル少＋高再現性で std が過小評価され破綻するため廃止。
-// 順序: accRms, accPeak, gyroRms, gyroPeak, tilt, jerkPk, gravAx, gravAy, gravAz
-static const float MOTION_FEATURE_SCALE[MOTION_FEAT_DIM] = {1.0f, 3.0f, 10.0f, 100.0f, 45.0f, 2.0f, 1.0f, 1.0f, 1.0f};
+// デバイスはバイクへ固定取り付けを前提とし、動的acc を各軸の符号付きピーク(max/min)
+// で保持する（平均は往復動作で相殺して方向が消えるため、行き/戻りピークで方向を保持）。
+// 順序: accDynMax(x,y,z), accDynMin(x,y,z), accDynRms(x,y,z),
+//       gyroMean(x,y,z), gyroRms(x,y,z), accDynMagPeak, gyroMagPeak, tilt, gravAx, gravAy, gravAz
+static const float MOTION_FEATURE_SCALE[MOTION_FEAT_DIM] = {
+    1.0f, 1.0f, 1.0f,    // accDyn max x/y/z（符号付きピーク・行き方向）
+    1.0f, 1.0f, 1.0f,    // accDyn min x/y/z（符号付きピーク・戻り方向）
+    1.0f, 1.0f, 1.0f,    // accDyn rms x/y/z
+    20.0f, 20.0f, 20.0f, // gyro mean x/y/z
+    50.0f, 50.0f, 50.0f, // gyro rms x/y/z
+    3.0f,                // accDyn ノルムpeak
+    100.0f,              // gyro ノルムpeak
+    45.0f,               // tilt
+    1.0f, 1.0f, 1.0f     // grav x/y/z
+};
 #define MOTION_FRAME_MAGIC0      0xAA                // モデル受信フレームマジック
 #define MOTION_FRAME_MAGIC1      0x55
 #define MOTION_FRAME_STATUS_LAST 0xFF
@@ -243,11 +256,11 @@ extern uint16_t g_imuDumpTotal;          // 総チャンク数
 extern uint16_t g_imuDumpSamplesToSend;  // 送信対象サンプル数（= 採取時点の count）
 extern unsigned long g_imuDumpLastSend;  // 最終チャンク送信時刻（millis()）
 extern uint8_t g_imuDumpRetry;           // 現チャンクのリトライ回数
-extern bool g_imuRecordPending;            // IMU_RECORD_START: 10秒録音待機中
+extern bool g_imuRecordPending;            // IMU_RECORD_START: 4秒録音待機中
 extern unsigned long g_imuRecordStartMillis; // 録音開始時刻
 
 // Phase 2: モーション認識（bikeclock_esp32_motion.ino）
-extern MotionPattern g_motionPatterns[MAX_MOTION_PATTERNS];  // 学習済みパターン
+extern MotionPattern* g_motionPatterns;                     // ヒープ割当（.bss 配置重複回避）
 extern uint8_t g_motionPatternCount;                         // パターン数
 extern bool g_motionModelReady;                              // モデル受信済み
 extern char g_detectedPattern[MOTION_NAME_LEN];              // 直近の検出パターン名（空=不明）
@@ -255,6 +268,7 @@ extern int g_motionDisplayIndex;                             // 7セグ表示中
 extern unsigned long g_motionDisplayEndTime;                 // 7セグ表示の終了時刻
 extern bool g_parkedDisplayActive;                          // 駐車中: ePaperを詳細表示で維持（走行検知で解除）
 extern bool g_inferLogEnabled;                              // 推論ログBLE送信（INFER_LOG:1 でON・精度チューニング用）
+extern bool g_motionModelSaveRequested;   // モデル保存要求（BLEコールバック→loopでFlash書き込み）
 
 // --- Function Prototypes ---
 // 時刻計算
@@ -284,6 +298,8 @@ void updateTimestamp();
 void updateDisplayAndLedState();
 void recordStartupTime();   // 初回時刻同期時に起動時刻(JST)を g_startupTimeStr へ記録
 
+void updateMotionSave();                  // loop内でモデル保存(Flash書き込み)を実行（BLEコールバック外で安全に）
+void motionTask(void* arg);              // updateMotionInference 実行タスク（16KB・logPrintミューテックスで安全）
 // BMI160 IMU（Phase 14）— bikeclock_esp32_imu.ino
 void setupIMU();      // Wire.begin + BMI160 初期化（接続失敗時 g_imuEnabled=false でフォールバック）
 void updateIMU();     // 50Hz(20ms) サンプリング + 生値読出し + リングバッファ push（loop から毎回呼出）

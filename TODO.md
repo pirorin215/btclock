@@ -68,6 +68,12 @@ Seeed XIAO BLE (nRF52840) 版 `bikeclock/` を ESP32-S3 SuperMini へ移植。
 - Phase 15 — モーションパターン学習・検出（エッジ推論）✅（v2.0.39）
 - Phase 15 関連 — 推論ログ取得（BLE・精度チューニング用）✅（v2.0.41）
 - Phase 15 関連 — 正規化を z-score → 固定スケールへ変更 ✅（v2.0.42）
+- Phase 15 関連 — 特徴量を方向付き18次元化（バイク固定取り付け前提・ノルム→各軸符号付き成分）＋学習採取10秒→4秒 ✅（v2.0.43）
+- Phase 15 関連 — 方向特徴量を平均→符号付きピーク(max/min)へ置換（往復動作の方向相殺を解消・駐車-解除分離 0.38→0.91）✅（v2.0.44）
+- Phase 15 関連 — モデル受信クラッシュ修正（Flash書き込みをBLEコールバック外へ）＋学習データ受信のePaper表示 ✅（v2.0.45）
+- Phase 15 関連 — g_motionPatterns の .bss 配置重複（リングバッファ破壊）をヒープ割当で解消 ✅（v2.0.46）
+- Phase 15 関連 — スタックオーバーフロー解消: updateMotionInference を独立FreeRTOSタスク(16KB)へ分離（extractFeatures のスタック肥大で loopTask 8KB超過→変数破壊・ハング） ✅（v2.0.47）
+- Phase 15 関連 — extractFeatures の return true 欠落修正（全クラッシュの真因・未定義動作でスタック破壊）＋logPrintミューテックス化（マルチタスク安全） ✅（v2.0.48）
 
 ### その他（実質完了）
 - `NVIC_SystemReset()` → `ESP.restart()` 全置換 ✅（移植時点で対応済み）

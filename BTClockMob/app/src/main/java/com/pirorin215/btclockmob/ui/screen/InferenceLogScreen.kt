@@ -212,7 +212,7 @@ fun InferenceLogScreen(
                             color = distColor,
                             modifier = Modifier.width(48.dp)
                         )
-                        // 特徴量の先頭4つを簡易表示（accRms,accPeak,gyroRms,gyroPeak）
+                        // 特徴量の先頭4つを簡易表示（accDynMaxX,accDynMaxY,accDynMaxZ,accDynMinX）
                         Text(
                             e.features.take(4).joinToString(" ") { "%.2f".format(it) },
                             style = MaterialTheme.typography.bodySmall,

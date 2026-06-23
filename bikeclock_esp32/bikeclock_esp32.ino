@@ -39,11 +39,14 @@ char g_notificationText[NOTIFY_TEXT_LEN] = "";
 volatile bool g_epaperRedrawRequested = false;
 
 // --- ロギング ---
+static SemaphoreHandle_t _logMutex = NULL;
 void setupLog() {
     g_startupMillis = millis();
+    _logMutex = xSemaphoreCreateMutex();
 }
 
 void logPrint(const char* tag, const char* format, ...) {
+    if (_logMutex) xSemaphoreTake(_logMutex, portMAX_DELAY);   // マルチタスク安全化
     unsigned long elapsed = millis() - g_startupMillis;
     Serial.printf("[%4lu.%03lu] ", elapsed / 1000, elapsed % 1000);
     if (tag != nullptr && tag[0] != '\0') {
@@ -55,6 +58,7 @@ void logPrint(const char* tag, const char* format, ...) {
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
     Serial.println(buffer);
+    if (_logMutex) xSemaphoreGive(_logMutex);
 }
 
 // ====================================================================
@@ -345,6 +349,7 @@ void setup() {
     updateLedStateBasedOnStatus();
 
     logPrint("INIT", "Setup complete");
+    xTaskCreatePinnedToCore(motionTask, "motion", 16384, NULL, 1, NULL, 1);
 }
 
 void loop() {
@@ -357,8 +362,9 @@ void loop() {
     //   リングバッファへ直近10秒を蓄積。駐車検知 14-C でも常時必須）
     updateIMU();
     updateImuDump();   // Phase 14-B: IMU_DUMP チャンク送信の進行（要求時のみ動作）
-    updateImuRecord();  // 未来録り: 10秒経過で handleImuDump 起動
-    updateMotionInference();  // Phase 2: モーションパターン推論（モデル受信済み・1秒周期）
+    updateImuRecord();  // 未来録り: 4秒経過で handleImuDump 起動
+    updateMotionSave();         // モデル保存(Flash書き込み)をBLEコールバック外で実行
+    // updateMotionInference は motionTask で実行（loopTask 8KB ではスタック不足）
 
     // メンテナンスモードの処理
     if (!processMaintenanceMode()) {

@@ -16,15 +16,31 @@ import kotlin.math.sqrt
 object MotionFeatures {
 
     /** 特徴量次元数（順序は extract() の戻り値に対応・固定） */
-    const val DIM = 9
+    const val DIM = 21
 
     /**
      * 固定スケール正規化の除数（各特徴量の物理的フルスケール想定）。
      * マイコン（bikeclock.h MOTION_FEATURE_SCALE）と完全一致させること。
      * z-score はサンプル少＋高再現性で std が過小評価され破綻するため廃止。
-     * 順序は DIM に準拠: accRms, accPeak, gyroRms, gyroPeak, tilt, jerkPk, gravAx, gravAy, gravAz
+     *
+     * デバイスはバイクへ固定取り付けを前提とし、動的acc を各軸の符号付きピーク(max/min)
+     * で保持する（平均は往復動作で相殺して方向が消えるため、行き/戻りピークで方向を保持）。
+     * 順序は DIM に準拠:
+     *   accDynMax(x,y,z), accDynMin(x,y,z), accDynRms(x,y,z),
+     *   gyroMean(x,y,z), gyroRms(x,y,z), accDynMagPeak, gyroMagPeak, tilt,
+     *   gravAx, gravAy, gravAz
      */
-    val FEATURE_SCALE = floatArrayOf(1f, 3f, 10f, 100f, 45f, 2f, 1f, 1f, 1f)
+    val FEATURE_SCALE = floatArrayOf(
+        1f, 1f, 1f,           // accDyn max x/y/z（符号付きピーク・行き方向）
+        1f, 1f, 1f,           // accDyn min x/y/z（符号付きピーク・戻り方向）
+        1f, 1f, 1f,           // accDyn rms x/y/z（各軸の動き強度・振動）
+        20f, 20f, 20f,        // gyro mean x/y/z（回転方向・符号付き）
+        50f, 50f, 50f,        // gyro rms  x/y/z（各軸の回転揺らぎ）
+        3f,                   // accDyn ノルムpeak（瞬間最大激しさ）
+        100f,                 // gyro ノルムpeak（瞬間最大回転）
+        45f,                  // tilt（鉛直からの傾き[deg]）
+        1f, 1f, 1f            // grav x/y/z（姿勢）
+    )
 
     private const val FS = 50f                     // サンプリングレート[Hz]
     /** 特徴量抽出の窓長（サンプル数）。マイコン MOTION_FEAT_WINDOW_SAMPLES と一致させること。
@@ -47,13 +63,18 @@ object MotionFeatures {
     }
 
     /**
-     * 9次元特徴量を抽出する。サンプル不足時は null。
+     * 21次元特徴量を抽出する。サンプル不足時は null。
+     *
+     * デバイスはバイクへ固定取り付けを前提とし、動的acc の各軸を符号付きピーク(max/min)
+     * で保持する。平均は往復動作（スタンド上げ等）で相殺して方向が消えるため、行き/戻り
+     * のピークで「斜め上後ろ」等の固有動作方向を活かす。
      * 次元順序:
-     *  0: acc 動的成分 RMS, 1: acc 動的成分 peak,
-     *  2: gyro |ω| RMS, 3: gyro |ω| peak,
-     *  4: tilt(鉛直からの傾き[deg]・平均),
-     *  5: acc jerk peak(動的加速度差分の大きさピーク=衝撃),
-     *  6: grav ax 平均, 7: grav ay 平均, 8: grav az 平均(姿勢方向)
+     *  0-2 : acc 動的成分 各軸max(符号付き), 3-5: acc 動的成分 各軸min(符号付き),
+     *  6-8 : acc 動的成分 各軸RMS(各軸の動き強度),
+     *  9-11: gyro 各軸平均(符号付き=回転方向), 12-14: gyro 各軸RMS(各軸の回転揺らぎ),
+     *  15  : acc 動的成分 ノルムpeak(瞬間最大激しさ), 16: gyro ノルムpeak(瞬間最大回転),
+     *  17  : tilt(鉛直からの傾き[deg]・平均),
+     *  18-20: grav ax/ay/az 平均(姿勢方向)
      */
     fun extract(samples: List<ImuSample>): FloatArray? {
         if (samples.size < 10) return null
@@ -71,27 +92,47 @@ object MotionFeatures {
         val day = FloatArray(n) { ay[it] - gay[it] }
         val daz = FloatArray(n) { az[it] - gaz[it] }
 
-        // acc 動的マグニチュード RMS / peak
-        var sumDyn = 0.0
-        var peakDyn = 0f
+        // 動的acc 各軸 符号付きピーク(max/min=動き方向) / RMS(各軸の動き強度)
+        // 平均は往復動作（スタンド上げ等）で相殺して方向が消えるためピークで保持
+        var daxMax = dax[0]; var dayMax = day[0]; var dazMax = daz[0]
+        var daxMin = dax[0]; var dayMin = day[0]; var dazMin = daz[0]
+        var sdax2 = 0.0; var sday2 = 0.0; var sdaz2 = 0.0
         for (i in 0 until n) {
-            val m = sqrt(dax[i] * dax[i] + day[i] * day[i] + daz[i] * daz[i])
-            sumDyn += m.toDouble()
-            if (m > peakDyn) peakDyn = m
+            if (dax[i] > daxMax) daxMax = dax[i]
+            if (day[i] > dayMax) dayMax = day[i]
+            if (daz[i] > dazMax) dazMax = daz[i]
+            if (dax[i] < daxMin) daxMin = dax[i]
+            if (day[i] < dayMin) dayMin = day[i]
+            if (daz[i] < dazMin) dazMin = daz[i]
+            sdax2 += dax[i] * dax[i]; sday2 += day[i] * day[i]; sdaz2 += daz[i] * daz[i]
         }
-        val accRms = sqrt((sumDyn / n).toFloat())
-        val accPeak = peakDyn
+        val accDynRmsX = sqrt((sdax2 / n).toFloat())
+        val accDynRmsY = sqrt((sday2 / n).toFloat())
+        val accDynRmsZ = sqrt((sdaz2 / n).toFloat())
 
-        // gyro マグニチュード RMS / peak
-        var sumGyro = 0.0
+        // gyro 各軸 平均(符号付き=回転方向) / RMS(各軸の回転揺らぎ)
+        var sgx = 0.0; var sgy = 0.0; var sgz = 0.0
+        var sgx2 = 0.0; var sgy2 = 0.0; var sgz2 = 0.0
+        for (i in 0 until n) {
+            sgx += gx[i]; sgy += gy[i]; sgz += gz[i]
+            sgx2 += gx[i] * gx[i]; sgy2 += gy[i] * gy[i]; sgz2 += gz[i] * gz[i]
+        }
+        val gyroMeanX = (sgx / n).toFloat()
+        val gyroMeanY = (sgy / n).toFloat()
+        val gyroMeanZ = (sgz / n).toFloat()
+        val gyroRmsX = sqrt((sgx2 / n).toFloat())
+        val gyroRmsY = sqrt((sgy2 / n).toFloat())
+        val gyroRmsZ = sqrt((sgz2 / n).toFloat())
+
+        // 動的acc / gyro ノルムpeak（瞬間最大激しさ・回転）
+        var peakDyn = 0f
         var peakGyro = 0f
         for (i in 0 until n) {
-            val m = sqrt(gx[i] * gx[i] + gy[i] * gy[i] + gz[i] * gz[i])
-            sumGyro += m.toDouble()
-            if (m > peakGyro) peakGyro = m
+            val dm = sqrt(dax[i] * dax[i] + day[i] * day[i] + daz[i] * daz[i])
+            if (dm > peakDyn) peakDyn = dm
+            val gm = sqrt(gx[i] * gx[i] + gy[i] * gy[i] + gz[i] * gz[i])
+            if (gm > peakGyro) peakGyro = gm
         }
-        val gyroRms = sqrt((sumGyro / n).toFloat())
-        val gyroPeak = peakGyro
 
         // 重力ベクトル平均 → 傾き
         var tgax = 0.0; var tgay = 0.0; var tgaz = 0.0
@@ -103,20 +144,14 @@ object MotionFeatures {
         val ratio = (abs(mgaz) / gmag).toDouble().coerceIn(0.0, 1.0)
         val tilt = (acos(ratio) * 180.0 / Math.PI).toFloat()
 
-        // jerk = 動的加速度差分の大きさピーク
-        var peakJerk = 0f
-        for (i in 1 until n) {
-            val jx = dax[i] - dax[i - 1]
-            val jy = day[i] - day[i - 1]
-            val jz = daz[i] - daz[i - 1]
-            val m = sqrt(jx * jx + jy * jy + jz * jz)
-            if (m > peakJerk) peakJerk = m
-        }
-
         return floatArrayOf(
-            accRms, accPeak,
-            gyroRms, gyroPeak,
-            tilt, peakJerk,
+            daxMax, dayMax, dazMax,
+            daxMin, dayMin, dazMin,
+            accDynRmsX, accDynRmsY, accDynRmsZ,
+            gyroMeanX, gyroMeanY, gyroMeanZ,
+            gyroRmsX, gyroRmsY, gyroRmsZ,
+            peakDyn, peakGyro,
+            tilt,
             mgax, mgay, mgaz
         )
     }

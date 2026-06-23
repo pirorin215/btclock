@@ -145,9 +145,9 @@ class ImuDataCaptureViewModel(
             return
         }
         Log.d(TAG, "IMU_RECORD_START requested")
-        // 10秒録音タイマー（進捗ゲージ用）。完了で Receiving（チャンク受信待ち）へ遷移。
+        // 4秒録音タイマー（進捗ゲージ用）。完了で Receiving（チャンク受信待ち）へ遷移。
         viewModelScope.launch {
-            val durationMs = 10_000L
+            val durationMs = 4_000L
             val stepMs = 100L
             var elapsed = 0L
             while (elapsed < durationMs) {
@@ -235,7 +235,7 @@ class ImuDataCaptureViewModel(
     }
 
     /** 採取したデータからスライド窓で特徴量を抽出し学習データに追加（ラベル=pendingLabel）。
-     *  採取10秒(500) を MotionFeatures.WINDOW_SAMPLES(100) 窓・step 50(50%重複) で分割し、
+     *  採取4秒(200) を MotionFeatures.WINDOW_SAMPLES(100) 窓・step 50(50%重複) で分割し、
      *  各窓から1件ずつ学習サンプルを生成。推論時の「直近2秒の様々な局面」を学習に取り込む。 */
     fun addToTraining() {
         val label = pendingLabel
@@ -273,7 +273,7 @@ class ImuDataCaptureViewModel(
         sb.append("# memo: ").append(memo).append('\n')
         sb.append("# firmware: ").append(repository.deviceVersion.value ?: "unknown").append('\n')
         sb.append("# sample_rate_hz: 50\n")
-        sb.append("# duration_s: 10\n")
+        sb.append("# duration_s: 4\n")
         sb.append("# samples: ").append(samples.size).append('\n')
         sb.append("# axis: ax,ay,az=g  gx,gy,gz=deg/s (BMI160 ±2g/±250dps)\n")
         sb.append("timestamp_ms,ax,ay,az,gx,gy,gz\n")

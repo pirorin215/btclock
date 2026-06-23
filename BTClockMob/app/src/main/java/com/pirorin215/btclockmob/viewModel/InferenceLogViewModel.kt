@@ -26,14 +26,16 @@ import java.util.Locale
  * 推論ログ取得 ViewModel（駐車検知の精度チューニング用）。
  *
  * マイコンへ INFER_LOG:1/0 でログ送信を ON/OFF 制御し、毎推論（1Hz）で届く
- *   INFER:<ms>,<candidate>,<dist>,<f0>..<f8>
+ *   INFER:<ms>,<candidate>,<dist>,<f0>..<f20>
  * を受信・蓄積し、CSV でダウンロードへ保存する。
  * PC をバイクに持っていけない環境で、スマホだけで dist/特徴量の時系列を記録する目的。
  *
  * マイコン側（bikeclock_esp32_motion.ino updateMotionInference）とプロトコル一致:
  *   candidate: 最近傍候補ラベル（距離>3.0 で "-"）
  *   dist: 正規化空間の最近傍距離（閾値 3.0）
- *   f0..f8: 正規化前の特徴量（accRms,accPeak,gyroRms,gyroPeak,tilt,jerkPeak,gravAx,gravAy,gravAz）
+ *   f0..f20: 正規化前の特徴量（方向付き21次元）
+ *     accDynMax(x,y,z), accDynMin(x,y,z), accDynRms(x,y,z),
+ *     gyroMean(x,y,z), gyroRms(x,y,z), accDynMagPeak, gyroMagPeak, tilt, gravAx, gravAy, gravAz
  */
 class InferenceLogViewModel(
     private val repository: BleRepository,
@@ -43,7 +45,7 @@ class InferenceLogViewModel(
     companion object {
         private const val TAG = "InferenceLogVM"
         private const val MAX_ENTRIES = 2000      // 蓄積上限（古いものから破棄・メモリ保護）
-        private const val FEAT_DIM = 9           // 特徴量次元（マイコン MOTION_FEAT_DIM と一致）
+        private const val FEAT_DIM = 21          // 特徴量次元（マイコン MOTION_FEAT_DIM と一致）
     }
 
     /** 受信ログ1件 */
@@ -51,7 +53,7 @@ class InferenceLogViewModel(
         val ms: Long,
         val candidate: String,
         val dist: Float,
-        val features: List<Float>     // 正規化前の特徴量（最大9次元）
+        val features: List<Float>     // 正規化前の特徴量（最大21次元）
     )
 
     /** 画面状態 */
@@ -83,7 +85,7 @@ class InferenceLogViewModel(
         }
     }
 
-    /** "INFER:<ms>,<candidate>,<dist>,<f0>..<f8>" をパースして蓄積 */
+    /** "INFER:<ms>,<candidate>,<dist>,<f0>..<f20>" をパースして蓄積 */
     private fun handleLine(line: String) {
         val fields = line.removePrefix("INFER:").split(",")
         if (fields.size < 3) return
@@ -142,8 +144,8 @@ class InferenceLogViewModel(
         sb.append("# firmware: ").append(repository.deviceVersion.value ?: "unknown").append('\n')
         sb.append("# candidate: 最近傍候補（- は距離>閾値で不明）\n")
         sb.append("# dist: 正規化空間の最近傍距離（閾値 3.0）\n")
-        sb.append("# f0..f8: accRms,accPeak,gyroRms,gyroPeak,tilt,jerkPeak,gravAx,gravAy,gravAz（正規化前）\n")
-        sb.append("ms,candidate,dist,f0,f1,f2,f3,f4,f5,f6,f7,f8\n")
+        sb.append("# f0..f20: accDynMaxX,accDynMaxY,accDynMaxZ,accDynMinX,accDynMinY,accDynMinZ,accDynRmsX,accDynRmsY,accDynRmsZ,gyroMeanX,gyroMeanY,gyroMeanZ,gyroRmsX,gyroRmsY,gyroRmsZ,accDynMagPeak,gyroMagPeak,tilt,gravAx,gravAy,gravAz（正規化前）\n")
+        sb.append("ms,candidate,dist,f0,f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19,f20\n")
         for (e in entries) {
             sb.append(e.ms).append(',').append(e.candidate).append(',')
               .append(String.format(Locale.US, "%.2f", e.dist))
