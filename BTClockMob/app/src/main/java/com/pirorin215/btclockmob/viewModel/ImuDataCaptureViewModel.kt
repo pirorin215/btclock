@@ -58,6 +58,7 @@ class ImuDataCaptureViewModel(
     /** 採取状態 */
     sealed class CaptureState {
         object Idle : CaptureState()
+        data class Countdown(val remaining: Int) : CaptureState()   // 開始遅延カウントダウン（残り秒）
         object Requesting : CaptureState()
         data class Recording(val progress: Float) : CaptureState()
         data class Receiving(val receivedChunks: Int, val totalChunks: Int) : CaptureState()
@@ -122,13 +123,30 @@ class ImuDataCaptureViewModel(
         }
     }
 
-    /** 「データ取得」ボタン押下: IMU_DUMP 要求を送信 */
-    fun requestDump(label: String, memo: String) {
+    /** 「データ取得」ボタン押下: 開始遅延後に IMU_DUMP 要求を送信 */
+    fun requestDump(label: String, memo: String, delaySec: Int = 0) {
         val conn = repository.connectionState.value
         if (conn !is ConnectionState.Connected) {
             _state.value = CaptureState.Error("デバイスに接続されていません")
             return
         }
+        if (delaySec > 0) {
+            // 開始遅延カウントダウン（セルフタイマー）。終了で beginCapture へ。
+            _state.value = CaptureState.Countdown(delaySec)
+            viewModelScope.launch {
+                for (remaining in delaySec downTo 1) {
+                    _state.value = CaptureState.Countdown(remaining)
+                    delay(1000)
+                }
+                if (_state.value is CaptureState.Countdown) beginCapture(label, memo)
+            }
+        } else {
+            beginCapture(label, memo)
+        }
+    }
+
+    /** 実際の採取開始: IMU_RECORD_START 送信 → 4秒録音 → チャンク受信 */
+    private fun beginCapture(label: String, memo: String) {
         pendingLabel = label
         pendingMemo = memo
         savedShareUri = null

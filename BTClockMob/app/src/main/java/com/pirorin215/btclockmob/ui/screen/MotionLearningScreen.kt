@@ -1,6 +1,7 @@
 package com.pirorin215.btclockmob.ui.screen
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,7 +66,8 @@ fun MotionLearningScreen(
 
     val isConnected = connectionState is ConnectionState.Connected
 
-    var labelToDelete by remember { mutableStateOf<MotionLearningViewModel.LabelCount?>(null) }
+    var selectedLabel by remember { mutableStateOf(IMU_LABELS.first()) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -109,44 +112,48 @@ fun MotionLearningScreen(
             }
 
             Text(
-                "ラベルを選んでデータを採取し、学習データに蓄積します。" +
-                    "パターン別の特徴量重心を学習してマイコンへ送信できます。",
+                "ラベルを行選択してデータを採取・蓄積し、パターン別重心を学習してマイコンへ送信できます。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // データ採取セクション（IMU採取と統合）
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ImuCaptureSection(captureViewModel)
-                }
-            }
-
-            // 学習サンプル一覧
+            // 学習データ（ラベル選択 + 件数）— 行選択が採取/削除の対象
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("学習データ: 合計 ${samples.size} 件", fontWeight = FontWeight.Bold)
-                    if (labelCounts.isEmpty()) {
-                        Text(
-                            "（未登録。採取画面で「学習データに追加」を押してください）",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    } else {
-                        labelCounts.forEach { lc ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("${lc.label}: ${lc.count} 件", style = MaterialTheme.typography.bodyMedium)
-                                IconButton(onClick = { labelToDelete = lc }, modifier = Modifier.size(36.dp)) {
-                                    Icon(Icons.Default.Delete, contentDescription = "${lc.label}を削除", tint = Color(0xFFF44336))
-                                }
-                            }
+                    Text(
+                        "行を選択 → 「データ取得開始」で採取、「削除」でそのラベルを削除します。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    IMU_LABELS.forEach { label ->
+                        val count = labelCounts.find { it.label == label }?.count ?: 0
+                        val isSelected = label == selectedLabel
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else Color.Transparent)
+                                .clickable { selectedLabel = label }
+                                .padding(vertical = 10.dp, horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(label, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                            Text("$count 件", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
-                    // 学習データ・モデル全削除（データのそばに配置）
+                    val selectedCount = labelCounts.find { it.label == selectedLabel }?.count ?: 0
+                    if (selectedCount > 0) {
+                        TextButton(
+                            onClick = { showDeleteDialog = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFF44336))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("「$selectedLabel」を削除 (${selectedCount}件)", color = Color(0xFFF44336))
+                        }
+                    }
                     if (samples.isNotEmpty() || model != null) {
                         TextButton(onClick = { viewModel.clearAll() }, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.Delete, contentDescription = null)
@@ -154,6 +161,13 @@ fun MotionLearningScreen(
                             Text("学習データとモデルを全削除")
                         }
                     }
+                }
+            }
+
+            // データ採取セクション（選択中ラベルへ採取）
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ImuCaptureSection(captureViewModel, selectedLabel)
                 }
             }
 
@@ -200,23 +214,24 @@ fun MotionLearningScreen(
             }
 
 
-            // ラベル単位削除の確認ダイアログ
-            labelToDelete?.let { lc ->
+            // 選択中ラベル削除の確認ダイアログ
+            if (showDeleteDialog) {
+                val selectedCount = labelCounts.find { it.label == selectedLabel }?.count ?: 0
                 AlertDialog(
-                    onDismissRequest = { labelToDelete = null },
+                    onDismissRequest = { showDeleteDialog = false },
                     title = { Text("学習データを削除") },
                     text = {
-                        Text("「${lc.label}」の学習データ（${lc.count}件）を削除しますか？\n" +
-                            "削除後、採取画面で再取得して「学習する」を押せば再学習できます。")
+                        Text("「$selectedLabel」の学習データ（${selectedCount}件）を削除しますか？\n" +
+                            "削除後、再取得して「学習してマイコンへ送信」で再学習できます。")
                     },
                     confirmButton = {
                         TextButton(onClick = {
-                            viewModel.deleteLabel(lc.label)
-                            labelToDelete = null
+                            viewModel.deleteLabel(selectedLabel)
+                            showDeleteDialog = false
                         }) { Text("削除", color = Color(0xFFF44336)) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { labelToDelete = null }) { Text("キャンセル") }
+                        TextButton(onClick = { showDeleteDialog = false }) { Text("キャンセル") }
                     }
                 )
             }

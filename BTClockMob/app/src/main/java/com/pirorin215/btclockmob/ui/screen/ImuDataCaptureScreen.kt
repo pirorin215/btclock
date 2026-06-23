@@ -2,6 +2,7 @@ package com.pirorin215.btclockmob.ui.screen
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -14,10 +15,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.pirorin215.btclockmob.data.ConnectionState
 import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
 
-private val IMU_LABELS = listOf("駐車A", "駐車B", "駐車C", "走行開始A", "走行開始B", "走行開始C", "停車A", "停車B", "停車C")
+val IMU_LABELS = listOf("駐車A", "駐車B", "駐車C", "走行開始A", "走行開始B", "走行開始C", "停車A", "停車B", "停車C")
 
 /**
  * モーション学習画面に組み込む IMU データ採取セクション。
@@ -28,52 +32,17 @@ private val IMU_LABELS = listOf("駐車A", "駐車B", "駐車C", "走行開始A"
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ImuCaptureSection(viewModel: ImuDataCaptureViewModel) {
+fun ImuCaptureSection(viewModel: ImuDataCaptureViewModel, selectedLabel: String) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
 
     val isConnected = connectionState is ConnectionState.Connected
 
-    var selectedLabel by remember { mutableStateOf(IMU_LABELS.first()) }
     var memo by remember { mutableStateOf("") }
-    var labelExpanded by remember { mutableStateOf(false) }
+    var selectedDelay by remember { mutableStateOf(0) }
 
     Text("データ採取", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    Text(
-        "デバイスのリングバッファ（直近10秒・50Hz）を取得し、学習データに追加します。" +
-            "取得したい動作をさせてから「データ取得」を押してください。",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-
-    // ラベル選択（固定リスト Dropdown）
-    ExposedDropdownMenuBox(
-        expanded = labelExpanded,
-        onExpandedChange = { labelExpanded = it }
-    ) {
-        OutlinedTextField(
-            value = selectedLabel,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("ラベル") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = labelExpanded) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor()
-        )
-        ExposedDropdownMenu(
-            expanded = labelExpanded,
-            onDismissRequest = { labelExpanded = false }
-        ) {
-            IMU_LABELS.forEach { label ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = { selectedLabel = label; labelExpanded = false }
-                )
-            }
-        }
-    }
 
     // メモ
     OutlinedTextField(
@@ -84,22 +53,36 @@ fun ImuCaptureSection(viewModel: ImuDataCaptureViewModel) {
         minLines = 2
     )
 
-    // 取得ボタン
+    // 開始遅延（セルフタイマー）
+    Text("開始遅延秒", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(0, 5, 10, 15).forEach { sec ->
+            FilterChip(
+                selected = selectedDelay == sec,
+                onClick = { selectedDelay = sec },
+                label = { Text("${sec}秒") }
+            )
+        }
+    }
+
+    // 取得ボタン（フィールドで押しやすいよう縦幅を拡大）
     val busy = state is ImuDataCaptureViewModel.CaptureState.Requesting ||
         state is ImuDataCaptureViewModel.CaptureState.Recording ||
-        state is ImuDataCaptureViewModel.CaptureState.Receiving
+        state is ImuDataCaptureViewModel.CaptureState.Receiving ||
+        state is ImuDataCaptureViewModel.CaptureState.Countdown
     Button(
-        onClick = { viewModel.requestDump(selectedLabel, memo) },
-        modifier = Modifier.fillMaxWidth(),
+        onClick = { viewModel.requestDump(selectedLabel, memo, selectedDelay) },
+        modifier = Modifier.fillMaxWidth().height(72.dp),
         enabled = isConnected && !busy
     ) {
         Icon(Icons.Default.PlayArrow, contentDescription = null)
         Spacer(modifier = Modifier.width(8.dp))
-        Text("データ取得開始")
+        Text("データ取得開始", style = MaterialTheme.typography.titleMedium)
     }
 
     // 進捗・結果
     when (val s = state) {
+        is ImuDataCaptureViewModel.CaptureState.Countdown -> { /* 全画面ダイアログで表示 */ }
         is ImuDataCaptureViewModel.CaptureState.Requesting -> {
             Text("デバイスに要求中...", style = MaterialTheme.typography.bodyMedium)
         }
@@ -210,5 +193,44 @@ fun ImuCaptureSection(viewModel: ImuDataCaptureViewModel) {
         Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
         Spacer(modifier = Modifier.width(8.dp))
         Text("CSVをシェア")
+    }
+    // 開始遅延カウントダウン: 全画面スプラッシュ表示
+    val countdownState = state as? ImuDataCaptureViewModel.CaptureState.Countdown
+    if (countdownState != null) {
+        Dialog(
+            onDismissRequest = {},
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.88f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        selectedLabel,
+                        color = Color.White.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "${countdownState.remaining}",
+                        color = Color.White,
+                        fontSize = 200.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "秒後に採取開始",
+                        color = Color.White.copy(alpha = 0.8f),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+        }
     }
 }
