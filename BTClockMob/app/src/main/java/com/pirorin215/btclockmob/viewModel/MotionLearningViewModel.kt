@@ -77,6 +77,14 @@ class MotionLearningViewModel(
         viewModelScope.launch { repository.clearSamples() }
     }
 
+    /** 指定ラベルの学習サンプルを削除し、モデルを未学習状態に戻す（再学習を促す・古い重心の誤送信防止） */
+    fun deleteLabel(label: String) {
+        viewModelScope.launch {
+            repository.deleteSamplesByLabel(label)
+            repository.clearModel()
+        }
+    }
+
     /** 学習サンプルと学習済みモデルを全削除（完全リセット） */
     fun clearAll() {
         viewModelScope.launch {

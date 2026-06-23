@@ -96,7 +96,6 @@ fun MainScreen(
     var showAppLogPanel by remember { mutableStateOf(false) }
     var showKeyCodeSettings by remember { mutableStateOf(false) }
     var showNotificationDebug by remember { mutableStateOf(false) }
-    var showImuDataCapture by remember { mutableStateOf(false) }
     var showMotionLearning by remember { mutableStateOf(false) }
     var showInferenceLog by remember { mutableStateOf(false) }
 
@@ -122,15 +121,13 @@ fun MainScreen(
     val motionLearningViewModel: MotionLearningViewModel = koinViewModel()
     val inferenceLogViewModel: InferenceLogViewModel = koinViewModel()
 
-    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug || showImuDataCapture || showMotionLearning || showInferenceLog) {
+    BackHandler(enabled = isSelectionMode || showAppSettings || showKeyCodeSettings || showNotificationDebug || showMotionLearning || showInferenceLog) {
         if (showAppSettings) {
             showAppSettings = false
         } else if (showKeyCodeSettings) {
             showKeyCodeSettings = false
         } else if (showNotificationDebug) {
             showNotificationDebug = false
-        } else if (showImuDataCapture) {
-            showImuDataCapture = false
         } else if (showMotionLearning) {
             showMotionLearning = false
         } else if (showInferenceLog) {
@@ -174,15 +171,10 @@ fun MainScreen(
                 onBack = { showNotificationDebug = false }
             )
         }
-        showImuDataCapture -> {
-            ImuDataCaptureScreen(
-                viewModel = imuDataCaptureViewModel,
-                onBack = { showImuDataCapture = false }
-            )
-        }
         showMotionLearning -> {
             MotionLearningScreen(
                 viewModel = motionLearningViewModel,
+                captureViewModel = imuDataCaptureViewModel,
                 onBack = { showMotionLearning = false }
             )
         }
@@ -309,13 +301,6 @@ fun MainScreen(
                                         text = { Text("通知デバッグ") },
                                         onClick = {
                                             showNotificationDebug = true
-                                            expanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("IMU採取") },
-                                        onClick = {
-                                            showImuDataCapture = true
                                             expanded = false
                                         }
                                     )

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,6 +34,9 @@ import androidx.compose.material3.Button
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -40,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pirorin215.btclockmob.data.ConnectionState
 import com.pirorin215.btclockmob.viewModel.MotionLearningViewModel
+import com.pirorin215.btclockmob.viewModel.ImuDataCaptureViewModel
 
 /**
  * モーションパターン学習画面（Phase 1）。
@@ -49,6 +54,7 @@ import com.pirorin215.btclockmob.viewModel.MotionLearningViewModel
 @Composable
 fun MotionLearningScreen(
     viewModel: MotionLearningViewModel,
+    captureViewModel: ImuDataCaptureViewModel,
     onBack: () -> Unit
 ) {
     val samples by viewModel.samples.collectAsState()
@@ -58,6 +64,8 @@ fun MotionLearningScreen(
     val sendState by viewModel.sendState.collectAsState()
 
     val isConnected = connectionState is ConnectionState.Connected
+
+    var labelToDelete by remember { mutableStateOf<MotionLearningViewModel.LabelCount?>(null) }
 
     Scaffold(
         topBar = {
@@ -102,11 +110,18 @@ fun MotionLearningScreen(
             }
 
             Text(
-                "採取画面で取得したモーションをラベル付きで蓄積し、パターン別の特徴量重心を学習します。" +
-                    "学習したモデルはマイコンへ送信できます（マイコン側の受信は Phase 2 以降）。",
+                "ラベルを選んでデータを採取し、学習データに蓄積します。" +
+                    "パターン別の特徴量重心を学習してマイコンへ送信できます。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+
+            // データ採取セクション（IMU採取と統合）
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ImuCaptureSection(captureViewModel)
+                }
+            }
 
             // 学習サンプル一覧
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -120,7 +135,16 @@ fun MotionLearningScreen(
                         )
                     } else {
                         labelCounts.forEach { lc ->
-                            Text("  ${lc.label}: ${lc.count} 件", style = MaterialTheme.typography.bodyMedium)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("${lc.label}: ${lc.count} 件", style = MaterialTheme.typography.bodyMedium)
+                                IconButton(onClick = { labelToDelete = lc }, modifier = Modifier.size(36.dp)) {
+                                    Icon(Icons.Default.Delete, contentDescription = "${lc.label}を削除", tint = Color(0xFFF44336))
+                                }
+                            }
                         }
                     }
                 }
@@ -182,6 +206,27 @@ fun MotionLearningScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("学習データとモデルを全削除")
                 }
+            }
+
+            // ラベル単位削除の確認ダイアログ
+            labelToDelete?.let { lc ->
+                AlertDialog(
+                    onDismissRequest = { labelToDelete = null },
+                    title = { Text("学習データを削除") },
+                    text = {
+                        Text("「${lc.label}」の学習データ（${lc.count}件）を削除しますか？\n" +
+                            "削除後、採取画面で再取得して「学習する」を押せば再学習できます。")
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            viewModel.deleteLabel(lc.label)
+                            labelToDelete = null
+                        }) { Text("削除", color = Color(0xFFF44336)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { labelToDelete = null }) { Text("キャンセル") }
+                    }
+                )
             }
         }
     }

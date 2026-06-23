@@ -49,6 +49,16 @@ class MotionTrainingRepository(private val context: Context) {
         context.motionDataStore.edit { it.remove(SAMPLES) }
     }
 
+    /** 指定ラベルの学習サンプルを削除（項目単位の修正・再学習用） */
+    suspend fun deleteSamplesByLabel(label: String) {
+        context.motionDataStore.edit { prefs ->
+            val current = prefs[SAMPLES]
+                ?.let { JsonUtil.json.decodeFromString<List<LabeledFeatures>>(it) }
+                ?: emptyList()
+            prefs[SAMPLES] = JsonUtil.json.encodeToString(current.filterNot { it.label == label })
+        }
+    }
+
     suspend fun saveModel(model: MotionModel) {
         context.motionDataStore.edit { prefs ->
             prefs[MODEL] = JsonUtil.json.encodeToString(model)
