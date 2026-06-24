@@ -102,6 +102,7 @@ fun MainScreen(
     var showConfirmDialog by remember { mutableStateOf(false) }
     var showDeleteSelectedDialog by remember { mutableStateOf(false) }
     var showRouteDialogDate by remember { mutableStateOf<String?>(null) }
+    var showDeleteDateDialog by remember { mutableStateOf<String?>(null) }
     
     // 現在選択されている日のエントリを動的に取得（フィルター変更に追従）
     val routeEntries = remember(entriesForList, showRouteDialogDate) {
@@ -444,7 +445,9 @@ fun MainScreen(
                                                     },
                                                     onShowRoute = {
                                                         showRouteDialogDate = date
-                                                    }
+                                                    },
+                                                    onDeleteDate = { showDeleteDateDialog = date },
+                                                    canDelete = !isSelectionMode
 
                                                 )
                                             }
@@ -556,6 +559,30 @@ fun MainScreen(
             dismissButton = {
                 TextButton(
                     onClick = { showDeleteSelectedDialog = false }
+                ) {
+                    Text(stringResource(R.string.cancel_button))
+                }
+            }
+        )
+    }
+    showDeleteDateDialog?.let { date ->
+        AlertDialog(
+            onDismissRequest = { showDeleteDateDialog = null },
+            title = { Text(stringResource(R.string.confirm_delete_date_title)) },
+            text = { Text(stringResource(R.string.confirm_delete_date_message, date)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        historyViewModel.deleteEntriesByDate(date)
+                        showDeleteDateDialog = null
+                    }
+                ) {
+                    Text(stringResource(R.string.delete_button))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteDateDialog = null }
                 ) {
                     Text(stringResource(R.string.cancel_button))
                 }

@@ -13,25 +13,14 @@
  *        │ (日付) │                     │
  *        └────────┴─────────────────────┘
  *          ↑縦線
- *        左欄: 曜日(上)・日付(下)を縦に表示
- *
- *   - 時刻        : 現在時刻 HH:MM（logisoso62_tn 62px, 右寄せ）
- *   - 曜日        : 漢字32px（左欄上半分）。GNU Unifont 16x16ビットマップを2倍拡大
- *   - 日付        : getDay() 数字32px（左欄下半分）
- *   - 乗車時間    : 電源ONからの経過(millisベース) HH:MM（logisoso32_tn 32px, 右寄せ）
- *                   ※時刻同期で時刻がジャンプしても継続＝実際の乗車時間
- *   - 区切り線    : 縦線(左欄/右欄)、横線(時刻/乗車時間)
  *
  * 更新戦略:
- *   - 分が変化 / 日が変化 / 初回同期 → 全画面フル更新（文字のにじみや薄化を防ぎコントラストを最大化）
- *   - 未同期 → 「時刻未同期」固定表示（乗車時間も非表示）
+ *   - 分/日変化・初回同期 → フル更新（文字のにじみ防止・コントラスト最大化）
+ *   - 未同期 → 「時刻未同期」固定表示
  *
- * ハードウェア:
- *   - 専用 SPI3_HOST バス（SPIClass epdSPI(HSPI)）を使用。
- *   - CS=1, DC=2, RST=3, BUSY=10, SCK=12, MOSI=11
- *
- * 注意: ePaper更新はブロッキング（部分~0.3s / フル~3s）だが、NimBLEは別FreeRTOS
- * タスクで稼働するためBLE時刻同期の応答性は影響しない。
+ * ハードウェア: 専用 SPI3_HOST バス(CS=1,DC=2,RST=3,BUSY=10,SCK=12,MOSI=11)。
+ * ePaper更新はブロッキング(部分~0.3s/フル~3s)だが、NimBLEは別FreeRTOSタスクで
+ * 稼働するためBLE時刻同期の応答性には影響しない。
  */
 
 #include "bikeclock.h"
@@ -108,10 +97,9 @@ static const uint16_t KANJI_WEEKDAY[7][16] = {
 // ====================================================================
 // 乗車時間（電源ONからの経過、millisベース）
 // ====================================================================
-// 時刻同期(BLE)で g_currentTimestamp がジャンプしても影響しない＝実際の乗車時間。
+// millisベースなので時刻同期(BLE)で g_currentTimestamp がジャンプしても影響しない＝実際の乗車時間。
 static void getRideTime(int* hours, int* minutes) {
-    unsigned long elapsedMs = millis() - g_startupMillis;
-    unsigned long totalMin = elapsedMs / 60000UL;
+    unsigned long totalMin = (millis() - g_startupMillis) / 60000UL;
     *hours   = (int)(totalMin / 60UL);
     *minutes = (int)(totalMin % 60UL);
 }
@@ -146,8 +134,15 @@ static const char* keyNameFromCode(uint16_t code) {
 // 描画ヘルパ
 // ====================================================================
 
-// 16x16 ビットマップを scale 倍で描画（曜日漢字用。scale=2 → 32x32）。
-// 左上を(x,y)とする。MSB=左端ピクセル。
+// フォント選択とePaper向け共通設定（黒字/白地/ブレンド）。全描画で同一のため共通化。
+static void setFont(const uint8_t* font) {
+    u8g2Fonts.setFont(font);
+    u8g2Fonts.setFontMode(1);
+    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
+    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+}
+
+// 16x16 ビットマップを scale 倍で描画（曜日漢字用）。左上(x,y), MSB=左端。
 static void drawKanji16x16(int16_t x, int16_t y, const uint16_t* bmp, int16_t scale) {
     for (int16_t row = 0; row < 16; row++) {
         uint16_t bits = bmp[row];
@@ -159,7 +154,7 @@ static void drawKanji16x16(int16_t x, int16_t y, const uint16_t* bmp, int16_t sc
     }
 }
 
-// 太字版: 各黒ピクセルの上下左右に1px追加してストロークを太くする（曜日漢字用）
+// 太字版: 各黒ピクセルから上下左右に1px膨張させてストロークを太くする（曜日漢字用）
 static void drawKanji16x16Bold(int16_t x, int16_t y, const uint16_t* bmp, int16_t scale) {
     for (int16_t row = 0; row < 16; row++) {
         uint16_t bits = bmp[row];
@@ -168,16 +163,16 @@ static void drawKanji16x16Bold(int16_t x, int16_t y, const uint16_t* bmp, int16_
                 int16_t px = x + col * scale;
                 int16_t py = y + row * scale;
                 g_epaper.fillRect(px, py, scale, scale, GxEPD_BLACK);
-                g_epaper.fillRect(px + scale, py, 1, scale, GxEPD_BLACK);  // 右に1px膨張
-                g_epaper.fillRect(px - 1, py, 1, scale, GxEPD_BLACK);      // 左に1px膨張
-                g_epaper.fillRect(px, py + scale, scale, 1, GxEPD_BLACK);  // 下に1px膨張
-                g_epaper.fillRect(px, py - 1, scale, 1, GxEPD_BLACK);      // 上に1px膨張
+                g_epaper.fillRect(px + scale, py, 1, scale, GxEPD_BLACK);
+                g_epaper.fillRect(px - 1, py, 1, scale, GxEPD_BLACK);
+                g_epaper.fillRect(px, py + scale, scale, 1, GxEPD_BLACK);
+                g_epaper.fillRect(px, py - 1, scale, 1, GxEPD_BLACK);
             }
         }
     }
 }
 
-// 経過時間アイコン（時計: 太い円＋太い針）。center(cx,cy), 半径r
+// 経過時間アイコン（時計: 太い円＋太い針）。center(cx,cy), 半径r。
 // gfx: 描画先（g_epaper 直接 / ScaledGFX 拡大描画。スケールは gfx 側で吸収）。
 static void drawClockIcon(Adafruit_GFX& gfx, int16_t cx, int16_t cy, int16_t r) {
     // 太い文字盤（2重円で2px線）
@@ -196,15 +191,12 @@ static void drawClockIcon(Adafruit_GFX& gfx, int16_t cx, int16_t cy, int16_t r) 
 }
 
 // 数字フォントで HH:MM を左端 x から左寄せ描画（コロンは fillCircle で2点）。
-// gfx: 描画先（u8g2Fonts の begin 先と一致させること）。
+// gfx は u8g2Fonts.begin() の描画先と一致させること。
 static void drawHHMM(Adafruit_GFX& gfx, int16_t x, int16_t baselineY,
                      int hours, int minutes,
                      const uint8_t* font, int16_t gap,
                      int16_t dotR, int16_t dotOff) {
-    u8g2Fonts.setFont(font);
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
-    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+    setFont(font);
 
     char buf[4];
     snprintf(buf, sizeof(buf), "%02d", hours);
@@ -224,8 +216,7 @@ static void drawHHMM(Adafruit_GFX& gfx, int16_t x, int16_t baselineY,
     u8g2Fonts.print(buf);
 }
 
-// 数字のみフォント(_tn)で HH MM を「右寄せ」描画（時刻・乗車時間共用）。
-// drawHHMM に右端xを計算して委譲。コロンは fillCircle で2点。
+// 数字のみフォント(_tn)で HH MM を右寄せ描画（時刻・乗車時間共用）。drawHHMM に委譲。
 static void drawClockDigitsRight(Adafruit_GFX& gfx, int16_t rightX, int16_t baselineY,
                                  int hours, int minutes,
                                  const uint8_t* font, int16_t gap,
@@ -242,33 +233,27 @@ static void drawClockDigitsRight(Adafruit_GFX& gfx, int16_t rightX, int16_t base
 
 // 区切り線（縦線: 左欄/右欄、横線: 時刻/乗車時間）
 static void drawDividers() {
-    // 縦線（全高）
     g_epaper.fillRect(DIVIDER_X, 0, LINE_W, EP_H, GxEPD_BLACK);
-    // 横線（縦線から右端まで）
     g_epaper.fillRect(DIVIDER_X, DIVIDER_Y, EP_W - DIVIDER_X, LINE_W, GxEPD_BLACK);
 }
 
 // 左欄: 曜日漢字(上半分) + 日付数字(下半分) を縦に配置（左端基準）
 static void drawLeftPanel() {
-    // --- 曜日漢字48px(3倍)（上段 0〜DIVIDER_Y の中央、左端配置） ---
+    // --- 曜日漢字48px(3倍)（上段中央、左端配置） ---
     const int16_t kw = 48;  // 16x16を3倍
-    int16_t kx = LEFT_MARGIN;                       // 左端
-    int16_t ky = DIVIDER_Y / 2 - kw / 2;            // 上段中央(39)-24=15
+    int16_t kx = LEFT_MARGIN;
+    int16_t ky = DIVIDER_Y / 2 - kw / 2;
     drawKanji16x16Bold(kx, ky, KANJI_WEEKDAY[getWeekday()], 3);
 
-    // --- 日付数字 logisoso38（下段 DIVIDER_Y〜EP_H の中央、左端配置） ---
-    u8g2Fonts.setFont(u8g2_font_logisoso38_tn);
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
-    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+    // --- 日付数字 logisoso38（下段中央、左端配置） ---
+    setFont(u8g2_font_logisoso38_tn);
 
     char dayBuf[4];
     snprintf(dayBuf, sizeof(dayBuf), "%d", getDay());
     int dayW = u8g2Fonts.getUTF8Width(dayBuf);
     int16_t asc = u8g2Fonts.getFontAscent();
-    int16_t dx = LEFT_MARGIN - 5;                    // 日付は左端からさらに5px左（視覚的左寄せ）
-    int16_t centerDownY = (DIVIDER_Y + EP_H) / 2;   // 下段中央(100)
-    int16_t dBaselineY = centerDownY + asc / 2;     // 中心→ベースライン
+    int16_t dx = LEFT_MARGIN - 5;                    // 数字は左端からさらに5px左（視覚的左寄せ）
+    int16_t dBaselineY = (DIVIDER_Y + EP_H) / 2 + asc / 2;
     u8g2Fonts.setCursor(dx, dBaselineY);
     u8g2Fonts.print(dayBuf);
 
@@ -303,44 +288,49 @@ public:
     void endWrite() override { _realGfx.endWrite(); }
 };
 
-// 中央揃えテキスト（unifont日本語、未同期/スプラッシュ用）
-static void drawCenteredText(const char* text, int16_t baselineY) {
-    u8g2Fonts.setFont(u8g2_font_unifont_t_japanese3);
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
-    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+// 中央揃えテキスト（unifont日本語）。
+// scale>1 で ScaledGFX により拡大（scale=2 → 実32px相当）。baselineY は実ピクセル座標
+// （拡大時は内部で仮想座標 baselineY/scale に変換）。スプラッシュ/OTA は scale=1 のまま。
+static void drawCenteredText(const char* text, int16_t baselineY, int16_t scale = 1) {
+    setFont(u8g2_font_unifont_t_japanese3);
     int w = u8g2Fonts.getUTF8Width(text);
-    u8g2Fonts.setCursor((EP_W - w) / 2, baselineY);
+    if (scale == 1) {
+        u8g2Fonts.setCursor((EP_W - w) / 2, baselineY);
+        u8g2Fonts.print(text);
+        return;
+    }
+    ScaledGFX scaledGfx(g_epaper, scale);
+    u8g2Fonts.begin(scaledGfx);
+    u8g2Fonts.setCursor((EP_W / scale - w) / 2, baselineY / scale);
     u8g2Fonts.print(text);
+    u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
 }
 
-// UTF-8 文字列の文字数を返す（バイト数ではない）。
-// 通知フォントサイズの段階切替（Phase 10 拡張）で使用。
+// UTF-8先頭バイトから1文字のバイト長(1-4)を返す。不正バイトは0。
+static uint8_t utf8Len(const char* p) {
+    if ((*p & 0x80) == 0) return 1;
+    if ((*p & 0xE0) == 0xC0) return 2;
+    if ((*p & 0xF0) == 0xE0) return 3;
+    if ((*p & 0xF8) == 0xF0) return 4;
+    return 0;
+}
+
+// UTF-8 文字列の文字数（バイト数ではない）。通知フォントサイズの段階切替で使用。
 static int utf8CharCount(const char* text) {
     int count = 0;
-    const char* p = text;
-    while (*p) {
-        uint8_t len = 0;
-        if ((*p & 0x80) == 0) len = 1;
-        else if ((*p & 0xE0) == 0xC0) len = 2;
-        else if ((*p & 0xF0) == 0xE0) len = 3;
-        else if ((*p & 0xF8) == 0xF0) len = 4;
-        else { p++; continue; }
+    for (const char* p = text; *p; ) {
+        uint8_t len = utf8Len(p);
+        if (!len) { p++; continue; }
         count++;
         p += len;
     }
     return count;
 }
 
-// 日本語自動折返し描画（epaper_test.ino から移植、Phase 10 通知表示用）
-// UTF-8 を1文字ずつ描画し、maxWidth を超えると改行する。分割線なしでテキスト埋め。
+// 日本語自動折返し描画（通知表示用）。UTF-8 を1文字ずつ描画し、maxWidth を超えると改行。
 static void drawWrappedText(int16_t x, int16_t y, const char* text,
-                            const uint8_t* font, uint16_t fg, uint16_t bg,
-                            int16_t maxWidth) {
-    u8g2Fonts.setFont(font);
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(fg);
-    u8g2Fonts.setBackgroundColor(bg);
+                            const uint8_t* font, int16_t maxWidth) {
+    setFont(font);
 
     int16_t cursorX = x;
     int16_t lineHeight = u8g2Fonts.getFontAscent() - u8g2Fonts.getFontDescent() + 6;
@@ -348,12 +338,8 @@ static void drawWrappedText(int16_t x, int16_t y, const char* text,
 
     const char* p = text;
     while (*p) {
-        uint8_t len = 0;
-        if ((*p & 0x80) == 0) len = 1;
-        else if ((*p & 0xE0) == 0xC0) len = 2;
-        else if ((*p & 0xF0) == 0xE0) len = 3;
-        else if ((*p & 0xF8) == 0xF0) len = 4;
-        else { p++; continue; }   // 不正なバイトは読み飛ばし
+        uint8_t len = utf8Len(p);
+        if (!len) { p++; continue; }   // 不正バイトは読み飛ばし
 
         char buf[5] = {0};
         strncpy(buf, p, len);
@@ -371,75 +357,68 @@ static void drawWrappedText(int16_t x, int16_t y, const char* text,
 }
 
 // バージョン番号 "ver major.minor.patch" を画面中央に描画。
-// 「ver」は24pxフォント、番号は巨大数字フォント(_tn)。ピリオドは数字の下端寄り。
-// （数字フォントは英字・ピリオド非収録のため「ver」は別フォント、ピリオドは fillCircle）
+// 「ver」は34pxフォント、番号は巨大数字フォント。ピリオドは数字フォントが非収録のため fillCircle。
 static void drawVersionBig(const uint8_t* font, int16_t baselineY, int16_t dotR) {
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
-    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+    const int parts[] = { FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH };
+    setFont(font);
 
-    // --- 巨大数字フォント: 各番号の幅 ---
-    u8g2Fonts.setFont(font);
     char buf[4];
-    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_MAJOR);
-    int16_t majW = u8g2Fonts.getUTF8Width(buf);
-    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_MINOR);
-    int16_t minW = u8g2Fonts.getUTF8Width(buf);
-    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_PATCH);
-    int16_t patW = u8g2Fonts.getUTF8Width(buf);
+    int16_t width[3];
+    for (int i = 0; i < 3; i++) {
+        snprintf(buf, sizeof(buf), "%d", parts[i]);
+        width[i] = u8g2Fonts.getUTF8Width(buf);
+    }
 
-    const int16_t dotSlot = dotR * 2 + 8;   // ピリオド区画幅（ドット+両側余白、14から8に縮小）
-    const int16_t digitsW = majW + dotSlot + minW + dotSlot + patW;
+    const int16_t dotSlot = dotR * 2 + 8;   // ピリオド区画幅（ドット+両側余白）
+    const int16_t digitsW = width[0] + dotSlot + width[1] + dotSlot + width[2];
 
-    // --- 「ver」プレフィックス(34px)の幅 ---
+    // 「ver」プレフィックス(34px)の幅
     static const char prefix[] = "ver";
     u8g2Fonts.setFont(u8g2_font_logisoso34_tf);
     const int16_t prefixW = u8g2Fonts.getUTF8Width(prefix);
-    const int16_t gap = 0;  // ver と数字の間の固定余白
 
-    // --- 全体中央寄せ開始x ---
-    int16_t x = (EP_W - (prefixW + gap + digitsW)) / 2;
+    // 全体中央寄せ開始x
+    int16_t x = (EP_W - (prefixW + digitsW)) / 2;
+    const int16_t dotY = baselineY - dotR;   // ドットは数字の下端寄り
 
-    // --- 点のy（数字の下端寄り。ベースライン - 半径 で数字の底に接する） ---
-    const int16_t dotY = baselineY - dotR;
-
-    // --- 「ver」描画（34px、ベースライン揃え） ---
+    // 「ver」描画（34px、ベースライン揃え）
     u8g2Fonts.setCursor(x, baselineY);
     u8g2Fonts.print(prefix);
-    x += prefixW + gap;
+    x += prefixW;
 
-    // --- 番号描画（巨大フォント） ---
+    // 番号描画（巨大フォント）。末尾以外はピリオドを挟む。
     u8g2Fonts.setFont(font);
-
-    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_MAJOR);
-    u8g2Fonts.setCursor(x, baselineY);
-    u8g2Fonts.print(buf);
-    x += majW + dotSlot / 2;
-    g_epaper.fillCircle(x, dotY, dotR, GxEPD_BLACK);
-    x += dotSlot / 2;
-
-    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_MINOR);
-    u8g2Fonts.setCursor(x, baselineY);
-    u8g2Fonts.print(buf);
-    x += minW + dotSlot / 2;
-    g_epaper.fillCircle(x, dotY, dotR, GxEPD_BLACK);
-    x += dotSlot / 2;
-
-    snprintf(buf, sizeof(buf), "%d", FIRMWARE_VERSION_PATCH);
-    u8g2Fonts.setCursor(x, baselineY);
-    u8g2Fonts.print(buf);
+    for (int i = 0; i < 3; i++) {
+        snprintf(buf, sizeof(buf), "%d", parts[i]);
+        u8g2Fonts.setCursor(x, baselineY);
+        u8g2Fonts.print(buf);
+        x += width[i];
+        if (i < 2) {
+            x += dotSlot / 2;
+            g_epaper.fillCircle(x, dotY, dotR, GxEPD_BLACK);
+            x += dotSlot / 2;
+        }
+    }
 }
 
 // ====================================================================
 // 画面描画
 // ====================================================================
 
+// フル画面をページ単位で描画。GxEPD2 の paged-update 定型句の共通化。
+// マクロ化しているのは、関数テンプレートだと Arduino の自動プロトタイプ生成が
+// 壊れるため（テンプレート仮引数型の前方宣言を勝手に出力してしまう）。
+#define DRAW_PAGED(...) \
+    g_epaper.setFullWindow(); \
+    g_epaper.firstPage(); \
+    do { \
+        g_epaper.fillScreen(GxEPD_WHITE); \
+        __VA_ARGS__; \
+    } while (g_epaper.nextPage())
+
 // 時計画面（常にフル更新）
 static void drawEpaperClock() {
-    g_epaper.setFullWindow();
-    g_epaper.firstPage();
-    do {
-        g_epaper.fillScreen(GxEPD_WHITE);
+    DRAW_PAGED({
         drawDividers();
         drawLeftPanel();
         // 時刻（右寄せ、上段）
@@ -452,25 +431,23 @@ static void drawEpaperClock() {
                              u8g2_font_logisoso32_tn, 14, 2, 5);
         // 経過時間アイコン（時計）
         drawClockIcon(g_epaper, ICON_CX, ICON_CY, ICON_R);
-    } while (g_epaper.nextPage());
+    });
 }
 
-// 通知表示（Phase 10 本実装）: 本文テキストを全画面に自動折返し描画（分割線なし）
-// アプリ名は非表示（ユーザー選択: 本文のみレイアウト）。
-// 文字数に応じてフォントサイズを3段階で切替（短文ほど大きく）。
+// 通知表示: 本文テキストを全画面に自動折返し描画。
+// 文字数に応じてフォントサイズを段階切替（NOTIFY_FONT_SETTINGS）。
 //   12字以下 → 16px / 13〜40字 → 12px / 41字以上 → 10px
 // ※ onWrite(BLEタスク) と競合しないよう、ページループ前にローカルコピーを取り、
-//    ループ内ではそのコピーを使う（GxEPD2 の paged update は各ページで再描画するため）。
+//    ループ内ではそのコピーを使う（paged update は各ページで再描画するため）。
 static void drawEpaperNotification(const char* text) {
     static char safeText[NOTIFY_TEXT_LEN];
     strncpy(safeText, text, NOTIFY_TEXT_LEN - 1);
     safeText[NOTIFY_TEXT_LEN - 1] = '\0';
 
-    // 文字数でフォントサイズとスケーリングを判定（NOTIFY_FONT_SETTINGS 設定配列を使用）
+    // 文字数でフォントサイズとスケーリングを判定
     const uint8_t* font = u8g2_font_b10_t_japanese2; // デフォルトフォールバック
     int scale = 1;
     const int n = utf8CharCount(safeText);
-
     for (size_t i = 0; i < NUM_NOTIFY_FONT_SETTINGS; i++) {
         if (n <= NOTIFY_FONT_SETTINGS[i].maxChars) {
             font = NOTIFY_FONT_SETTINGS[i].font;
@@ -483,37 +460,26 @@ static void drawEpaperNotification(const char* text) {
     logPrint("NOTIFY", "Text: '%s', UTF8 chars: %d, selected font size: %dpx, scale: %dx (effective: %dpx)",
              safeText, n, baseSize, scale, baseSize * scale);
 
-    g_epaper.setFullWindow();
-    g_epaper.firstPage();
-    do {
-        g_epaper.fillScreen(GxEPD_WHITE);
+    DRAW_PAGED({
         if (safeText[0] != '\0') {
             if (scale > 1) {
                 ScaledGFX scaledGfx(g_epaper, scale);
                 u8g2Fonts.begin(scaledGfx);
-                drawWrappedText(0, 0, safeText, font, GxEPD_BLACK, GxEPD_WHITE, EP_W / scale);
+                drawWrappedText(0, 0, safeText, font, EP_W / scale);
                 u8g2Fonts.begin(g_epaper); // 元に戻す
             } else {
-                drawWrappedText(0, 0, safeText, font, GxEPD_BLACK, GxEPD_WHITE, EP_W);
+                drawWrappedText(0, 0, safeText, font, EP_W);
             }
         } else {
-            drawCenteredText("通知なし", EP_H / 2);
+            drawCenteredText("通知なし", 76, 2);
         }
-    } while (g_epaper.nextPage());
+    });
 }
 
-// 詳細表示（モードC）: 開始時刻 / 経過時間 / 現在日時 / HIDキー設定
-// 16px級フォントで情報密度高く。切替時の1回だけ描画（スナップショット）。
+// 詳細表示（モードC）: 開始時刻 / 経過時間 / 現在日時 / HIDキー設定。スナップショット（1回のみ描画）。
 static void drawEpaperDetail() {
-    u8g2Fonts.setFont(u8g2_font_unifont_t_japanese3);
-    u8g2Fonts.setFontMode(1);
-    u8g2Fonts.setForegroundColor(GxEPD_BLACK);
-    u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
-
-    g_epaper.setFullWindow();
-    g_epaper.firstPage();
-    do {
-        g_epaper.fillScreen(GxEPD_WHITE);
+    DRAW_PAGED({
+        setFont(u8g2_font_unifont_t_japanese3);
 
         char buf[48];
         const int16_t x = 4;
@@ -555,26 +521,20 @@ static void drawEpaperDetail() {
             u8g2Fonts.setCursor(x + col * col2, y + row * lh);
             u8g2Fonts.print(buf);
         }
-    } while (g_epaper.nextPage());
+    });
 }
 
-// 詳細大表示（モード4）: 日付＋曜日 / 経過 / 開始〜現在 を2倍拡大で3行表示。②経過はlogisoso20(実40px)・①③はb16(実32px)。
+// 詳細大表示（モード4）: 日付＋曜日 / 経過 / 開始〜現在 を2倍拡大で3行表示。
+//   ②経過はlogisoso20(実40px)・①③はb16(実32px)。
 // 日付は画面幅(250px)の制約でスラッシュ短縮形 "2026/06/24 水" とし32pxに収める。
 // スナップショット（FUNC切替時に1回のみ描画・以降更新なし）。
 static void drawEpaperDetailLarge() {
     const int scale = 2;
 
-    g_epaper.setFullWindow();
-    g_epaper.firstPage();
-    do {
-        g_epaper.fillScreen(GxEPD_WHITE);
-
+    DRAW_PAGED({
         ScaledGFX scaledGfx(g_epaper, scale);
         u8g2Fonts.begin(scaledGfx);
-        u8g2Fonts.setFont(u8g2_font_b16_t_japanese3);
-        u8g2Fonts.setFontMode(1);
-        u8g2Fonts.setForegroundColor(GxEPD_BLACK);
-        u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+        setFont(u8g2_font_b16_t_japanese3);
 
         int16_t y = 10;          // 1行目ベースライン（②経過行を大きく取るため上詰め）
         char buf[40];
@@ -588,7 +548,7 @@ static void drawEpaperDetailLarge() {
         }
         u8g2Fonts.setCursor(3, y);
         u8g2Fonts.print(buf);
-        y += 28;                 // → ②経過行(logisoso22)
+        y += 28;                 // → ②経過行
 
         // ② 経過時間（電源ONから、millisベース）: 時計アイコン + HH:MM
         // logisoso20(実40px相当)。モード1の日付数字(logisoso38=実38px)と同サイズ。
@@ -600,7 +560,7 @@ static void drawEpaperDetailLarge() {
         drawClockIcon(scaledGfx, iconCx, iconCy, iconR);
         drawHHMM(scaledGfx, iconCx + iconR + 3, y, rh, rm,
                  u8g2_font_logisoso20_tn, 8, 2, 3);
-        y += 15;                 // → ③開始〜現在(b16)
+        y += 15;                 // → ③開始〜現在
 
         // ③ 開始〜現在（日をまたぐと終端を24時超えで表示。例: "22:00〜26:30"）
         const char* st = g_startupTimeStr[0] ? (g_startupTimeStr + 11) : "--:--";
@@ -614,41 +574,34 @@ static void drawEpaperDetailLarge() {
             em = endMin % 60;
         }
         snprintf(buf, sizeof(buf), "%s〜%02d:%02d", st, eh, em);
-        u8g2Fonts.setFont(u8g2_font_b16_t_japanese3);  // ②行(drawHHMM)で変更されたフォントをb16に戻す
+        setFont(u8g2_font_b16_t_japanese3);  // ②行(drawHHMM)で変更されたフォントをb16に戻す
         u8g2Fonts.setCursor(3, y);
         u8g2Fonts.print(buf);
 
         u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
-    } while (g_epaper.nextPage());
+    });
 }
 
 // 未同期画面
 static void drawEpaperUnsynced() {
-    g_epaper.setFullWindow();
-    g_epaper.firstPage();
-    do {
-        g_epaper.fillScreen(GxEPD_WHITE);
-        drawCenteredText("BikeClock", EP_H / 2 - 14);
-        drawCenteredText("時刻未同期", EP_H / 2 + 14);
-    } while (g_epaper.nextPage());
+    DRAW_PAGED({
+        drawCenteredText("BikeClock", 54, 2);       // 実32px相当（中央上寄り）
+        drawCenteredText("時刻未同期", 98, 2);       // 実32px相当（中央下寄り）
+    });
 }
 
 extern const char* g_resetReasonStr;
 
 // ブートスプラッシュ（タイトル + バージョン巨大表示）
 static void drawEpaperSplash() {
-    g_epaper.setFullWindow();
-    g_epaper.firstPage();
-    do {
-        g_epaper.fillScreen(GxEPD_WHITE);
+    DRAW_PAGED({
         drawCenteredText("BikeClock", 20);                       // 上段: タイトル
         drawVersionBig(u8g2_font_logisoso62_tn, EP_H - 28, 4);   // 中央: バージョン番号(62px)
-        
         // 下段: プラットフォーム + 再起動理由
         char buf[64];
         snprintf(buf, sizeof(buf), "ESP32-S3 (%s)", g_resetReasonStr);
         drawCenteredText(buf, EP_H - 4);
-    } while (g_epaper.nextPage());
+    });
 }
 
 // ====================================================================
@@ -688,11 +641,11 @@ static EpaperView displayModeToEpaperView(DisplayMode mode) {
 //   - 標準(CLOCK)  → 分/日が変わるかビュー切替時に毎分フル更新
 //   - 通知/詳細    → ビューが切り替わった瞬間の1回だけ描画（スナップショット）
 void updateEpaperDisplay() {
-    // 案4: FUNC連打中は最終モードが確定するまで描画を遅延（連打の無駄な再描画を抑制）
+    // FUNC連打中は最終モードが確定するまで描画を遅延（連打の無駄な再描画を抑制）
     if (g_currentMillis - g_lastFuncEdgeMs < EPAPER_FUNC_COALESCE_MS) {
         return;
     }
-    // === Phase 10: 通知表示の自動切替・自動復帰 ===
+    // === 通知表示の自動切替・自動復帰 ===
     // 「ユーザ選択のベースビュー(g_displayMode)」を触らず、通知を優先オーバーライド。
 
     // 通知タイムアウト判定: 期限切れで通知を終了し、ベースを時計(TIME)へ強制復帰
@@ -767,39 +720,32 @@ void updateEpaperDisplay() {
 }
 
 void drawEpaperOtaState(const char* state, const char* ipStr) {
-    g_epaper.setFullWindow();
-    g_epaper.firstPage();
-    do {
-        g_epaper.fillScreen(GxEPD_WHITE);
+    enum OtaState { CON, FAIL, NOFI, STOP, OTA, OTA_URL, OTHER };
+    OtaState st = OTHER;
+    if      (strcmp(state, "Con")     == 0) st = CON;
+    else if (strcmp(state, "FAIL")    == 0) st = FAIL;
+    else if (strcmp(state, "noFi")    == 0) st = NOFI;
+    else if (strcmp(state, "STOP")    == 0) st = STOP;
+    else if (strcmp(state, "OTA")     == 0) st = OTA;
+    else if (strcmp(state, "OTA_URL") == 0) st = OTA_URL;
 
-        // 状態表示
-        if (strcmp(state, "Con") == 0) {
-            drawCenteredText("WiFi 起動中...", 65);
-        } else if (strcmp(state, "FAIL") == 0) {
-            drawCenteredText("接続失敗", 65);
-        } else if (strcmp(state, "noFi") == 0) {
-            drawCenteredText("WiFi 未設定", 65);
-        } else if (strcmp(state, "STOP") == 0) {
-            drawCenteredText("キャンセルされました", 65);
-        } else if (strcmp(state, "OTA") == 0 || strcmp(state, "OTA_URL") == 0) {
-            // 左側: QRコードの描画 (ローカルのQRCodeライブラリを利用)
+    DRAW_PAGED({
+        switch (st) {
+        case CON:  drawCenteredText("WiFi 起動中...", 65); break;
+        case FAIL: drawCenteredText("接続失敗", 65); break;
+        case NOFI: drawCenteredText("WiFi 未設定", 65); break;
+        case STOP: drawCenteredText("キャンセルされました", 65); break;
+        case OTA: case OTA_URL: {
+            // 左側: QRコード（ローカルのQRCodeライブラリ）
             QRCode qrcode;
             uint8_t qrcodeData[qrcode_getBufferSize(3)];
-            
-            if (strcmp(state, "OTA") == 0) {
-                // WiFi自動接続用QRコード (SSID: bcota, パスワードなし)
-                qrcode_initText(&qrcode, qrcodeData, 3, ECC_MEDIUM, "WIFI:S:bcota;T:NOPASS;;");
-            } else {
-                // URLアクセス用QRコード (http://<IP>)
-                char urlBuf[64];
-                snprintf(urlBuf, sizeof(urlBuf), "http://%s", ipStr);
-                qrcode_initText(&qrcode, qrcodeData, 3, ECC_MEDIUM, urlBuf);
-            }
+            char urlBuf[64];
+            snprintf(urlBuf, sizeof(urlBuf), "http://%s", ipStr);
+            // OTA=Wifi自動接続用 / OTA_URL=URLアクセス用
+            qrcode_initText(&qrcode, qrcodeData, 3, ECC_MEDIUM,
+                            st == OTA ? "WIFI:S:bcota;T:NOPASS;;" : urlBuf);
 
-            const int16_t qrX = 10;
-            const int16_t qrY = 17;
-            const int16_t scale = 3;
-
+            const int16_t qrX = 10, qrY = 17, scale = 3;
             for (uint8_t y = 0; y < qrcode.size; y++) {
                 for (uint8_t x = 0; x < qrcode.size; x++) {
                     if (qrcode_getModule(&qrcode, x, y)) {
@@ -809,45 +755,29 @@ void drawEpaperOtaState(const char* state, const char* ipStr) {
             }
 
             // 右側: テキスト表示
-            u8g2Fonts.setFontMode(1);
-            u8g2Fonts.setForegroundColor(GxEPD_BLACK);
-            u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
-
             const int16_t textX = 110;
 
             // 1. タイトル
-            u8g2Fonts.setFont(u8g2_font_unifont_t_japanese3);
+            setFont(u8g2_font_unifont_t_japanese3);
             u8g2Fonts.setCursor(textX, 26);
             u8g2Fonts.print("BikeClock OTA");
 
-            // 2. 案内
-            u8g2Fonts.setFont(u8g2_font_b12_t_japanese3);
+            // 2〜4. 案内 / 接続後案内 / URL
+            setFont(u8g2_font_b12_t_japanese3);
             u8g2Fonts.setCursor(textX, 52);
-            if (strcmp(state, "OTA") == 0) {
-                u8g2Fonts.print("QRでWiFi自動接続");
-            } else {
-                u8g2Fonts.print("QRでページを開く");
-            }
-
-            // 3. 接続後案内
+            u8g2Fonts.print(st == OTA ? "QRでWiFi自動接続" : "QRでページを開く");
             u8g2Fonts.setCursor(textX, 70);
-            if (strcmp(state, "OTA") == 0) {
-                u8g2Fonts.print("接続後ブラウザで以下へ");
-            } else {
-                u8g2Fonts.print("またはブラウザで以下へ");
-            }
-
-            // 4. URL
-            char urlBuf[64];
-            snprintf(urlBuf, sizeof(urlBuf), "http://%s", ipStr);
-            u8g2Fonts.setFont(u8g2_font_b12_t_japanese3);
+            u8g2Fonts.print(st == OTA ? "接続後ブラウザで以下へ" : "またはブラウザで以下へ");
             u8g2Fonts.setCursor(textX, 90);
             u8g2Fonts.print(urlBuf);
 
             // 5. 終了方法
-            u8g2Fonts.setFont(u8g2_font_b10_t_japanese2);
+            setFont(u8g2_font_b10_t_japanese2);
             u8g2Fonts.setCursor(textX, 112);
             u8g2Fonts.print("FUNC長押し(2秒)で終了");
+            break;
         }
-    } while (g_epaper.nextPage());
+        default: break;
+        }
+    });
 }

@@ -222,4 +222,16 @@ class DeviceHistoryViewModel(
             exitSelectionMode()
         }
     }
+    // 指定した日付（"yyyy/MM/dd"）のエントリをすべて削除
+    fun deleteEntriesByDate(date: String) {
+        viewModelScope.launch {
+            val sdf = java.text.SimpleDateFormat("yyyy/MM/dd", java.util.Locale.getDefault())
+            val timestamps = deviceHistoryEntries.value
+                .filter { sdf.format(java.util.Date(it.timestamp)) == date }
+                .map { it.timestamp }
+            if (timestamps.isNotEmpty()) {
+                deviceHistoryRepository.deleteEntriesByTimestamps(timestamps)
+            }
+        }
+    }
 }

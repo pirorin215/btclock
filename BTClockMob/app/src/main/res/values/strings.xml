@@ -43,6 +43,8 @@
     <string name="no_device_history_yet">No device history yet.</string>
     <string name="confirm_delete_title">履歴を削除</string>
     <string name="confirm_delete_message">全てのデバイス履歴を削除してもよろしいですか？</string>
+    <string name="confirm_delete_date_title">この日の履歴を削除</string>
+    <string name="confirm_delete_date_message">%1$s のデバイス履歴をすべて削除しますか？</string>
     <string name="delete_button">削除</string>
     <string name="cancel_button">キャンセル</string>
 

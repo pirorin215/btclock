@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
@@ -596,7 +597,9 @@ fun DateHeader(
     entries: List<DeviceHistoryEntry> = emptyList(),
     isExpanded: Boolean = true,
     onToggleExpand: () -> Unit = {},
-    onShowRoute: () -> Unit = {}
+    onShowRoute: () -> Unit = {},
+    onDeleteDate: () -> Unit = {},
+    canDelete: Boolean = true
 ) {
     val points = entries.filter { it.latitude != null && it.longitude != null }
         .sortedBy { it.timestamp }
@@ -683,6 +686,15 @@ fun DateHeader(
                         imageVector = Icons.Default.Timeline,
                         contentDescription = "ルートを表示",
                         tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            if (canDelete) {
+                IconButton(onClick = onDeleteDate) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "この日を削除",
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.6f)
                     )
                 }
             }
