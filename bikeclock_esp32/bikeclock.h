@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 56
+#define FIRMWARE_VERSION_PATCH 60
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -301,7 +301,7 @@ extern int g_motionDisplayIndex;                             // 7セグ表示中
 extern unsigned long g_motionDisplayEndTime;                 // 7セグ表示の終了時刻
 // 駐車詳細表示の自動復帰タイムアウト（20秒経過で時計表示へ戻す）
 #define PARKED_DISPLAY_TIMEOUT_MS 20000UL
-extern bool g_parkedDisplayActive;                          // 駐車中: ePaperを詳細表示で維持（走行検知で解除）
+extern bool g_parkedDisplayActive;                          // 駐車中: ePaperを詳細表示で維持（タイムアウトで解除）
 extern unsigned long g_parkedDisplayStartMillis;            // 駐車詳細表示の開始時刻（millis()）
 extern bool g_inferLogEnabled;                              // 推論ログBLE送信（INFER_LOG:1 でON・精度チューニング用）
 extern bool g_motionModelSaveRequested;   // モデル保存要求（BLEコールバック→loopでFlash書き込み）

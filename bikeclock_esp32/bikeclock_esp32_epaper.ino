@@ -177,28 +177,29 @@ static void drawKanji16x16Bold(int16_t x, int16_t y, const uint16_t* bmp, int16_
 }
 
 // 経過時間アイコン（時計: 太い円＋太い針）。center(cx,cy), 半径r
-static void drawClockIcon(int16_t cx, int16_t cy, int16_t r) {
+// gfx: 描画先（g_epaper 直接 / ScaledGFX 拡大描画。スケールは gfx 側で吸収）。
+static void drawClockIcon(Adafruit_GFX& gfx, int16_t cx, int16_t cy, int16_t r) {
     // 太い文字盤（2重円で2px線）
-    g_epaper.drawCircle(cx, cy, r, GxEPD_BLACK);
-    g_epaper.drawCircle(cx, cy, r - 1, GxEPD_BLACK);
+    gfx.drawCircle(cx, cy, r, GxEPD_BLACK);
+    gfx.drawCircle(cx, cy, r - 1, GxEPD_BLACK);
     // 12時方向の針(上): fillRectで2px幅
-    g_epaper.fillRect(cx - 1, cy - r + 4, 2, r - 3, GxEPD_BLACK);
+    gfx.fillRect(cx - 1, cy - r + 4, 2, r - 3, GxEPD_BLACK);
     // 4時方向の針(右下): drawLine 3本並列で太く
-    g_epaper.drawLine(cx, cy - 1, cx + (r * 2 / 3), cy + 2, GxEPD_BLACK);
-    g_epaper.drawLine(cx, cy,     cx + (r * 2 / 3), cy + 3, GxEPD_BLACK);
-    g_epaper.drawLine(cx, cy + 1, cx + (r * 2 / 3), cy + 4, GxEPD_BLACK);
+    gfx.drawLine(cx, cy - 1, cx + (r * 2 / 3), cy + 2, GxEPD_BLACK);
+    gfx.drawLine(cx, cy,     cx + (r * 2 / 3), cy + 3, GxEPD_BLACK);
+    gfx.drawLine(cx, cy + 1, cx + (r * 2 / 3), cy + 4, GxEPD_BLACK);
     // 太い頭金具
-    g_epaper.fillRect(cx - 2, cy - r - 3, 5, 3, GxEPD_BLACK);
+    gfx.fillRect(cx - 2, cy - r - 3, 5, 3, GxEPD_BLACK);
     // 中心点（濃さアップ）
-    g_epaper.fillCircle(cx, cy, 2, GxEPD_BLACK);
+    gfx.fillCircle(cx, cy, 2, GxEPD_BLACK);
 }
 
-// 数字のみフォント(_tn)で HH MM を「右寄せ」描画（時刻・乗車時間共用）。
-// コロンは数字フォントに非収録のため fillCircle で2点を手描画。
-static void drawClockDigitsRight(int16_t rightX, int16_t baselineY,
-                                 int hours, int minutes,
-                                 const uint8_t* font, int16_t gap,
-                                 int16_t dotR, int16_t dotOff) {
+// 数字フォントで HH:MM を左端 x から左寄せ描画（コロンは fillCircle で2点）。
+// gfx: 描画先（u8g2Fonts の begin 先と一致させること）。
+static void drawHHMM(Adafruit_GFX& gfx, int16_t x, int16_t baselineY,
+                     int hours, int minutes,
+                     const uint8_t* font, int16_t gap,
+                     int16_t dotR, int16_t dotOff) {
     u8g2Fonts.setFont(font);
     u8g2Fonts.setFontMode(1);
     u8g2Fonts.setForegroundColor(GxEPD_BLACK);
@@ -207,24 +208,35 @@ static void drawClockDigitsRight(int16_t rightX, int16_t baselineY,
     char buf[4];
     snprintf(buf, sizeof(buf), "%02d", hours);
     int hhW = u8g2Fonts.getUTF8Width(buf);
-    snprintf(buf, sizeof(buf), "%02d", minutes);
-    int mmW = u8g2Fonts.getUTF8Width(buf);
 
-    int16_t totalW = hhW + gap + mmW;
-    int16_t x = rightX - totalW;
-
-    snprintf(buf, sizeof(buf), "%02d", hours);
     u8g2Fonts.setCursor(x, baselineY);
-    u8g2Fonts.print(buf);
-    snprintf(buf, sizeof(buf), "%02d", minutes);
-    u8g2Fonts.setCursor(x + hhW + gap, baselineY);
     u8g2Fonts.print(buf);
 
     int16_t asc = u8g2Fonts.getFontAscent();
     int16_t midY = baselineY - asc / 2;
     int16_t colX = x + hhW + gap / 2;
-    g_epaper.fillCircle(colX, midY - dotOff, dotR, GxEPD_BLACK);
-    g_epaper.fillCircle(colX, midY + dotOff, dotR, GxEPD_BLACK);
+    gfx.fillCircle(colX, midY - dotOff, dotR, GxEPD_BLACK);
+    gfx.fillCircle(colX, midY + dotOff, dotR, GxEPD_BLACK);
+
+    snprintf(buf, sizeof(buf), "%02d", minutes);
+    u8g2Fonts.setCursor(x + hhW + gap, baselineY);
+    u8g2Fonts.print(buf);
+}
+
+// 数字のみフォント(_tn)で HH MM を「右寄せ」描画（時刻・乗車時間共用）。
+// drawHHMM に右端xを計算して委譲。コロンは fillCircle で2点。
+static void drawClockDigitsRight(Adafruit_GFX& gfx, int16_t rightX, int16_t baselineY,
+                                 int hours, int minutes,
+                                 const uint8_t* font, int16_t gap,
+                                 int16_t dotR, int16_t dotOff) {
+    u8g2Fonts.setFont(font);
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%02d", hours);
+    int hhW = u8g2Fonts.getUTF8Width(buf);
+    snprintf(buf, sizeof(buf), "%02d", minutes);
+    int mmW = u8g2Fonts.getUTF8Width(buf);
+    int16_t totalW = hhW + gap + mmW;
+    drawHHMM(gfx, rightX - totalW, baselineY, hours, minutes, font, gap, dotR, dotOff);
 }
 
 // 区切り線（縦線: 左欄/右欄、横線: 時刻/乗車時間）
@@ -430,15 +442,15 @@ static void drawEpaperClock() {
         drawDividers();
         drawLeftPanel();
         // 時刻（右寄せ、上段）
-        drawClockDigitsRight(EP_W - RIGHT_MARGIN, TIME_BLY, getHours(), getMinutes(),
+        drawClockDigitsRight(g_epaper, EP_W - RIGHT_MARGIN, TIME_BLY, getHours(), getMinutes(),
                              u8g2_font_logisoso62_tn, 30, 4, 11);
         // 乗車時間（右寄せ、下段）
         int rideH, rideM;
         getRideTime(&rideH, &rideM);
-        drawClockDigitsRight(EP_W - RIGHT_MARGIN, RIDE_BLY, rideH, rideM,
+        drawClockDigitsRight(g_epaper, EP_W - RIGHT_MARGIN, RIDE_BLY, rideH, rideM,
                              u8g2_font_logisoso32_tn, 14, 2, 5);
         // 経過時間アイコン（時計）
-        drawClockIcon(ICON_CX, ICON_CY, ICON_R);
+        drawClockIcon(g_epaper, ICON_CX, ICON_CY, ICON_R);
     } while (g_epaper.nextPage());
 }
 
@@ -545,7 +557,7 @@ static void drawEpaperDetail() {
     } while (g_epaper.nextPage());
 }
 
-// 詳細大表示（モード4）: 日付＋曜日 / 経過 / 開始〜現在 を2倍拡大(b16→32px相当)で3行表示。
+// 詳細大表示（モード4）: 日付＋曜日 / 経過 / 開始〜現在 を2倍拡大で3行表示。②経過はlogisoso20(実40px)・①③はb16(実32px)。
 // 日付は画面幅(250px)の制約でスラッシュ短縮形 "2026/06/24 水" とし32pxに収める。
 // スナップショット（FUNC切替時に1回のみ描画・以降更新なし）。
 static void drawEpaperDetailLarge() {
@@ -563,8 +575,7 @@ static void drawEpaperDetailLarge() {
         u8g2Fonts.setForegroundColor(GxEPD_BLACK);
         u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
 
-        const int16_t lh = 19;   // 16pxフォント + 余白
-        int16_t y = 18;          // 1行目ベースライン（仮想61px内で3行を中央寄せ）
+        int16_t y = 10;          // 1行目ベースライン（②経過行を大きく取るため上詰め）
         char buf[40];
 
         // ① 開始日付＋曜日（起動時刻の日付。日をまたいでも開始日。例: "2026/06/24 水"）
@@ -576,15 +587,19 @@ static void drawEpaperDetailLarge() {
         }
         u8g2Fonts.setCursor(3, y);
         u8g2Fonts.print(buf);
-        y += lh;
+        y += 28;                 // → ②経過行(logisoso22)
 
-        // ② 経過時間（電源ONから、millisベース）
+        // ② 経過時間（電源ONから、millisベース）: 時計アイコン + HH:MM
+        // logisoso20(実40px相当)。モード1の日付数字(logisoso38=実38px)と同サイズ。
         int rh, rm;
         getRideTime(&rh, &rm);
-        snprintf(buf, sizeof(buf), "経過 %d時間%02d分", rh, rm);
-        u8g2Fonts.setCursor(3, y);
-        u8g2Fonts.print(buf);
-        y += lh;
+        const int16_t iconR = 7;
+        int16_t iconCx = 3 + iconR + 1;     // 左マージン + 半径
+        int16_t iconCy = y - 7;             // 行中央（ベースライン上）
+        drawClockIcon(scaledGfx, iconCx, iconCy, iconR);
+        drawHHMM(scaledGfx, iconCx + iconR + 3, y, rh, rm,
+                 u8g2_font_logisoso20_tn, 8, 2, 3);
+        y += 15;                 // → ③開始〜現在(b16)
 
         // ③ 開始〜現在（日をまたぐと終端を24時超えで表示。例: "22:00〜26:30"）
         const char* st = g_startupTimeStr[0] ? (g_startupTimeStr + 11) : "--:--";
@@ -598,6 +613,7 @@ static void drawEpaperDetailLarge() {
             em = endMin % 60;
         }
         snprintf(buf, sizeof(buf), "%s〜%02d:%02d", st, eh, em);
+        u8g2Fonts.setFont(u8g2_font_b16_t_japanese3);  // ②行(drawHHMM)で変更されたフォントをb16に戻す
         u8g2Fonts.setCursor(3, y);
         u8g2Fonts.print(buf);
 
