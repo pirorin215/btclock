@@ -7,8 +7,10 @@
 #=============================================================================
 # ESP32-S3 SuperMini (ESP32S3FH4R2: 4MB Flash, 2MB PSRAM)
 # CDCOnBoot=cdc : USB-CDC で Serial を有効化（USBケーブル1本でログ確認/書き込み）
-# ※ OTA(WiFi) 実装時に PartitionScheme を見直す可能性あり
-BIKECLOCK_FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc"
+# PartitionScheme=min_spiffs : OTA対応（app0/app1 各1.9MB + LittleFS 128KB）。
+#   Phase 7 WiFi OTA で Update ライブラリが app スロットを切替えるのに必須。
+#   ※ default(No OTA) から切替時は esptool erase_flash 後の再書込が必要（パーティション構造変更のため）。
+BIKECLOCK_FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,PartitionScheme=min_spiffs"
 
 #=============================================================================
 # シリアルポートデバイスパターン（共通定義）

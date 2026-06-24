@@ -198,7 +198,7 @@ Arduino IDE / arduino-cli で以下をインストール：
 | **NimBLE-Arduino** (h2zero) | BLE (HID + GATT) | Phase 5/6 |
 | **Adafruit NeoPixel** (Adafruit) | オンボードRGB LED (GPIO48) | Phase 2 |
 | **GxEPD2** / **U8g2** | ePaper 描画 | Phase 2.5 |
-| **ArduinoOTA** | WiFi OTA（arduino-esp32 付属） | Phase 7 |
+| **HTTPUpdateServer** / **WebServer** | WiFi OTA（ブラウザ経由・arduino-esp32 付属・インストール不要） | Phase 7 |
 | **LittleFS** | 設定保存（arduino-esp32 付属） | Phase 4 |
 | **Wire** | BMI160 IMU I2C（レジスタ直接制御・arduino-esp32 付属・インストール不要） | Phase 14 |
 
@@ -210,10 +210,10 @@ arduino-cli lib install "TM1637" "NimBLE-Arduino" "Adafruit NeoPixel" "GxEPD2" "
 
 1. esp32 core（esp32:esp32）をインストール済みであること（確認済: 3.3.8）
 2. ボード: **ESP32S3 Dev Module**（`esp32:esp32:esp32s3`）
-3. FQBN: `esp32:esp32:esp32s3:CDCOnBoot=cdc`
+3. FQBN: `esp32:esp32:esp32s3:CDCOnBoot=cdc,PartitionScheme=min_spiffs`
    - USB CDC On Boot = **Enabled**（USBケーブル1本でログ確認・書込）
    - Flash Size = 4MB
-   - Partition Scheme = Default（OTA導入時に変更、Phase 7）
+   - Partition Scheme = **Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)** — OTA必須（`min_spiffs`）
 
 ### ファームウェア書き込み
 
@@ -233,6 +233,53 @@ sh upload.sh
 # シリアルログ監視
 sh consolelog.sh
 ```
+
+
+### WiFi OTA でファームウェア更新（USB不要・Phase 7）
+
+USB ケーブルなしでファームウェアを更新できます。事前に WiFi 設定が必要です。
+
+#### 初回のみ: パーティション移行（default → min_spiffs）
+
+OTA 対応パーティション（`min_spiffs`）への初回切替は **Flash 全消去が必須**（パーティション構造が変わるため）。`sh compile.sh` 後に:
+
+```bash
+source setting.sh                      # BIKECLOCK_PORT を読込
+esptool.py --port $BIKECLOCK_PORT erase_flash
+sh upload.sh                           # min_spiffs パーティションで初期書込
+```
+
+> 2回目以降の OTA 書込では erase_flash 不要です（同じパーティション構造なので）。
+
+#### WiFi 設定（SSID / パスワード）
+
+BLE で WiFi 設定を送信して LittleFS `/wifi.dat` に保存します（※パスフレーズは平文で Flash に保存されます）。Android アプリ設定画面は別途対応。今は `nRF Connect` 等の BLE ツールで Command 特性へ書き込み:
+
+```
+SET:wifi:<SSID>\n<パスワード>          # 例: SET:wifi:MyHomeWiFi\nsecretpass
+SET:wifi:<SSID>                         # オープン AP（パスワード空）
+```
+
+#### OTA 実行手順
+
+1. FUNC キー長押し（3秒）→ メンテナンスモード
+2. 矢印キーで **3OTA** を選択（3秒無操作で確定）
+3. WiFi 接続後、シリアルログに `OTA Ready: open http://<IP>/update` が表示される
+4. PC/スマホのブラウザで `http://<IP>/update` を開き、`.bin` をアップロード
+5. 書込成功で自動再起動 → 新ファームで通常起動
+
+OTA 中の表示:
+
+| 状態 | 7seg | LED |
+|------|------|-----|
+| WiFi 未設定 | `noFi` | 赤 |
+| WiFi 接続中 | `Con` | 青点滅 |
+| 接続失敗 | `FAIL` | 赤 |
+| OTA 待ち受け中 | `OTA` | 緑点滅 |
+| キャンセル | `STOP` | — |
+
+- FUNC 長押し（2秒）でキャンセル / 5分で自動タイムアウト（いずれも再起動して通常モードへ）
+- アップロードする `.bin` は `build/bikeclock_esp32.ino.bin`（`sh compile.sh` で生成）
 
 ---
 
@@ -261,7 +308,7 @@ sh consolelog.sh
 
 ## 実装状況
 
-フェーズ別に段階開発中。現在 **Phase 15（モーションパターン学習・検出）まで完了**。
+フェーズ別に段階開発中。現在 **Phase 15（モーション認識）・Phase 7（WiFi OTA）まで完了**（残り Phase 8 のみ）。
 
 | フェーズ | 内容 | 状態 |
 |---------|------|:----:|
@@ -279,7 +326,7 @@ sh consolelog.sh
 | 14-B | スマホ経由IMUデータ採取（未来録り・ラベル付きCSV） | ✅ |
 | 14-C | 駐車検出（機械学習: 特徴量＋距離分類） | ✅ |
 | 15 | モーションパターン学習・検出（エッジ推論） | ✅ |
-| 7 | WiFi OTA | |
+| 7 | WiFi OTA（Web OTA・ブラウザ経由） | ✅ |
 | 8 | 統合 & 調整 | |
 
 詳細は [TODO.md](../TODO.md) を参照。
@@ -319,7 +366,7 @@ sh consolelog.sh
 - **表示**: TM1637 + ePaper (GxEPD2)
 - **LED**: Adafruit NeoPixel（オンボードRGB LED, GPIO48）
 - **ファイル**: LittleFS (ESP32)
-- **OTA**: ArduinoOTA (WiFi)
+- **OTA**: HTTPUpdateServer / WebServer（WiFi・ブラウザ経由）
 
 ## 謝辞
 

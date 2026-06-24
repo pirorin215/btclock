@@ -144,3 +144,92 @@ void resetToFactoryDefaults() {
 
     ESP.restart();
 }
+
+// ====================================================================
+// WiFi設定（Phase 7: OTA用・LittleFS の /wifi.dat に保存）
+//   形式: [ssid_len(1)][ssid][pass_len(1)][pass]
+//   ssid: 最大32バイト、pass: 最大63バイト（空パス=オープンAP可）
+// ====================================================================
+bool hasWifiConfig() {
+    return LittleFS.exists(WIFI_FILE_PATH);
+}
+
+// WiFi設定読込（成功=true・未設定/破損時は false）
+bool loadWifiConfig(String& ssid, String& pass) {
+    ssid = "";
+    pass = "";
+
+    if (!LittleFS.exists(WIFI_FILE_PATH)) {
+        logPrint("FS", "No WiFi config found.");
+        return false;
+    }
+
+    File file = LittleFS.open(WIFI_FILE_PATH, "r");
+    if (!file) {
+        logPrint("FS", "Failed to open %s for reading.", WIFI_FILE_PATH);
+        return false;
+    }
+
+    uint8_t ssidLen = 0, passLen = 0;
+    if (file.read(&ssidLen, 1) != 1 || ssidLen == 0 || ssidLen > WIFI_SSID_MAX_LEN) {
+        logPrint("FS", "WiFi config corrupt (ssidLen=%u).", ssidLen);
+        file.close();
+        return false;
+    }
+    uint8_t ssidBuf[WIFI_SSID_MAX_LEN + 1];
+    if (file.read(ssidBuf, ssidLen) != ssidLen) {
+        logPrint("FS", "WiFi config truncated (ssid).");
+        file.close();
+        return false;
+    }
+    if (file.read(&passLen, 1) != 1 || passLen > WIFI_PASS_MAX_LEN) {
+        logPrint("FS", "WiFi config corrupt (passLen=%u).", passLen);
+        file.close();
+        return false;
+    }
+    uint8_t passBuf[WIFI_PASS_MAX_LEN + 1];
+    if (passLen > 0 && file.read(passBuf, passLen) != passLen) {
+        logPrint("FS", "WiFi config truncated (pass).");
+        file.close();
+        return false;
+    }
+    file.close();
+
+    ssidBuf[ssidLen] = '\0';
+    passBuf[passLen] = '\0';
+    ssid = String((const char*)ssidBuf);
+    pass = String((const char*)passBuf);
+    logPrint("FS", "WiFi config loaded: SSID='%s'", ssid.c_str());
+    return true;
+}
+
+// WiFi設定保存（ssid 必須・pass は空可）
+void saveWifiConfig(const char* ssid, const char* pass) {
+    size_t ssidLen = strlen(ssid);
+    size_t passLen = pass ? strlen(pass) : 0;
+
+    if (ssidLen == 0 || ssidLen > WIFI_SSID_MAX_LEN || passLen > WIFI_PASS_MAX_LEN) {
+        logPrint("FS", "!! Invalid WiFi config (ssidLen=%u passLen=%u). Not saved.",
+                 (unsigned)ssidLen, (unsigned)passLen);
+        return;
+    }
+
+    logPrint("FS", "Saving WiFi config to %s (SSID='%s')...", WIFI_FILE_PATH, ssid);
+    LittleFS.remove(WIFI_FILE_PATH);
+
+    File file = LittleFS.open(WIFI_FILE_PATH, "w");
+    if (!file) {
+        logPrint("FS", "Failed to open %s for writing.", WIFI_FILE_PATH);
+        return;
+    }
+
+    uint8_t ssidLenB = (uint8_t)ssidLen;
+    uint8_t passLenB = (uint8_t)passLen;
+    file.write(&ssidLenB, 1);
+    file.write((const uint8_t*)ssid, ssidLen);
+    file.write(&passLenB, 1);
+    file.write((const uint8_t*)pass, passLen);
+    file.close();
+
+    logPrint("FS", "WiFi config saved.");
+}

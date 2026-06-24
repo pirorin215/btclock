@@ -77,6 +77,8 @@ class CommandCharCallbacks : public NimBLECharacteristicCallbacks {
             handleTimeSync(command.c_str());
         } else if (command.startsWith("SET:keys:")) {
             handleKeyConfig(command.c_str());
+        } else if (command.startsWith("SET:wifi:")) {
+            handleWifiConfig(command.c_str());
         } else if (command.startsWith("GET:version")) {
             handleGetVersion();
         } else if (command.startsWith("NOTIFY:")) {
@@ -261,6 +263,39 @@ void handleKeyConfig(const char* command) {
         logPrint("BLE", "Error: only %d keys parsed. Expected %d.", i, NUM_HID_SWITCHES);
         sendResponse("ERROR: Invalid key format");
     }
+}
+
+// SET:wifi:<ssid>\n<password> — WiFi設定（Phase 7: OTA用・/wifi.dat に永続化）
+// 形式: SET:wifi:MySSID\nMyPassword （\n区切り・パス空可=オープンAP・CRLFの\rは除去）
+// ※ パスフレーズは平文で Flash に保存される。
+void handleWifiConfig(const char* command) {
+    const char* p = command + 9;   // "SET:wifi:" の長さ
+
+    // \n で SSID / パスを分割
+    const char* nl = strchr(p, '\n');
+    String ssid, pass;
+    if (nl != nullptr) {
+        ssid = String(p).substring(0, nl - p);
+        pass = String(nl + 1);
+    } else {
+        ssid = String(p);          // \n 無し: SSID のみ（パス空）
+    }
+
+    ssid.trim();
+    pass.trim();
+    if (pass.endsWith("\r")) pass.remove(pass.length() - 1);   // CRLF 対策
+
+    if (ssid.length() == 0 || ssid.length() > WIFI_SSID_MAX_LEN || pass.length() > WIFI_PASS_MAX_LEN) {
+        logPrint("BLE", "SET:wifi invalid (ssidLen=%u passLen=%u).",
+                 (unsigned)ssid.length(), (unsigned)pass.length());
+        sendResponse("ERROR: Invalid wifi config");
+        return;
+    }
+
+    saveWifiConfig(ssid.c_str(), pass.c_str());
+    logPrint("BLE", "SET:wifi saved (SSID='%s', passLen=%u).",
+             ssid.c_str(), (unsigned)pass.length());
+    sendResponse("OK: wifi config saved");
 }
 
 // ※ loadSettings()/saveSettings() は bikeclock_esp32_settings.ino（Phase 4）に実装

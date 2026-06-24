@@ -10,7 +10,7 @@
 // XIAO BLE 版 (1.x.x) と区別するため 2.0.0 から開始
 #define FIRMWARE_VERSION_MAJOR 2
 #define FIRMWARE_VERSION_MINOR 0
-#define FIRMWARE_VERSION_PATCH 60
+#define FIRMWARE_VERSION_PATCH 61
 
 // --- GPIO Pin Definitions (ESP32-S3 SuperMini / 推奨案A) ---
 // TM1637 4-digit 7-segment display
@@ -329,6 +329,7 @@ void updateTestDisplay();
 // ePaper表示（昼間視認性用）— bikeclock_esp32_epaper.ino
 void setupEpaper();
 void updateEpaperDisplay();
+void drawEpaperOtaState(const char* state, const char* ipStr = "");
 
 // システム
 void updateTimestamp();
@@ -424,5 +425,20 @@ void loadSettings();
 void saveSettings();
 void resetKeySettingsToDefaults();
 void resetToFactoryDefaults();
+
+// WiFi設定永続化（Phase 7: OTA用・LittleFS の /wifi.dat に SSID/パスを保存）
+//   ※パスフレーズは平文で Flash に保存される（NVS暗号化なし・個人用途向け）
+#define WIFI_FILE_PATH "/wifi.dat"
+#define WIFI_SSID_MAX_LEN 32   // IEEE 802.11 SSID 上限
+#define WIFI_PASS_MAX_LEN 63   // WPA パスフレーズ上限
+bool loadWifiConfig(String& ssid, String& pass);          // 設定読込（成功=true・未設定/破損=false）
+void saveWifiConfig(const char* ssid, const char* pass);  // 設定保存
+bool hasWifiConfig();                                     // WiFi設定が保存済みか
+void handleWifiConfig(const char* command);               // BLE SET:wifi: 受信処理
+
+// WiFi OTA（Phase 7）— bikeclock_esp32_ota.ino
+// メンテナンス「3OTA」選択時: WiFi接続 → HTTPUpdateServer 起動 → .bin 書込待ち受け。
+// この関数は戻らない（書込成功で ESP.restart、キャンセル/エラーでも再起動で通常モードへ）。
+void startOtaDfuMode();
 
 #endif // BIKECLOCK_H

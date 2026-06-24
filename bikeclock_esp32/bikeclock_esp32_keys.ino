@@ -5,7 +5,7 @@
  *   - GPIO 直接入力 (内部プルアップ)
  *   - スイッチ SW1-SW7 (GPIO 4, 5, 13, 14, 35, 38, 39) の検出 (HID 送信はスタブ)
  *   - FUNC スイッチ (GPIO 8) によるモード切替と長押しによるメンテナンス遷移
- *   - メンテナンスモード内のメニュー動作と各種アクション (テストモード、再起動、OTA/Resetスタブ)
+ *   - メンテナンスモード内のメニュー動作と各種アクション (テストモード、再起動、WiFi OTA、リセット)
  */
 
 #include "bikeclock.h"
@@ -376,10 +376,8 @@ bool processMaintenanceMode() {
                 return false;
 
             case MAINTENANCE_MENU_DFU:
-                logPrint("MAINTENANCE", "Action: Enter OTA DFU mode (Stub for Phase 3)");
-                g_display->showNumberDec(3333);
-                delay(3000);
-                ESP.restart();
+                logPrint("MAINTENANCE", "Action: Enter WiFi OTA mode");
+                startOtaDfuMode();   // 戻らない（WiFi接続→Web OTA待ち受け→書込/キャンセルで再起動）
                 break;
 
             case MAINTENANCE_MENU_FACTORY_RESET:

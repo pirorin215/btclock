@@ -53,26 +53,9 @@ VERSION_MINOR=$(grep "#define FIRMWARE_VERSION_MINOR" bikeclock.h | awk '{print 
 VERSION_PATCH=$(grep "#define FIRMWARE_VERSION_PATCH" bikeclock.h | awk '{print $3}')
 VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}"
 
-# Create ZIP archive with version in filename in build directory (ESP32 output: .bin)
-if [ -n "$UNIT_NAME" ]; then
-    ZIP_FILENAME="build/bikeclock_esp32-v${VERSION}-${UNIT_NAME}.zip"
-else
-    ZIP_FILENAME="build/bikeclock_esp32-v${VERSION}.zip"
-fi
 echo ""
-echo "Creating ZIP archive: ${ZIP_FILENAME}"
-
-TEMP_DIR=$(mktemp -d)
-mkdir -p "${TEMP_DIR}"
-
-# Copy firmware binary
 if [ -f build/bikeclock_esp32.ino.bin ]; then
-    cp build/bikeclock_esp32.ino.bin "${TEMP_DIR}/bikeclock_esp32.ino.bin"
-    zip -j "${ZIP_FILENAME}" "${TEMP_DIR}/bikeclock_esp32.ino.bin"
-    echo "✅ ZIP archive created: ${ZIP_FILENAME}"
+    echo "✅ ファームウェアバイナリが生成されました: build/bikeclock_esp32.ino.bin (v${VERSION})"
 else
-    echo "⚠️  build/bikeclock_esp32.ino.bin が見つかりません（ZIP作成をスキップ）"
+    echo "⚠️  build/bikeclock_esp32.ino.bin が見つかりません"
 fi
-
-# Cleanup
-rm -rf "${TEMP_DIR}"

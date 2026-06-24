@@ -38,6 +38,7 @@
 #include <SPI.h>
 #include <GxEPD2_BW.h>
 #include <U8g2_for_Adafruit_GFX.h>
+#include "qrcode.h"
 
 // === ePaper オブジェクト（専用 SPI3_HOST バス） ===
 static SPIClass epdSPI(HSPI);   // ESP32-S3: HSPI == SPI3_HOST（グローバルSPI=FSPI=SPI2と独立）
@@ -763,4 +764,90 @@ void updateEpaperDisplay() {
         }
         ep_lastView = effective;
     }
+}
+
+void drawEpaperOtaState(const char* state, const char* ipStr) {
+    g_epaper.setFullWindow();
+    g_epaper.firstPage();
+    do {
+        g_epaper.fillScreen(GxEPD_WHITE);
+
+        // 状態表示
+        if (strcmp(state, "Con") == 0) {
+            drawCenteredText("WiFi 起動中...", 65);
+        } else if (strcmp(state, "FAIL") == 0) {
+            drawCenteredText("接続失敗", 65);
+        } else if (strcmp(state, "noFi") == 0) {
+            drawCenteredText("WiFi 未設定", 65);
+        } else if (strcmp(state, "STOP") == 0) {
+            drawCenteredText("キャンセルされました", 65);
+        } else if (strcmp(state, "OTA") == 0 || strcmp(state, "OTA_URL") == 0) {
+            // 左側: QRコードの描画 (ローカルのQRCodeライブラリを利用)
+            QRCode qrcode;
+            uint8_t qrcodeData[qrcode_getBufferSize(3)];
+            
+            if (strcmp(state, "OTA") == 0) {
+                // WiFi自動接続用QRコード (SSID: bcota, パスワードなし)
+                qrcode_initText(&qrcode, qrcodeData, 3, ECC_MEDIUM, "WIFI:S:bcota;T:NOPASS;;");
+            } else {
+                // URLアクセス用QRコード (http://<IP>)
+                char urlBuf[64];
+                snprintf(urlBuf, sizeof(urlBuf), "http://%s", ipStr);
+                qrcode_initText(&qrcode, qrcodeData, 3, ECC_MEDIUM, urlBuf);
+            }
+
+            const int16_t qrX = 10;
+            const int16_t qrY = 17;
+            const int16_t scale = 3;
+
+            for (uint8_t y = 0; y < qrcode.size; y++) {
+                for (uint8_t x = 0; x < qrcode.size; x++) {
+                    if (qrcode_getModule(&qrcode, x, y)) {
+                        g_epaper.fillRect(qrX + x * scale, qrY + y * scale, scale, scale, GxEPD_BLACK);
+                    }
+                }
+            }
+
+            // 右側: テキスト表示
+            u8g2Fonts.setFontMode(1);
+            u8g2Fonts.setForegroundColor(GxEPD_BLACK);
+            u8g2Fonts.setBackgroundColor(GxEPD_WHITE);
+
+            const int16_t textX = 110;
+
+            // 1. タイトル
+            u8g2Fonts.setFont(u8g2_font_unifont_t_japanese3);
+            u8g2Fonts.setCursor(textX, 26);
+            u8g2Fonts.print("BikeClock OTA");
+
+            // 2. 案内
+            u8g2Fonts.setFont(u8g2_font_b12_t_japanese3);
+            u8g2Fonts.setCursor(textX, 52);
+            if (strcmp(state, "OTA") == 0) {
+                u8g2Fonts.print("QRでWiFi自動接続");
+            } else {
+                u8g2Fonts.print("QRでページを開く");
+            }
+
+            // 3. 接続後案内
+            u8g2Fonts.setCursor(textX, 70);
+            if (strcmp(state, "OTA") == 0) {
+                u8g2Fonts.print("接続後ブラウザで以下へ");
+            } else {
+                u8g2Fonts.print("またはブラウザで以下へ");
+            }
+
+            // 4. URL
+            char urlBuf[64];
+            snprintf(urlBuf, sizeof(urlBuf), "http://%s", ipStr);
+            u8g2Fonts.setFont(u8g2_font_b12_t_japanese3);
+            u8g2Fonts.setCursor(textX, 90);
+            u8g2Fonts.print(urlBuf);
+
+            // 5. 終了方法
+            u8g2Fonts.setFont(u8g2_font_b10_t_japanese2);
+            u8g2Fonts.setCursor(textX, 112);
+            u8g2Fonts.print("FUNC長押し(2秒)で終了");
+        }
+    } while (g_epaper.nextPage());
 }
