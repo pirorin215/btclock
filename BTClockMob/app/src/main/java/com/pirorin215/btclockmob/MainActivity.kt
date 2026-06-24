@@ -17,6 +17,7 @@ import android.os.Build.VERSION_CODES
 import android.os.PowerManager
 import android.provider.Settings
 import android.content.Context
+import android.content.ComponentName
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -92,6 +93,12 @@ class MainActivity : ComponentActivity() {
 
 private const val TAG = "BleApp"
 
+private fun isNotificationListenerEnabled(context: Context): Boolean {
+    val cn = ComponentName(context, com.pirorin215.btclockmob.service.BikeNotificationListener::class.java)
+    val flat = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
+    return flat != null && flat.contains(cn.flattenToString())
+}
+
 @Composable
 fun BleApp(
     modifier: Modifier = Modifier,
@@ -164,6 +171,8 @@ fun BleApp(
     var isBatteryOptimized by remember { mutableStateOf(false) }
     var showLocationDialog by remember { mutableStateOf(false) }
     var isLocationNotAlways by remember { mutableStateOf(false) }
+    var showNotificationAccessDialog by remember { mutableStateOf(false) }
+    var isNotificationAccessGranted by remember { mutableStateOf(false) }
 
     LaunchedEffect(permissionsChecked) {
         if (permissionsChecked) {
@@ -206,6 +215,13 @@ fun BleApp(
                     Log.d(TAG, "Location permission not set to 'Always', showing dialog")
                     showLocationDialog = true
                 }
+            }
+
+            // 通知アクセス（NotificationListenerService）チェック
+            isNotificationAccessGranted = isNotificationListenerEnabled(context)
+            if (!isNotificationAccessGranted) {
+                Log.d(TAG, "Notification listener permission not granted, showing dialog")
+                showNotificationAccessDialog = true
             }
         }
     }
@@ -254,6 +270,26 @@ fun BleApp(
                     e.printStackTrace()
                 }
                 showLocationDialog = false
+            }
+        )
+    }
+
+    // 通知アクセス権限ダイアログ
+    if (showNotificationAccessDialog) {
+        NotificationAccessPermissionDialog(
+            onDismiss = { showNotificationAccessDialog = false },
+            onOpenSettings = {
+                try {
+                    val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS").apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    Log.d(TAG, "Opening notification listener settings")
+                    activity.startActivity(intent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to open notification listener settings: ${e.message}")
+                    e.printStackTrace()
+                }
+                showNotificationAccessDialog = false
             }
         )
     }
@@ -344,6 +380,53 @@ fun BatteryOptimizationDialog(
                 Text(
                     "設定画面で許可を与えると、\n" +
                             "再インストール後も安定して動作します。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onOpenSettings) {
+                Text("設定を開く")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("後で")
+            }
+        }
+    )
+}
+
+@Composable
+fun NotificationAccessPermissionDialog(
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(imageVector = Icons.Filled.Warning, contentDescription = "警告")
+        },
+        title = {
+            Text("通知アクセス権限の設定が必要です")
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "このアプリがバックグラウンドで強制終了されずに動作し続けるためには、" +
+                            "「通知アクセス権」の許可が必要です。\n\n" +
+                            "※通知の読み取りなどは行いません。常時起動を保証するためのシステム機能として利用します。",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    "下のボタンから設定画面を開き、「BTClockMob」の通知アクセスを許可してください。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
