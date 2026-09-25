@@ -12,10 +12,13 @@
 // ため、Adafruit_GFX等の型を参照する関数が通るように全ライブラリを
 // このヘッダでincludeする(bikeclock.hと同じ構成)。
 
+// --- Battery Monitoring ---
+#define BATTERY_REFRESH_MS  60000UL  // 電池電圧のキャッシュ測定間隔(fastrec2と同じ60秒)
+
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
-#define FIRMWARE_VERSION_MINOR 1
-#define FIRMWARE_VERSION_PATCH 5
+#define FIRMWARE_VERSION_MINOR 2
+#define FIRMWARE_VERSION_PATCH 0
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -112,6 +115,10 @@ void updateLed();
 void setLedState(LedState state);
 void setLedError();
 void updateLedStateBasedOnStatus();
+
+// cycleclock_battery.ino
+void updateBattery();
+float batteryVoltageCached();
 
 // Logging
 void setupLog();

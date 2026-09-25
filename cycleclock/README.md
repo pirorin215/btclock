@@ -67,8 +67,17 @@ ePaper モジュールの端子印字は **BUSY / D/C / SCL / GND / RES / CS / S
 
 - Service UUID: `4fafc201-1fb5-459e-8fcc-c5c9c331914c`
 - Command UUID: `beb5483e-36e1-4688-b7f5-ea07361b26a0` (Read/Write/Notify・暗号化必須=bonding)
-- プロトコル: `SET:time:<unix_ts>` / `GET:version`
+- プロトコル: `SET:time:<unix_ts>` / `GET:version` / `GET:battery`(v0.2.0以降・`OK:battery:<mV>`応答)
 - デバイス名: `BikeClock-Cycle`（アプリは `BikeClock-` 接頭辞で解決）
+
+### バッテリー電圧監視 (v0.2.0・cycleclock_battery.ino)
+
+- XIAO BLE 内蔵 VBAT 分圧(PIN_VBAT=P0.31 / VBAT_ENABLE=P0.14 active-LOW)を使用。外付け部品不要
+- 測定時のみ分圧を接続し測定後に切断(~2μAリーク回避・System OFF予算保護)
+- 60秒ごとのアイドル時キャッシュ測定(負荷直後は低めに出るため・fastrec2と同じ考え方)
+- `GET:battery` はキャッシュ値のみ返す(BLEコールバックからanalogReadするとnrfxアサートで落ちるfastrec2の教訓)
+- 分圧比 2.96(1510k/510k設計値・fastrec2校正値)。実機テスタと1Vでもズレがあれば `BATT_DIV_MULT` を調整
+- アプリ側: 接続直後+5分ごとに取得し時系列保存(DataStore・最大10000件)。ヘッダーに最新電圧表示(3.5V未満は赤字)
 
 ### スリープポリシー
 

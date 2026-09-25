@@ -240,6 +240,7 @@ void loop() {
     processWakeSwitch();
     updateLed();
     updateTimestamp();
+    updateBattery();
     updateEpaperDisplay();
     checkSleepTimeout();
 

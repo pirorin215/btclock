@@ -56,6 +56,8 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
             handleTimeSync(command);
         } else if (strncmp(command, "GET:version", 11) == 0) {
             handleGetVersion();
+        } else if (strncmp(command, "GET:battery", 11) == 0) {
+            handleGetBattery();
         } else {
             logPrint("BLE", "Unknown command: %s", command);
             sendResponse("ERROR: Unknown command");
@@ -155,6 +157,20 @@ void handleGetVersion() {
     snprintf(versionResponse, sizeof(versionResponse), "OK:version:%d.%d.%d",
              FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
     sendResponse(versionResponse);
+}
+
+// --- Battery Handler ---
+// キャッシュ値のみ返す(ADCには触らない・fastrec2のクラッシュ教训により
+// BLEコールバックからanalogReadは禁止)。フォーマット: OK:battery:<mV>
+void handleGetBattery() {
+    float v = batteryVoltageCached();
+    if (v < 0.0f) {
+        sendResponse("ERROR: Battery not measured yet");
+        return;
+    }
+    char resp[40];
+    snprintf(resp, sizeof(resp), "OK:battery:%d", (int)(v * 1000.0f + 0.5f));
+    sendResponse(resp);
 }
 
 // --- Response Helper ---
