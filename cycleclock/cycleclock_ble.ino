@@ -174,7 +174,14 @@ void handleGetBattery() {
 }
 
 // --- Response Helper ---
+// コマンド特性はsetFixedLen(32)のため、notifyは内部バッファ32バイト全文を送る。
+// メッセージだけコピーすると末尾に以前の内容が残り続ける(実被害: "OK:battery:3689"
+// の後に直前コマンドの断片"4508/"が付着し、アプリ側の数値解析が失敗した)ため、
+// 毎回バッファをゼロクリアしてフル長で送る。
 void sendResponse(const char* message) {
-    bleCommandCharacteristic.notify((uint8_t*)message, strlen(message));
+    uint8_t buf[32];
+    memset(buf, 0, sizeof(buf));
+    strncpy((char*)buf, message, sizeof(buf) - 1);
+    bleCommandCharacteristic.notify(buf, sizeof(buf));
     logPrint("BLE", "Response sent: %s", message);
 }

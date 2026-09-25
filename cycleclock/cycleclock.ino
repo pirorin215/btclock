@@ -220,6 +220,10 @@ void setup() {
     // ウェイクスイッチ(内部プルアップ・導通=LOW)
     pinMode(WAKE_SW_GPIO, INPUT_PULLUP);
 
+    // 電池電圧を即測定(アプリの初回GET:batteryに間に合わせる)
+    g_currentMillis = millis();
+    updateBattery();
+
     setupLed();
 
     // ePaper初期化+スプラッシュ表示

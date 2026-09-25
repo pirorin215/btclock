@@ -18,7 +18,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 2
-#define FIRMWARE_VERSION_PATCH 0
+#define FIRMWARE_VERSION_PATCH 2
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)

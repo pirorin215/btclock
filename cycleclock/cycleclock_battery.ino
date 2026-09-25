@@ -29,10 +29,13 @@
 static float s_battVolts = 0.0f;
 static unsigned long s_lastBattMs = 0;
 static bool s_battValid = false;
+static bool s_firstPending = true;   // 起動直後に即測定(初回GET:batteryに間に合わせる)
 
-// loop()から定期的に呼ぶ(BLE_REFRESH間隔)。キャッシュ値を更新する。
+// loop()から定期的に呼ぶ(BATTERY_REFRESH間隔)。キャッシュ値を更新する。
 void updateBattery() {
-    if (g_currentMillis - s_lastBattMs < BATTERY_REFRESH_MS) return;
+    // 初回(起動直後)は即測定。以降は60秒間隔。
+    if (!s_firstPending && g_currentMillis - s_lastBattMs < BATTERY_REFRESH_MS) return;
+    s_firstPending = false;
     s_lastBattMs = g_currentMillis;
 
     // 分圧接続 → 安定待ち → サンプル → 切断
