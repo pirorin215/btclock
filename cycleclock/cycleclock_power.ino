@@ -56,34 +56,54 @@ void enterSystemOff() {
 }
 
 // --- Onboard LED (XIAO BLE 共通アノードRGB: HIGH=消灯) ---
+// 常時点灯系(BOOT/SYNCED/CONNECTED_SYNCED): 超低デューティPWM(約1.2%)の常時薄点灯。
+// 点滅系(NO_SYNC/CONNECTED_NO_SYNC/ERROR): ほぼ消灯で、intervalごとに
+// ごく短いパルス(50ms)だけ点灯(自作キーボード界隈の「ほぼ消えているが生きている」LED)。
 unsigned long g_lastLedBlink = 0;
-bool g_ledBlinkState = false;
+bool g_ledPulseOn = false;
 
 void setupLed() {
     pinMode(LED_RED, OUTPUT);
     pinMode(LED_GREEN, OUTPUT);
     pinMode(LED_BLUE, OUTPUT);
-    setLedState(LED_STATE_BOOT);
+    // 全消灯(common anode: HIGH=消灯)
+    digitalWrite(LED_RED, HIGH);
+    digitalWrite(LED_GREEN, HIGH);
+    digitalWrite(LED_BLUE, HIGH);
+    g_currentLedState = LED_STATE_BOOT;
+    g_ledPulseOn = false;
+    setLedColor(true, false, false);
+}
+
+// 1色分の点灯制御。点灯はanalogWriteの超低デューティPWMで暗色化し平均電流を削減。
+// 消灯時はdigitalWriteでGPIOへ戻しPWMを確実に止める(System OFF前の全消灯も兼ねる)。
+static void ledWrite(uint8_t pin, bool on) {
+    if (on) {
+        analogWrite(pin, LED_DIM_PWM_VALUE);
+    } else {
+        digitalWrite(pin, HIGH);
+    }
 }
 
 void setLedColor(bool red, bool green, bool blue) {
-    digitalWrite(LED_RED,   red   ? LOW : HIGH);
-    digitalWrite(LED_GREEN, green ? LOW : HIGH);
-    digitalWrite(LED_BLUE,  blue  ? LOW : HIGH);
+    ledWrite(LED_RED,   red);
+    ledWrite(LED_GREEN, green);
+    ledWrite(LED_BLUE,  blue);
 }
 
 void setLedState(LedState state) {
     if (state == g_currentLedState) return;
     g_currentLedState = state;
-    g_lastLedBlink = 0;  // 点滅位相リセット
+    g_lastLedBlink = 0;                 // パルス位相リセット
+    g_ledPulseOn = false;
+    setLedColor(false, false, false);   // 一旦消灯(点滅系はこれで基本消灯となる)
 
     switch (state) {
         case LED_STATE_BOOT:              setLedColor(true,  false, false); break;
-        case LED_STATE_NO_SYNC:           setLedColor(true,  false, false); break;
         case LED_STATE_SYNCED:            setLedColor(false, true,  false); break;
-        case LED_STATE_CONNECTED_NO_SYNC: setLedColor(false, false, true);  break;
         case LED_STATE_CONNECTED_SYNCED:  setLedColor(false, false, true);  break;
-        case LED_STATE_ERROR:             setLedColor(true,  false, false); break;
+        // 点滅系(NO_SYNC/CONNECTED_NO_SYNC/ERROR)は updateLed() のパルス駆動に委ねる
+        default: break;
     }
 }
 
@@ -99,30 +119,38 @@ void updateLedStateBasedOnStatus() {
     }
 }
 
-void updateLed() {
-    bool blink = false;
-    unsigned long interval = 1000;
+// 点滅系状態のパルス色
+static void pulseColor() {
+    switch (g_currentLedState) {
+        case LED_STATE_NO_SYNC:           setLedColor(true,  false, false); break;
+        case LED_STATE_CONNECTED_NO_SYNC: setLedColor(false, false, true);  break;
+        case LED_STATE_ERROR:             setLedColor(true,  false, false); break;
+        default: break;
+    }
+}
 
+// loopから毎回呼ぶ。点滅系は「(interval - LED_PULSE_MS)消灯 → LED_PULSE_MS点灯」を繰り返す。
+void updateLed() {
+    unsigned long interval;
     switch (g_currentLedState) {
         case LED_STATE_NO_SYNC:
-            blink = true;
-            setLedColor(g_ledBlinkState, false, false);
-            break;
-        case LED_STATE_CONNECTED_NO_SYNC:
-            blink = true;
-            setLedColor(false, false, g_ledBlinkState);
-            break;
-        case LED_STATE_ERROR:
-            blink = true;
-            interval = 200;
-            setLedColor(g_ledBlinkState, false, false);
-            break;
-        default:
-            return;  // 点灯固定状態は何もしない
+        case LED_STATE_CONNECTED_NO_SYNC: interval = LED_PULSE_INTERVAL_MS; break;
+        case LED_STATE_ERROR:             interval = LED_ERROR_INTERVAL_MS; break;
+        default: return;  // 常時点灯系は変化なし
     }
 
-    if (blink && g_currentMillis - g_lastLedBlink >= interval) {
-        g_ledBlinkState = !g_ledBlinkState;
-        g_lastLedBlink = g_currentMillis;
+    unsigned long elapsed = g_currentMillis - g_lastLedBlink;
+    if (!g_ledPulseOn) {
+        if (elapsed >= interval - LED_PULSE_MS) {
+            g_ledPulseOn = true;
+            g_lastLedBlink = g_currentMillis;
+            pulseColor();
+        }
+    } else {
+        if (elapsed >= LED_PULSE_MS) {
+            g_ledPulseOn = false;
+            g_lastLedBlink = g_currentMillis;
+            setLedColor(false, false, false);
+        }
     }
 }

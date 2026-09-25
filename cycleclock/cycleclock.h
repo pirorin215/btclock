@@ -17,8 +17,8 @@
 
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
-#define FIRMWARE_VERSION_MINOR 2
-#define FIRMWARE_VERSION_PATCH 2
+#define FIRMWARE_VERSION_MINOR 3
+#define FIRMWARE_VERSION_PATCH 0
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -39,8 +39,23 @@
 #define WAKE_SW_GPIO    D0
 
 // --- Sleep Policy ---
-#define SLEEP_IDLE_TIMEOUT_MS   300000UL  // BLE未接続が5分続いたら System OFF
+// 「ウェイクスイッチ導通(振動パルス)がこの時間無ければ BLE接続中でもスリープする」。
+// 乗車中は振動が継続的に導通を作るため起き続け、駐輪後はスマホが近くにいても
+// 確実に System OFF へ入る(スマホの位置に依存しない=振動の有無がスイッチ)。
+// 開発中のタクトスイッチでは「押下」が振動パルスに相当する。
+#define RIDE_INACTIVITY_TIMEOUT_MS  180000UL  // 3分
 #define WAKE_SW_LONGPRESS_MS    2000      // ウェイクスイッチ長押しで手動 System OFF (測定・テスト用)
+
+// --- LED dimming ---
+// XIAO BLEのRGB LEDはcommon anode(HIGH=消灯)。
+// 常時点灯系(BOOT/同期済み): analogWriteの超低デューティPWMで暗色化。
+// 点滅系(未同期/エラー): ほぼ消灯にしておき、一定間隔のごく短いパルスだけで
+// 生存を知らせる(自作キーボード界隈の「ほぼ消えているLED」手法)。平均電流はほぼゼロ。
+// LED_DIM_PWM_VALUE: 255=消灯。(255-値)/255 が点灯デューティ → 252は約1.2%点灯。
+#define LED_DIM_PWM_VALUE       252
+#define LED_PULSE_MS            50     // 点滅系のパルス幅
+#define LED_PULSE_INTERVAL_MS   2000   // 通常点滅間隔
+#define LED_ERROR_INTERVAL_MS   500    // エラー時の点滅間隔
 
 // --- BLE Settings ---
 // アプリ(BTClockMob)は "BikeClock-" 接頭辞でデバイスを解決するため、命名規則を維持する
@@ -80,7 +95,7 @@ extern bool g_timeSynced;                     // 時刻同期済み
 extern LedState g_currentLedState;
 extern unsigned long g_currentMillis;         // loop冒頭で更新される現在時刻
 extern unsigned long g_startupMillis;         // 起動時刻(ログタイムスタンプ・乗車時間の基点)
-extern unsigned long g_lastActivityMs;        // 最終ユーザ活動時刻(スリープ判定用)
+extern unsigned long g_lastRideEventMs;       // 最終振動検出時刻(スリープ判定の唯一の基準)
 extern DateCache g_dateCache;
 
 // --- Function Prototypes ---

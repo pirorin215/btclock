@@ -22,7 +22,7 @@ bool g_deviceConnected = false;
 unsigned long g_lastCounterMillis = 0;
 unsigned long g_currentMillis = 0;
 unsigned long g_startupMillis = 0;
-unsigned long g_lastActivityMs = 0;
+unsigned long g_lastRideEventMs = 0;  // 最終振動(スイッチ導通)検出時刻
 LedState g_currentLedState = LED_STATE_BOOT;
 DateCache g_dateCache = {0, 0, 0, 0, 0, false};
 
@@ -165,10 +165,10 @@ void processWakeSwitch() {
         if (reading != s_swStableState) {
             s_swStableState = reading;
             if (s_swStableState == LOW) {
-                // 押下開始
+                // 押下開始 = 振動パルス検出(スリープタイマーをリセット)
                 s_swPressStartMs = g_currentMillis;
-                g_lastActivityMs = g_currentMillis;
-                logPrint("SW", "Wake switch pressed");
+                g_lastRideEventMs = g_currentMillis;
+                logPrint("SW", "Wake switch pressed (ride event)");
             } else {
                 // 離した(長押し判定は押下中にも行うためここでは短押し確定のみ)
                 logPrint("SW", "Wake switch released (short)");
@@ -186,12 +186,23 @@ void processWakeSwitch() {
 }
 
 // --- スリープ判定 ---
+// 振動系の導通(乗車中の振動/タクト押下)が RIDE_INACTIVITY_TIMEOUT_MS 無ければ
+// System OFF に入る。BLE接続中でも同様(先に切断してから寝る)。
+// 「振動がある=乗っている」は物理的事実なので、スマホが近くにいる・いないに
+// 依存せず確実に眠る。逆に振動が続く限り(信号待ち含む)起き続ける。
 void checkSleepTimeout() {
-    if (g_deviceConnected) return;  // 接続中は寝ない
-    if (g_currentMillis - g_lastActivityMs < SLEEP_IDLE_TIMEOUT_MS) return;
+    if (g_currentMillis - g_lastRideEventMs < RIDE_INACTIVITY_TIMEOUT_MS) return;
 
-    logPrint("SLEEP", "Idle timeout (%lus) - entering System OFF",
-             (unsigned long)(SLEEP_IDLE_TIMEOUT_MS / 1000));
+    if (g_deviceConnected) {
+        logPrint("SLEEP", "No vibration for %lu min while connected - disconnecting",
+                 (unsigned long)(RIDE_INACTIVITY_TIMEOUT_MS / 60000));
+        // 先に切断: アプリが切断イベントとして履歴を記録できる
+        Bluefruit.disconnect(Bluefruit.connHandle());
+        delay(200);   // 切断が相手へ伝わるのを待つ
+    } else {
+        logPrint("SLEEP", "No vibration for %lu min - entering System OFF",
+                 (unsigned long)(RIDE_INACTIVITY_TIMEOUT_MS / 60000));
+    }
     enterSystemOff();  // 戻らない
 }
 
@@ -233,7 +244,7 @@ void setup() {
     setupBLE();
 
     g_lastCounterMillis = millis();
-    g_lastActivityMs = millis();
+    g_lastRideEventMs = millis();   // 起動=直前の振動で起床したとみなす
 
     logPrint("INIT", "Ready - waiting for BLE connection...");
 }

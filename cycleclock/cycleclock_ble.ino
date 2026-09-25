@@ -28,7 +28,6 @@ void ble_central_connect(uint16_t conn_handle) {
     (void)conn_handle;
     logPrint("BLE", "Device connected");
     g_deviceConnected = true;
-    g_lastActivityMs = millis();
     updateLedStateBasedOnStatus();
 }
 
@@ -37,7 +36,6 @@ void ble_central_disconnect(uint16_t conn_handle, uint8_t reason) {
     (void)reason;
     logPrint("BLE", "Device disconnected (reason=%u)", reason);
     g_deviceConnected = false;
-    g_lastActivityMs = millis();  // 切断時刻からスリープタイマーを再スタート
     updateLedStateBasedOnStatus();
 }
 
@@ -134,7 +132,6 @@ void handleTimeSync(const char* command) {
     if (timestamp > 0) {
         g_currentTimestamp = timestamp;
         g_timeSynced = true;
-        g_lastActivityMs = millis();
 
         g_dateCache.valid = false;
 
