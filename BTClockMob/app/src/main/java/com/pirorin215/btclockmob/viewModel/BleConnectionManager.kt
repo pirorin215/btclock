@@ -15,7 +15,6 @@ import com.pirorin215.btclockmob.service.BleScanService
 import kotlinx.coroutines.Job
 import androidx.lifecycle.viewModelScope
 import com.pirorin215.btclockmob.BleScanServiceManager
-import com.pirorin215.btclockmob.resolveTargetDeviceName
 import com.pirorin215.btclockmob.data.BleRepository
 import com.pirorin215.btclockmob.data.ConnectionState
 import kotlinx.coroutines.CoroutineScope
@@ -211,17 +210,28 @@ class BleConnectionManager(
             return
         }
 
-        // 1. Try to connect to a bonded device first
-        //    接続先は「ユーザー選択／未選択時は先頭BikeClockデバイス」で解決
+        val preferred = BleScanServiceManager.targetDeviceName.trim()
+
+        if (preferred.isBlank()) {
+            // 未選択: ペアリング済みのBikeClock複数台のどれが広告していても接続する。
+            // 単一デバイスへの直接接続ショートカットは使わない(電源の入っていない
+            // デバイスへの接続試行で最大30秒待たされるのを避ける)。
+            logManager.addDebugLog("No preferred device - scanning for any bonded BikeClock")
+            scope.launch {
+                BleScanServiceManager.emitRestartScan()
+            }
+            return
+        }
+
+        // 選択済み: 従来どおりbondedデバイスへの直接接続を優先する
         val bondedDevices = bluetoothAdapter?.bondedDevices
-        val targetName = resolveTargetDeviceName(BleScanServiceManager.targetDeviceName, context)
-        val bondedBTDevice = bondedDevices?.find { it.name.equals(targetName, ignoreCase = true) }
+        val bondedBTDevice = bondedDevices?.find { it.name.equals(preferred, ignoreCase = true) }
 
         if (bondedBTDevice != null) {
             logManager.addDebugLog("Attempting bonded device connection")
             connect(bondedBTDevice)
         } else {
-            // 2. If no bonded device is found, start a new scan via the service
+            // If no bonded device is found, start a new scan via the service
             logManager.addDebugLog("Requesting new scan")
             scope.launch {
                 BleScanServiceManager.emitRestartScan()

@@ -23,7 +23,7 @@ import androidx.core.app.NotificationCompat
 import com.pirorin215.btclockmob.MainActivity
 import com.pirorin215.btclockmob.R // リソースファイルが必要になります
 import com.pirorin215.btclockmob.BleScanServiceManager
-import com.pirorin215.btclockmob.resolveTargetDeviceName
+import com.pirorin215.btclockmob.bondedBikeClockDeviceNames
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -44,7 +44,10 @@ class BleScanService : Service() {
     private lateinit var bluetoothManager: BluetoothManager
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var scanJob: Job? = null
-    private var resolvedTargetName: String = ""
+    // 接続を受け付けるデバイス名の集合。
+    // ユーザー選択あり → その1台のみ / 未選択 → ペアリング済みBikeClock全台
+    // (bikeclock=バイク / cycleclock=自転車 の切り替えをアプリ操作なしで成立させる)
+    private var acceptedNames: Set<String> = emptySet()
 
     // Bluetooth状態変化を監視するBroadcastReceiver
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
@@ -74,11 +77,26 @@ class BleScanService : Service() {
         .build()
 
     /**
-     * 指定デバイス名でスキャンフィルタを構築する。
+     * 接続候補デバイス名のリストからスキャンフィルタを構築する。
+     * ScanFilterはリスト化するとOR条件になるため、複数台のBikeClockを
+     * ハードウェアフィルタのまま待ち受けることができる。
      */
-    private fun buildScanFilters(name: String): List<ScanFilter> {
-        return if (name.isBlank()) emptyList()
-        else listOf(ScanFilter.Builder().setDeviceName(name).build())
+    private fun buildScanFilters(names: List<String>): List<ScanFilter> {
+        return names.filter { it.isNotBlank() }
+            .map { ScanFilter.Builder().setDeviceName(it).build() }
+    }
+
+    /**
+     * 接続候補デバイス名を解決する。
+     * - ユーザー選択(preferred)があればその1台のみ(従来動作を維持)
+     * - 未選択ならペアリング済みの全 "BikeClock-" デバイス
+     *   (どれが広告していても接続=乗り物の切り替えが自動)
+     * - ペアリング済みが1台も無ければ空(呼び出し元でスキャン中止)
+     */
+    private fun resolveAcceptedNames(preferred: String): List<String> {
+        val p = preferred.trim()
+        if (p.isNotBlank()) return listOf(p)
+        return bondedBikeClockDeviceNames(this)
     }
 
     override fun onCreate() {
@@ -152,16 +170,16 @@ class BleScanService : Service() {
 
         stopBleScan() // 既存のスキャンがあれば停止
 
-        // 接続先を解決: ユーザー選択があればそれ、未選択ならペアリング済みの先頭BikeClockデバイス。
+        // 接続先を解決: ユーザー選択があればその1台、未選択ならペアリング済みの全BikeClockデバイス。
         // スキャン開始時に解決することで、起動時の設定読み込みレースを回避する。
-        val resolved = resolveTargetDeviceName(BleScanServiceManager.targetDeviceName, this)
-        if (resolved.isBlank()) {
+        val names = resolveAcceptedNames(BleScanServiceManager.targetDeviceName)
+        if (names.isEmpty()) {
             Log.w(TAG, "No target BikeClock device available (not paired / not selected). Skipping scan.")
             return
         }
-        resolvedTargetName = resolved
-        Log.d(TAG, "Starting BLE scan in service... (target name: $resolved)")
-        bluetoothAdapter?.bluetoothLeScanner?.startScan(buildScanFilters(resolved), scanSettings, bleScanCallback)
+        acceptedNames = names.toSet()
+        Log.d(TAG, "Starting BLE scan in service... (accepted names: $names)")
+        bluetoothAdapter?.bluetoothLeScanner?.startScan(buildScanFilters(names), scanSettings, bleScanCallback)
 
         // Removed scan timeout job for continuous scanning
     }
@@ -179,7 +197,7 @@ class BleScanService : Service() {
             Log.d(TAG, "ScanResult: Device found - ${result.device.name} (${result.device.address}), RSSI: ${result.rssi}")
             val deviceName = result.device.name ?: "(no name)"
 
-            if (deviceName == resolvedTargetName) {
+            if (deviceName in acceptedNames) {
                 Log.d(TAG, "Target device '$deviceName' found! Signaling MainViewModel to connect.")
                 // Stop scanning to allow the ViewModel to handle the connection.
                 // The ViewModel will be responsible for restarting the scan later.
@@ -195,10 +213,10 @@ class BleScanService : Service() {
             override fun onBatchScanResults(results: List<ScanResult>) {
             super.onBatchScanResults(results)
             Log.d(TAG, "onBatchScanResults: ${results.size} devices found.")
-            // バッチスキャン結果の中からターゲットデバイスを探す
+            // バッチスキャン結果の中から接続候補デバイスを探す
             results.forEach { result ->
                 val deviceName = result.device.name ?: ""
-                if (deviceName == resolvedTargetName) {
+                if (deviceName in acceptedNames) {
                     Log.d(TAG, "Target device '$deviceName' found in batch! Signaling MainViewModel to connect.")
                     // Do NOT stop scan here; continue scanning for automatic re-detection
                     CoroutineScope(Dispatchers.IO).launch {

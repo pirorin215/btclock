@@ -17,7 +17,8 @@ object BleScanServiceManager {
 
     /**
      * ユーザーが設定で選んだ接続先デバイス名（preferred）。
-     * 空 = 未選択で、実行時にペアリング済みの先頭デバイスを自動使用する（resolveTargetDeviceName で解決）。
+     * 空 = 未選択で、実行時にペアリング済みの全 "BikeClock-" デバイスが接続候補となる
+     * （実際に広告しているデバイスへ接続=バイク/自転車の切り替えが自動・BleScanService参照）。
      * MainApplication が AppSettingsRepository の値をここへ同期する。
      */
     @Volatile
