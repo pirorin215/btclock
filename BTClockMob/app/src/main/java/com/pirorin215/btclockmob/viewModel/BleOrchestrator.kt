@@ -31,6 +31,8 @@ import com.pirorin215.btclockmob.constants.TimeConstants
 import com.pirorin215.btclockmob.viewModel.LogManager
 import com.pirorin215.btclockmob.LocationTracker
 import com.pirorin215.btclockmob.data.DeviceHistoryRepository
+import com.pirorin215.btclockmob.data.BatteryLogRepository
+import com.pirorin215.btclockmob.data.BatteryLogEntry
 import com.pirorin215.btclockmob.bluetooth.constants.BleConstants
 import com.pirorin215.btclockmob.bluetooth.device.BleDeviceManager
 import com.pirorin215.btclockmob.viewModel.NavigationEvent
@@ -46,7 +48,8 @@ class BleOrchestrator(
     private val logManager: LogManager,
     private val disconnectSignal: SharedFlow<Unit>,
     private val locationTracker: LocationTracker,
-    private val deviceHistoryRepository: DeviceHistoryRepository
+    private val deviceHistoryRepository: DeviceHistoryRepository,
+    private val batteryLogRepository: BatteryLogRepository
 ) {
     companion object {
         const val TAG = "BleOrchestrator"
@@ -183,7 +186,22 @@ class BleOrchestrator(
             } else {
                 addLog("時刻同期完了")
             }
+
+            // 接続直後にバッテリー電圧を取得・記録（旧ファームはnullで無視）
+            fetchAndStoreBattery()
         }
+    }
+
+    /**
+     * cycleclockからバッテリー電圧を取得して時系列ログに保存する。
+     * 失敗・非対応(旧ファーム)はサイレントに諦める(毎分走るためログ抑制)。
+     */
+    private suspend fun fetchAndStoreBattery() {
+        val millivolts = bleDeviceManager.getBattery(connectionStateFlow.value) ?: return
+        batteryLogRepository.addEntry(
+            BatteryLogEntry(timestamp = System.currentTimeMillis(), millivolts = millivolts)
+        )
+        addDebugLog("Battery: %.2fV".format(millivolts / 1000.0))
     }
 
     /**
@@ -195,6 +213,7 @@ class BleOrchestrator(
         periodicTimeSyncJob?.cancel()
 
         periodicTimeSyncJob = scope.launch {
+            var batteryCounter = 0
             while (coroutineContext[Job.Key]?.isActive == true) {
                 delay(TimeConstants.TIME_SYNC_INTERVAL_MS) // 1 minute
 
@@ -209,6 +228,12 @@ class BleOrchestrator(
                                 latitude = data.latitude
                                 longitude = data.longitude
                             }
+                        }
+
+                        // バッテリーは5分ごと(5回に1回)に取得・記録
+                        if (++batteryCounter >= 5) {
+                            batteryCounter = 0
+                            fetchAndStoreBattery()
                         }
                     } else {
                         addDebugLog("Periodic time sync failed")
@@ -243,6 +268,9 @@ class BleOrchestrator(
             commandUuid -> {
                 when (_currentOperation.value) {
                     BleOperation.SENDING_TIME -> {
+                        bleDeviceManager.handleResponse(value, _currentOperation.value)
+                    }
+                    BleOperation.FETCHING_BATTERY -> {
                         bleDeviceManager.handleResponse(value, _currentOperation.value)
                     }
                     else -> {

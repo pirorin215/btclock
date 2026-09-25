@@ -29,7 +29,8 @@ val viewModelModule = module {
             get<BleOrchestrator>(),
             get<LocationMonitor>(),
             get<LogManager>(),
-            get<AppSettingsRepository>()
+            get<AppSettingsRepository>(),
+            get<com.pirorin215.btclockmob.data.BatteryLogRepository>()
         )
     }
 

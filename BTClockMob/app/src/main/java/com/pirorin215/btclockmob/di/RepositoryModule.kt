@@ -2,6 +2,7 @@ package com.pirorin215.btclockmob.di
 
 import android.content.Context
 import com.pirorin215.btclockmob.data.AppSettingsRepository
+import com.pirorin215.btclockmob.data.BatteryLogRepository
 import com.pirorin215.btclockmob.data.BleRepository
 import com.pirorin215.btclockmob.data.DeviceHistoryRepository
 import com.pirorin215.btclockmob.data.KeyCodeSettingsRepository
@@ -15,5 +16,6 @@ val repositoryModule = module {
     single { BleRepository(get<Context>()) }
     single { LastKnownLocationRepository(get<Context>()) }
     single { DeviceHistoryRepository(get<Context>()) }
+    single { BatteryLogRepository(get<Context>()) }
     single { MotionTrainingRepository(get<Context>()) }
 }

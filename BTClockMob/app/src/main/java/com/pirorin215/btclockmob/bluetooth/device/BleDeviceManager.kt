@@ -95,6 +95,52 @@ class BleDeviceManager(
     }
 
     /**
+     * バッテリー電圧を取得する（cycleclock v0.2.0以降・旧ファームはERRORを返す）
+     *
+     * @param connectionState 現在の接続状態
+     * @return 電圧(ミリボルト)、失敗時・非対応時はnull
+     */
+    suspend fun getBattery(connectionState: ConnectionState): Int? {
+        if (connectionState !is ConnectionState.Connected) {
+            return null
+        }
+
+        return bleMutex.withLock {
+            if (_currentOperation.value != BleOperation.IDLE) {
+                logManager.addDebugLog("バッテリー取得をスキップ: ${_currentOperation.value} 実行中")
+                return@withLock null
+            }
+
+            try {
+                _currentOperation.value = BleOperation.FETCHING_BATTERY
+                rawResponseBuffer.reset()
+                val completion = CompletableDeferred<Pair<Boolean, String?>>()
+                currentCommandCompletion = completion
+
+                sendCommand(BleConstants.CMD_GET_BATTERY)
+
+                val (success, response) = withTimeoutOrNull(BleTimeoutConstants.TIME_SYNC_TIMEOUT_MS) {
+                    completion.await()
+                } ?: Pair(false, "タイムアウト")
+
+                if (!success) {
+                    // 旧ファーム(bikeclock/bikeclock_esp32)はERROR: Unknown commandを返す
+                    logManager.addDebugLog("バッテリー取得失敗(旧ファームの可能性): $response")
+                    null
+                } else {
+                    response?.removePrefix(BleConstants.RESPONSE_OK_BATTERY)?.trim()?.toIntOrNull()
+                }
+            } catch (e: Exception) {
+                logManager.addDebugLog("バッテリー取得中にエラー: ${e.message}")
+                null
+            } finally {
+                _currentOperation.value = BleOperation.IDLE
+                currentCommandCompletion = null
+            }
+        }
+    }
+
+    /**
      * 定期時刻同期ジョブを開始する
      * 1分ごとにベストエフォートで時刻同期を行う
      */
@@ -149,6 +195,16 @@ class BleDeviceManager(
                 val response = rawResponseBuffer.toUtf8String()
                 if (response.startsWith(BleConstants.RESPONSE_OK_TIME)) {
                     currentCommandCompletion?.complete(Pair(true, null))
+                    rawResponseBuffer.reset()
+                } else if (response.startsWith(BleConstants.RESPONSE_ERROR + BleConstants.COMMAND_SEPARATOR)) {
+                    currentCommandCompletion?.complete(Pair(false, response))
+                    rawResponseBuffer.reset()
+                }
+            }
+            BleOperation.FETCHING_BATTERY -> {
+                val response = rawResponseBuffer.toUtf8String()
+                if (response.startsWith(BleConstants.RESPONSE_OK_BATTERY)) {
+                    currentCommandCompletion?.complete(Pair(true, response))
                     rawResponseBuffer.reset()
                 } else if (response.startsWith(BleConstants.RESPONSE_ERROR + BleConstants.COMMAND_SEPARATOR)) {
                     currentCommandCompletion?.complete(Pair(false, response))

@@ -14,6 +14,7 @@ import com.pirorin215.btclockmob.data.ThemeMode
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -24,7 +25,8 @@ class MainViewModel(
     private val bleOrchestrator: BleOrchestrator,
     private val locationMonitor: LocationMonitor,
     private val logManager: LogManager,
-    private val appSettingsRepository: com.pirorin215.btclockmob.data.AppSettingsRepository
+    private val appSettingsRepository: com.pirorin215.btclockmob.data.AppSettingsRepository,
+    batteryLogRepository: com.pirorin215.btclockmob.data.BatteryLogRepository
 ) : ViewModel() {
 
     companion object {
@@ -39,6 +41,12 @@ class MainViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Settings.DEFAULT_NOTIFICATION_MAX_CHARS)
 
     val logs = logManager.logs
+
+    // 最新のバッテリー電圧（cycleclockのGET:battery由来・時系列はBatteryLogRepositoryに蓄積）
+    val latestBattery: StateFlow<com.pirorin215.btclockmob.data.BatteryLogEntry?> =
+        batteryLogRepository.batteryLogFlow
+            .map { it.firstOrNull() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     // --- State exposed from orchestrator and managers ---
     val connectionState: StateFlow<ConnectionState> = bleConnectionManager.connectionState

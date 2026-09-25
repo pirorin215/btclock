@@ -2,6 +2,7 @@ package com.pirorin215.btclockmob.di
 
 import android.content.Context
 import com.pirorin215.btclockmob.data.AppSettingsRepository
+import com.pirorin215.btclockmob.data.BatteryLogRepository
 import com.pirorin215.btclockmob.data.BleRepository
 import com.pirorin215.btclockmob.data.ConnectionState
 import com.pirorin215.btclockmob.data.DeviceHistoryRepository
@@ -57,7 +58,8 @@ val bleModule = module {
             logManager = get(),
             disconnectSignal = get<MutableSharedFlow<Unit>>(named("disconnectSignal")).asSharedFlow(),
             locationTracker = get(),
-            deviceHistoryRepository = get()
+            deviceHistoryRepository = get(),
+            batteryLogRepository = get()
         )
     }
 }

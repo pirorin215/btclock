@@ -50,6 +50,12 @@ object BleConstants {
      */
     const val CMD_GET_VERSION = "GET:version"
 
+    /**
+     * バッテリー電圧取得コマンド（cycleclock v0.2.0以降）
+     * レスポンス: OK:battery:<millivolts>
+     */
+    const val CMD_GET_BATTERY = "GET:battery"
+
     // --- レスポンス定数 ---
     /**
      * 成功レスポンスプレフィックス
@@ -65,6 +71,11 @@ object BleConstants {
      * 時刻同期成功レスポンスプレフィックス
      */
     const val RESPONSE_OK_TIME = "OK: Time"
+
+    /**
+     * バッテリー電圧成功レスポンスプレフィックス
+     */
+    const val RESPONSE_OK_BATTERY = "OK:battery:"
 
     // --- プロトコルフォーマット定数 ---
     /**

@@ -79,6 +79,7 @@ fun MainScreen(
 ) {
     val context = LocalContext.current
     val connectionState by mainViewModel.connectionState.collectAsState()
+    val latestBattery by mainViewModel.latestBattery.collectAsState()
     val targetDevicePref by appSettingsViewModel.targetDeviceName.collectAsState()
     val logs: List<String> by mainViewModel.logs.collectAsState()
 
@@ -228,6 +229,19 @@ fun MainScreen(
                                                 text = headerName.ifBlank { disconnectedText },
                                                 style = MaterialTheme.typography.bodyMedium
                                             )
+                                            // 最新のバッテリー電圧（cycleclockのみ・GET:battery非対応機は非表示）
+                                            latestBattery?.let { batt ->
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "%.2fV".format(batt.millivolts / 1000.0),
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = if (batt.millivolts < 3500) {
+                                                        MaterialTheme.colorScheme.error
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurface
+                                                    }
+                                                )
+                                            }
                                             if (switchable) {
                                                 Icon(
                                                     Icons.Filled.ArrowDropDown,
