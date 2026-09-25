@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 
 # BikeClock Upload Script for XIAO BLE (nRF52840)
 

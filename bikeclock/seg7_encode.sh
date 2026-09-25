@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 
 # 7セグメントLED エンコーダー
 # 使い方: ./seg7_encode.sh "abcefg"

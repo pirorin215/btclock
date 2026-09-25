@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 
 # BikeClock ESP32-S3 Upload Script
 

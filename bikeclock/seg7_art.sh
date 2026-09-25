@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 
 # 7セグメントディスプレイ アスキーアート表示
 

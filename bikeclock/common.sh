@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 # BikeClock 共通関数ライブラリ
 # 各スクリプトから source コマンドで読み込まれます
 

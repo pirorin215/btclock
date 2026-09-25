@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 
 # BikeClock ESP32 シリアルコンソール監視スクリプト
 # デバイスの接続/切断を自動検出し、シリアルログを表示します

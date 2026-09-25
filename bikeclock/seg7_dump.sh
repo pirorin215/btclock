@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/opt/homebrew/bin/bash
 
 # SEGMENT_CHARS配列ダンプツール
 # bikeclock_led.inoからSEGMENT_CHARS配列を抽出して表示
