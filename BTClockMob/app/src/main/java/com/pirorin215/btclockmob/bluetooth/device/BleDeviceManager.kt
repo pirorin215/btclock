@@ -125,10 +125,17 @@ class BleDeviceManager(
 
                 if (!success) {
                     // 旧ファーム(bikeclock/bikeclock_esp32)はERROR: Unknown commandを返す
-                    logManager.addDebugLog("バッテリー取得失敗(旧ファームの可能性): $response")
+                    logManager.addDebugLog("バッテリー取得失敗(旧ファームの可能性): ${response?.take(48)}")
                     null
                 } else {
-                    response?.removePrefix(BleConstants.RESPONSE_OK_BATTERY)?.trim()?.toIntOrNull()
+                    // 応答から電圧を抽出。固定長特性は末尾にゴミが付くことがあるため
+                    // 厳密な全文字列解析ではなく正規表現で数字部分だけを取り出す
+                    // (実被害: "OK:battery:36894508/" → toIntOrNull失敗で無音死亡)。
+                    val mv = Regex("OK:battery:(\\d+)").find(response ?: "")?.groupValues?.get(1)?.toIntOrNull()
+                    if (mv == null) {
+                        logManager.addDebugLog("バッテリー応答の解析に失敗: ${response?.take(48)}")
+                    }
+                    mv
                 }
             } catch (e: Exception) {
                 logManager.addDebugLog("バッテリー取得中にエラー: ${e.message}")
