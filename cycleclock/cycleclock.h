@@ -18,7 +18,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 3
-#define FIRMWARE_VERSION_PATCH 0
+#define FIRMWARE_VERSION_PATCH 1
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -34,6 +34,11 @@
 #define EPD_SPI_MOSI_GPIO  D5   // SPI MOSI (モジュール印字: SDA)
 #define EPD_SPI_MISO_GPIO  D1   // SPI MISO (未使用・ダミー)
 
+// 描画前のBUSY解除待ち上限。3色パネルのフル更新はB74ドライバのBUSYタイムアウト
+// (10秒)より長くなるため、直前の更新が物理的に続いている間に描画すると消える。
+// 最悪値を見て30秒(通常の分更新間隔60秒では待ち自体が発生しない)。
+#define EPD_BUSY_GUARD_TIMEOUT_MS  30000UL
+
 // ウェイクスイッチ: 他端GND・内部プルアップ・導通(LOW)で System OFF から復帰
 // (開発中はタクトスイッチ、最終形は SW-18020P 系振動センサー)
 #define WAKE_SW_GPIO    D0
@@ -45,6 +50,7 @@
 // 開発中のタクトスイッチでは「押下」が振動パルスに相当する。
 #define RIDE_INACTIVITY_TIMEOUT_MS  180000UL  // 3分
 #define WAKE_SW_LONGPRESS_MS    2000      // ウェイクスイッチ長押しで手動 System OFF (測定・テスト用)
+#define WAKE_SW_RELEASE_TIMEOUT_MS  10000UL  // System OFF前のスイッチ解放待ち上限(導通継続時のハング防止)
 
 // --- LED dimming ---
 // XIAO BLEのRGB LEDはcommon anode(HIGH=消灯)。

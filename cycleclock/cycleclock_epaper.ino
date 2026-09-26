@@ -312,8 +312,31 @@ static void drawVersionBig(const uint8_t* font, int16_t baselineY, int16_t dotR)
 // 画面描画
 // ====================================================================
 
+// 描画前にパネルが実際にidle(BUSY解除)になるのを待つ。
+// 現状の3色パネルはフル更新がGxEPD2_213_B74のBUSYタイムアウト(10秒固定)より
+// 長く、_waitWhileBusyは10秒で諦めて制御を返した後もパネルは物理更新を続けて
+// いる。その間に送ったページデータ/リフレッシュコマンドはコントローラに
+// 無視される(実害: 分更新直後にスリープ画面を描こうとして消える)。通常の
+// 60秒間隔の更新では待ちは発生しない(即idle)。
+// B74のBUSY極性はHIGH=更新中。上限は3色パネルのフル更新最悪値を想定した30秒。
+static void waitPanelIdle() {
+    if (digitalRead(EPD_BUSY_GPIO) == LOW) return;  // 即idle・無待ち
+    uint32_t t0 = millis();
+    logPrint("EPAPER", "Panel busy - waiting before draw...");
+    while (digitalRead(EPD_BUSY_GPIO) == HIGH) {
+        if (millis() - t0 > EPD_BUSY_GUARD_TIMEOUT_MS) {
+            logPrint("EPAPER", "Panel still busy after %d ms - drawing anyway",
+                     (int)EPD_BUSY_GUARD_TIMEOUT_MS);
+            break;
+        }
+        delay(10);
+    }
+    delay(20);  // BUSY解除直後のコマンド受付マージン
+}
+
 // フル画面をページ単位で描画。GxEPD2 の paged-update 定型句の共通化。
 #define DRAW_PAGED(...) \
+    waitPanelIdle(); \
     g_epaper.setFullWindow(); \
     g_epaper.firstPage(); \
     do { \

@@ -19,8 +19,17 @@
 void enterSystemOff() {
     // 押下されたまま System OFF に入ると DETECT が即成立して即時起床してしまう
     // (見かけ上「停止→再起動」になる)。離されるのを待ってから寝る。
+    // ただし導通が続く(SW-18020P誘導導通・断線ショート等)場合にここで永久ハング
+    // すると System OFF に入れず電池を食い潰すため、上限付きで待つ。
+    // 導通中に寝れば即再起床(見かけ上の再起動)するが、振動が止まれば自己解決する。
     logPrint("POWER", "Sleep requested - waiting for switch release...");
+    uint32_t releaseWaitStart = millis();
     while (digitalRead(WAKE_SW_GPIO) == LOW) {
+        if (millis() - releaseWaitStart > WAKE_SW_RELEASE_TIMEOUT_MS) {
+            logPrint("POWER", "Switch conducting for %d ms - entering System OFF anyway",
+                     (int)WAKE_SW_RELEASE_TIMEOUT_MS);
+            break;
+        }
         delay(10);
     }
     delay(100);  // チャタリング解放分のマージン
