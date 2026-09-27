@@ -26,6 +26,12 @@ unsigned long g_lastRideEventMs = 0;  // 最終振動(スイッチ導通)検出�
 LedState g_currentLedState = LED_STATE_BOOT;
 DateCache g_dateCache = {0, 0, 0, 0, 0, false};
 
+// --- Notification (bikeclock_esp32 Phase 10 から移植) ---
+volatile bool g_notificationActive = false;      // BLEコールバック(onWrite)が立てる
+unsigned long g_notificationEndTime = 0;
+char g_notificationApp[NOTIFY_APP_LEN] = {0};    // アプリ名(ログ用・描画未使用)
+char g_notificationText[NOTIFY_TEXT_LEN] = {0};  // 通知本文
+
 // --- Time Helper Functions (bikeclock.ino から移植) ---
 int getHours() {
     return (g_currentTimestamp % 86400) / 3600;

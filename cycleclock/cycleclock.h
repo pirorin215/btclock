@@ -18,7 +18,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 3
-#define FIRMWARE_VERSION_PATCH 1
+#define FIRMWARE_VERSION_PATCH 2
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -67,6 +67,32 @@
 // アプリ(BTClockMob)は "BikeClock-" 接頭辞でデバイスを解決するため、命名規則を維持する
 #define BLE_DEVICE_NAME       "BikeClock-Cycle"
 
+// コマンド特性の最大長。アプリは通知を "NOTIFY:app=...\n本文" の1回のWrite(最大~230B)で
+// 送るため、ATT MTU 247(実効244B)と合わせて可変長でこの長さまで受ける。
+#define BLE_CMD_MAX_LEN       247
+
+// --- Notification (bikeclock_esp32 Phase 10 から移植) ---
+#define NOTIFICATION_DISPLAY_TIMEOUT_MS 60000UL  // 通知表示時間。esp32版は30秒だが、現行3色
+                                                 // パネルのフル更新に>10秒かかるため60秒とする
+#define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null(ログ/将来用。描画には未使用)
+#define NOTIFY_TEXT_LEN  201   // 通知本文上限 200B + null
+
+// 通知の文字数に応じたフォントサイズと拡大倍率の設定構造体
+struct NotifyFontSetting {
+    int maxChars;          // この文字数以下の場合に適用
+    const uint8_t* font;   // 使用するフォント(u8g2_font_...)
+    int scale;             // 拡大倍率(1〜3)
+};
+
+// フォントと拡大倍率の段階設定(文字数の昇順で定義。最後は全長文をカバーする大きな値)
+static const NotifyFontSetting NOTIFY_FONT_SETTINGS[] = {
+    { 10,  u8g2_font_b16_t_japanese3, 3 },  // 16pxフォント3倍 48px
+    { 24,  u8g2_font_b12_t_japanese3, 3 },  // 12pxフォント3倍 36px
+    { 26,  u8g2_font_b16_t_japanese3, 2 },  // 16pxフォント2倍 32px
+    {999,  u8g2_font_b12_t_japanese3, 2 }
+};
+#define NUM_NOTIFY_FONT_SETTINGS (sizeof(NOTIFY_FONT_SETTINGS) / sizeof(NOTIFY_FONT_SETTINGS[0]))
+
 // --- BLE UUIDs (bikeclock / bikeclock_esp32 と共通・アプリ互換) ---
 #define BLE_SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914c"
 #define BLE_CHAR_COMMAND_UUID   "beb5483e-36e1-4688-b7f5-ea07361b26a0"  // Read/Write/Notify: 時刻同期コマンド
@@ -104,6 +130,12 @@ extern unsigned long g_startupMillis;         // 起動時刻(ログタイムス
 extern unsigned long g_lastRideEventMs;       // 最終振動検出時刻(スリープ判定の唯一の基準)
 extern DateCache g_dateCache;
 
+// --- Notification (BLE受信→ePaper通知表示) ---
+extern volatile bool g_notificationActive;    // 通知表示中フラグ(BLEコールバックが立てる)
+extern unsigned long g_notificationEndTime;   // 通知表示の終了時刻(millis())
+extern char g_notificationApp[];              // アプリ名(ログ用)
+extern char g_notificationText[];             // 通知本文
+
 // --- Function Prototypes ---
 
 // cycleclock.ino
@@ -122,6 +154,7 @@ void checkSleepTimeout();
 void setupBLE();
 void handleTimeSync(const char* command);
 void handleGetVersion();
+void handleNotify(const char* command);
 void sendResponse(const char* message);
 
 // cycleclock_epaper.ino

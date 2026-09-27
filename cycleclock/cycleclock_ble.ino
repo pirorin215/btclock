@@ -2,7 +2,8 @@
  * BLE Server Implementation for CycleClock (Adafruit Bluefruit)
  *
  * bikeclock_ble.ino (XIAO BLE版 v1.1.6) から流用。
- * HID・キー設定・7セグ表示を削除し、時刻同期のみの最小構成。
+ * HID・キー設定・7セグ表示を削除し、時刻同期+電池取得+通知受信(NOTIFY:)の構成。
+ * v0.3.2: ATT MTU 247拡大+コマンド特性可変長化(247B)で通知の長Writeに対応。
  *
  * ペアリング方針(2026-09-25 決定):
  * コマンド特性を SECMODE_ENC_NO_MITM とし、初回接続時に Just Works で
@@ -43,8 +44,8 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
     (void)conn_hdl;
     (void)chr;
 
-    if (len > 0 && len < 128) {
-        char command[128];
+    if (len > 0 && len <= BLE_CMD_MAX_LEN) {
+        char command[BLE_CMD_MAX_LEN + 1];
         memcpy(command, data, len);
         command[len] = '\0';
 
@@ -56,6 +57,8 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
             handleGetVersion();
         } else if (strncmp(command, "GET:battery", 11) == 0) {
             handleGetBattery();
+        } else if (strncmp(command, "NOTIFY:", 7) == 0) {
+            handleNotify(command);
         } else {
             logPrint("BLE", "Unknown command: %s", command);
             sendResponse("ERROR: Unknown command");
@@ -69,6 +72,13 @@ void setupBLE() {
     logPrint("BLE", "BLE Initialization (bonding required)");
     logPrint("BLE", "Firmware Version: %d.%d.%d (%s)",
              FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH, __DATE__);
+
+    // ATT MTUを247へ拡大(デフォルト23)。アプリは通知を1回のWrite(~230B)で送るため。
+    // begin()より前に設定する(SoftDeviceの接続構成に反映される)。
+    // キュー長等はデフォルトのまま(BANDWIDTH系プリセットはevent_len/キューも上がり省電力に不利)。
+    Bluefruit.configPrphConn(247, BLE_GAP_EVENT_LENGTH_MIN,
+                             BLE_GATTS_HVN_TX_QUEUE_SIZE_DEFAULT,
+                             BLE_GATTC_WRITE_CMD_TX_QUEUE_SIZE_DEFAULT);
 
     // 時計1台用途なので接続数1で十分(HID廃止)
     Bluefruit.begin(1, 0);
@@ -96,7 +106,9 @@ void setupBLE() {
     bleService.setPermission(SECMODE_OPEN, SECMODE_OPEN);
     bleCommandCharacteristic.setProperties(CHR_PROPS_READ | CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
     bleCommandCharacteristic.setPermission(SECMODE_ENC_NO_MITM, SECMODE_ENC_NO_MITM);
-    bleCommandCharacteristic.setFixedLen(32);
+    // 可変長(上限247B): 通知転送(NOTIFY:...)は~230Bの1回Writeで届く(旧: 32B固定長)
+    bleCommandCharacteristic.setMaxLen(BLE_CMD_MAX_LEN);
+    bleCommandCharacteristic.setFixedLen(0);
     bleCommandCharacteristic.setWriteCallback(onCommandWritten);
 
     bleService.begin();
@@ -170,15 +182,82 @@ void handleGetBattery() {
     sendResponse(resp);
 }
 
+// --- Notification Handler (bikeclock_esp32_ble.ino handleNotify から移植) ---
+// NOTIFY:app=<アプリ名>\n<テキスト> — スマホ通知受信(fire-and-forget・応答なし)。
+// ここ(SoftDeviceコールバック)では文字列操作とフラグ設定のみ行い、描画は
+// updateEpaperDisplay() のポーリングで loop 側が行う(analogRead等のnrfx触媒は禁止)。
+//   - "app=" が無ければアプリ名を空、残り全部を本文とする
+//   - "\n" が無ければ "app=" 以降全部をアプリ名、本文は空
+//   - 本文は 200B で切り詰め(UTF-8境界を巻き戻し、マルチバイト文字途中で切らない)
+//   - "\r\n"(CRLF) の \r は除去
+void handleNotify(const char* command) {
+    // "NOTIFY:" の7バイトをスキップ
+    const char* p = command + 7;
+
+    // "app=" を探す
+    const char* appStart = strstr(p, "app=");
+    const char* textStart = "";
+    const char* appEnd = p;   // アプリ名終端(デフォルト: 空文字列)
+
+    if (appStart != nullptr) {
+        appStart += 4;   // "app=" の4バイトをスキップ
+        appEnd = appStart;
+        // \n までがアプリ名。\r\n の \r も終端に含めない。
+        while (*appEnd != '\0' && *appEnd != '\n') {
+            appEnd++;
+        }
+        // 改行の次が本文(\r があれば1つ飛ばす)
+        if (*appEnd == '\n') {
+            textStart = appEnd + 1;
+        } else {
+            // \n 無し: アプリ名 = "app="以降全部。appEnd は '\0' を指す(本文空)
+            textStart = appEnd;
+        }
+    } else {
+        // "app=" 無し: アプリ名空、残り全部を本文
+        textStart = p;
+    }
+
+    // --- アプリ名コピー(32B上限) ---
+    size_t appLen = (size_t)(appEnd - appStart);
+    if (appEnd > appStart && appEnd[-1] == '\r') appLen--;   // 末尾 \r 除去
+    if (appLen >= NOTIFY_APP_LEN) appLen = NOTIFY_APP_LEN - 1;
+    memcpy(g_notificationApp, appStart, appLen);
+    g_notificationApp[appLen] = '\0';
+
+    // --- 本文コピー(200B上限、UTF-8境界巻き戻しは切り詰め時のみ) ---
+    size_t textLen = strlen(textStart);
+    bool truncated = (textLen >= NOTIFY_TEXT_LEN);
+    if (truncated) {
+        textLen = NOTIFY_TEXT_LEN - 1;
+    }
+    memcpy(g_notificationText, textStart, textLen);
+    g_notificationText[textLen] = '\0';
+
+    if (truncated) {
+        // 切り詰めが発生した時のみ、末尾の不完全なUTF-8バイトを削る
+        while (textLen > 0 && (g_notificationText[textLen - 1] & 0xC0) == 0x80) {
+            textLen--;
+        }
+        if (textLen > 0 && (g_notificationText[textLen - 1] & 0xC0) == 0xC0) {
+            textLen--;
+        }
+        g_notificationText[textLen] = '\0';
+    }
+
+    // --- 通知活性化(描画は updateEpaperDisplay が検出) ---
+    g_notificationEndTime = millis() + NOTIFICATION_DISPLAY_TIMEOUT_MS;
+    g_notificationActive = true;
+
+    logPrint("NOTIFY", "Received (app='%s', text=%d bytes): %s",
+             g_notificationApp, (int)textLen,
+             textLen > 0 ? g_notificationText : "(empty)");
+}
+
 // --- Response Helper ---
-// コマンド特性はsetFixedLen(32)のため、notifyは内部バッファ32バイト全文を送る。
-// メッセージだけコピーすると末尾に以前の内容が残り続ける(実被害: "OK:battery:3689"
-// の後に直前コマンドの断片"4508/"が付着し、アプリ側の数値解析が失敗した)ため、
-// 毎回バッファをゼロクリアしてフル長で送る。
+// 特性は可変長のため、メッセージ長だけをnotifyで送る(旧32B固定長時代の
+// ゼロクリア+フル長送信の workaround は不要になった)。
 void sendResponse(const char* message) {
-    uint8_t buf[32];
-    memset(buf, 0, sizeof(buf));
-    strncpy((char*)buf, message, sizeof(buf) - 1);
-    bleCommandCharacteristic.notify(buf, sizeof(buf));
+    bleCommandCharacteristic.notify((const uint8_t*)message, strlen(message));
     logPrint("BLE", "Response sent: %s", message);
 }

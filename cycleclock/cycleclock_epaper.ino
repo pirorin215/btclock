@@ -5,7 +5,8 @@
  * 変更点:
  * - 専用 SPI3_HOST バス + selectSPI → XIAO のデフォルト SPI (D8/D10)
  * - スプラッシュのプラットフォーム表記を nRF52840 に変更
- * - 通知/詳細/OTA/QR ビューを削除(時計・未同期・スプラッシュの3ビューのみ)
+ * - 詳細/OTA/QR ビューを削除(時計・未同期・スプラッシュ+通知)
+ * - v0.3.2: 通知ビューを bikeclock_esp32 (Phase 10) から復活・移植
  *
  * 表示レイアウト（250x122 横長, rotation=3）:
  *
@@ -35,6 +36,7 @@ static int8_t ep_lastHr  = -1;
 static int8_t ep_lastMin = -1;
 static int8_t ep_lastDay = -1;
 static bool   ep_showingUnsynced = false;
+static bool   ep_showingNotification = false;
 
 // === 画面ジオメトリ（rotation=3 で 250x122 横長） ===
 static const int16_t EP_W = 250;
@@ -266,6 +268,56 @@ static void drawCenteredText(const char* text, int16_t baselineY, int16_t scale 
     u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
 }
 
+// UTF-8 先頭バイトから1文字のバイト長を得る。不正バイトは0。
+static uint8_t utf8Len(const char* p) {
+    if ((*p & 0x80) == 0) return 1;
+    if ((*p & 0xE0) == 0xC0) return 2;
+    if ((*p & 0xF0) == 0xE0) return 3;
+    if ((*p & 0xF8) == 0xF0) return 4;
+    return 0;
+}
+
+// UTF-8 文字列の文字数（バイト数ではない）。通知フォントサイズの段階切替で使用。
+static int utf8CharCount(const char* text) {
+    int count = 0;
+    for (const char* p = text; *p; ) {
+        uint8_t len = utf8Len(p);
+        if (!len) { p++; continue; }
+        count++;
+        p += len;
+    }
+    return count;
+}
+
+// 日本語自動折返し描画（通知表示用）。UTF-8 を1文字ずつ描画し、maxWidth を超えると改行。
+static void drawWrappedText(int16_t x, int16_t y, const char* text,
+                            const uint8_t* font, int16_t maxWidth) {
+    setFont(font);
+
+    int16_t cursorX = x;
+    int16_t lineHeight = u8g2Fonts.getFontAscent() - u8g2Fonts.getFontDescent() + 6;
+    int16_t cursorY = y + u8g2Fonts.getFontAscent() + 4;
+
+    const char* p = text;
+    while (*p) {
+        uint8_t len = utf8Len(p);
+        if (!len) { p++; continue; }   // 不正バイトは読み飛ばし
+
+        char buf[5] = {0};
+        strncpy(buf, p, len);
+        int16_t charWidth = u8g2Fonts.getUTF8Width(buf);
+
+        if (cursorX + charWidth > x + maxWidth) {
+            cursorX = x;
+            cursorY += lineHeight;
+        }
+        u8g2Fonts.setCursor(cursorX, cursorY);
+        u8g2Fonts.print(buf);
+        cursorX += charWidth;
+        p += len;
+    }
+}
+
 // バージョン番号 "ver major.minor.patch" を画面中央に描画。
 // 「ver」は34pxフォント、番号は巨大数字フォント。ピリオドは数字フォントが非収録のため fillCircle。
 static void drawVersionBig(const uint8_t* font, int16_t baselineY, int16_t dotR) {
@@ -370,6 +422,45 @@ static void drawEpaperUnsynced() {
     });
 }
 
+// 通知表示: 本文テキストを全画面に自動折返し描画。
+// 文字数に応じてフォントサイズを段階切替（NOTIFY_FONT_SETTINGS）。
+// ※ BLEコールバックとページループが競合しないよう、ページループ前にローカルコピーを
+//    取り、ループ内ではそのコピーを使う(paged update は各ページで再描画するため)。
+static void drawEpaperNotification(const char* text) {
+    static char safeText[NOTIFY_TEXT_LEN];
+    strncpy(safeText, text, NOTIFY_TEXT_LEN - 1);
+    safeText[NOTIFY_TEXT_LEN - 1] = '\0';
+
+    // 文字数でフォントサイズとスケーリングを判定
+    const uint8_t* font = u8g2_font_b10_t_japanese2; // デフォルトフォールバック
+    int scale = 1;
+    const int n = utf8CharCount(safeText);
+    for (size_t i = 0; i < NUM_NOTIFY_FONT_SETTINGS; i++) {
+        if (n <= NOTIFY_FONT_SETTINGS[i].maxChars) {
+            font = NOTIFY_FONT_SETTINGS[i].font;
+            scale = NOTIFY_FONT_SETTINGS[i].scale;
+            break;
+        }
+    }
+
+    logPrint("NOTIFY", "Drawing: UTF8 chars=%d, scale=%dx", n, scale);
+
+    DRAW_PAGED({
+        if (safeText[0] != '\0') {
+            if (scale > 1) {
+                ScaledGFX scaledGfx(g_epaper, scale);
+                u8g2Fonts.begin(scaledGfx);
+                drawWrappedText(0, 0, safeText, font, EP_W / scale);
+                u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
+            } else {
+                drawWrappedText(0, 0, safeText, font, EP_W);
+            }
+        } else {
+            drawCenteredText("通知なし", 76, 2);
+        }
+    });
+}
+
 // スリープ画面: 停止時点のスナップショット。System OFF直前に1回だけ描画され、
 // ゼロ電力で保持され続ける。通常の時計表示のままだと停車中に「今の時刻」と
 // 勘違いされるため、日付+走行区間という明らかに時計でない形式にする
@@ -469,9 +560,30 @@ void setupEpaper() {
 }
 
 // loop から毎回呼ばれる。表示すべき内容が変わった時だけ描画。
+//   - 通知活性中 → 通知ビューを1回だけ描画(未同期より優先)。分更新を抑制し、
+//                  タイムアウトで通知を終了して時計(または未同期)へ強制復帰
 //   - 未同期 → 「時刻未同期」固定
 //   - 同期済 → 分/日が変わるか初回に時計を毎分フル更新
 void updateEpaperDisplay() {
+    // === 通知表示の自動切替・自動復帰(bikeclock_esp32と同一構造) ===
+    if (g_notificationActive && g_currentMillis >= g_notificationEndTime) {
+        logPrint("NOTIFY", "Timeout - returning to clock");
+        g_notificationActive = false;
+        ep_lastHr = -1;               // 時計(または未同期画面)を強制再描画
+        ep_lastMin = -1;
+        ep_lastDay = -1;
+        ep_showingUnsynced = false;
+    }
+
+    if (g_notificationActive) {
+        if (!ep_showingNotification) {
+            drawEpaperNotification(g_notificationText);
+            ep_showingNotification = true;
+        }
+        return;   // 通知表示中は分変化による時計更新を抑制
+    }
+    ep_showingNotification = false;
+
     if (!g_timeSynced) {
         if (!ep_showingUnsynced) {
             drawEpaperUnsynced();

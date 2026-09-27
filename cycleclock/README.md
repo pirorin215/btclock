@@ -59,16 +59,29 @@ ePaper モジュールの端子印字は **BUSY / D/C / SCL / GND / RES / CS / S
 | ファイル | 役割 | 移植元 |
 |---|---|---|
 | `cycleclock.ino` | メイン・時刻処理・スリープポリシー | bikeclock.ino |
-| `cycleclock_ble.ino` | BLE(bonding必須・Just Works)・時刻同期 | bikeclock_ble.ino |
-| `cycleclock_epaper.ino` | ePaper描画(時計/未同期/スプラッシュ) | bikeclock_esp32_epaper.ino |
+| `cycleclock_ble.ino` | BLE(bonding必須・Just Works)・時刻同期・通知受信 | bikeclock_ble.ino |
+| `cycleclock_epaper.ino` | ePaper描画(時計/未同期/スプラッシュ/通知) | bikeclock_esp32_epaper.ino |
+| `cycleclock_battery.ino` | バッテリー電圧監視 | fastrec2 battery.c |
 | `cycleclock_power.ino` | System OFF出入り・LED | 新規(nRF52正規API) |
 
 ### BLE仕様(bikeclock/bikeclock_esp32 と共通・アプリ互換)
 
 - Service UUID: `4fafc201-1fb5-459e-8fcc-c5c9c331914c`
 - Command UUID: `beb5483e-36e1-4688-b7f5-ea07361b26a0` (Read/Write/Notify・暗号化必須=bonding)
-- プロトコル: `SET:time:<unix_ts>` / `GET:version` / `GET:battery`(v0.2.0以降・`OK:battery:<mV>`応答)
+- プロトコル: `SET:time:<unix_ts>` / `GET:version` / `GET:battery`(v0.2.0以降・`OK:battery:<mV>`応答) / `NOTIFY:app=<名前>\n<本文>`(v0.3.2以降・応答なし)
 - デバイス名: `BikeClock-Cycle`（アプリは `BikeClock-` 接頭辞で解決）
+- ATT MTU 247・コマンド特性は可変長247B(v0.3.2〜。通知の~230Bを1回のWriteで受信)
+
+### スマホ通知表示 (v0.3.2)
+
+bikeclock_esp32(バイク版)と同じ仕組みを移植。アプリの通知リスナーが
+`NOTIFY:app=<アプリ名>\n<本文>`(UTF-8・最大200B)を送り、ePaperに通知ビューを表示する。
+
+- 受信(handleNotify)は文字列操作のみ(SoftDeviceコールバック文脈で安全)・描画はloop側
+- 文字数に応じフォント段階切替(10字以下48px/24字以下36px/26字以下32px/長文24px)+日本語自動折返し
+- **60秒表示**後に時計(未同期なら未同期画面)へ自動復帰(esp32版は30秒・3色パネルの
+  低速フル更新>10秒を考慮。定数 `NOTIFICATION_DISPLAY_TIMEOUT_MS`)
+- 通知表示中は時計の分更新を抑制。アプリ側の設定(転送ON/OFF・最大文字数)はバイク版と共通
 
 ### バッテリー電圧監視 (v0.2.0・cycleclock_battery.ino)
 
