@@ -25,16 +25,15 @@ BLEDis bledis;
 
 // --- Callback Handlers ---
 
-void ble_central_connect(uint16_t conn_handle) {
+void onConnect(uint16_t conn_handle) {
     (void)conn_handle;
     logPrint("BLE", "Device connected");
     g_deviceConnected = true;
     updateLedStateBasedOnStatus();
 }
 
-void ble_central_disconnect(uint16_t conn_handle, uint8_t reason) {
+void onDisconnect(uint16_t conn_handle, uint8_t reason) {
     (void)conn_handle;
-    (void)reason;
     logPrint("BLE", "Device disconnected (reason=%u)", reason);
     g_deviceConnected = false;
     updateLedStateBasedOnStatus();
@@ -44,25 +43,32 @@ void onCommandWritten(uint16_t conn_hdl, BLECharacteristic* chr, uint8_t* data, 
     (void)conn_hdl;
     (void)chr;
 
-    if (len > 0 && len <= BLE_CMD_MAX_LEN) {
-        char command[BLE_CMD_MAX_LEN + 1];
-        memcpy(command, data, len);
-        command[len] = '\0';
+    if (len == 0) return;   // 空Writeは無視
+    if (len > BLE_CMD_MAX_LEN) {
+        // バッファに収まらない過大Write: 無応答だとアプリ側はタイムアウトを
+        // 待つだけのため、長さのみでもエラーとして返す
+        logPrint("BLE", "Command too long: %u bytes (max %d)", len, BLE_CMD_MAX_LEN);
+        sendResponse("ERROR: Command too long");
+        return;
+    }
 
-        logPrint("BLE", "Received command: %s", command);
+    char command[BLE_CMD_MAX_LEN + 1];
+    memcpy(command, data, len);
+    command[len] = '\0';
 
-        if (strncmp(command, "SET:time:", 9) == 0) {
-            handleTimeSync(command);
-        } else if (strncmp(command, "GET:version", 11) == 0) {
-            handleGetVersion();
-        } else if (strncmp(command, "GET:battery", 11) == 0) {
-            handleGetBattery();
-        } else if (strncmp(command, "NOTIFY:", 7) == 0) {
-            handleNotify(command);
-        } else {
-            logPrint("BLE", "Unknown command: %s", command);
-            sendResponse("ERROR: Unknown command");
-        }
+    logPrint("BLE", "Received command: %s", command);
+
+    if (strncmp(command, "SET:time:", 9) == 0) {
+        handleTimeSync(command);
+    } else if (strncmp(command, "GET:version", 11) == 0) {
+        handleGetVersion();
+    } else if (strncmp(command, "GET:battery", 11) == 0) {
+        handleGetBattery();
+    } else if (strncmp(command, "NOTIFY:", 7) == 0) {
+        handleNotify(command);
+    } else {
+        logPrint("BLE", "Unknown command: %s", command);
+        sendResponse("ERROR: Unknown command");
     }
 }
 
@@ -91,8 +97,8 @@ void setupBLE() {
     // 接続インターバル: アプリの定期同期(1分)と省電力のバランス(bikeclockと同一)
     Bluefruit.Periph.setConnInterval(12, 24);
 
-    Bluefruit.Periph.setConnectCallback(ble_central_connect);
-    Bluefruit.Periph.setDisconnectCallback(ble_central_disconnect);
+    Bluefruit.Periph.setConnectCallback(onConnect);
+    Bluefruit.Periph.setDisconnectCallback(onDisconnect);
 
     // IMPORTANT: BLEDfu は他サービスより先に初期化する
     bledfu.begin();

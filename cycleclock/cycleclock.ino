@@ -54,6 +54,11 @@ uint32_t getDaysSinceEpoch() {
     return g_currentTimestamp / 86400;
 }
 
+// 閏年判定(グレゴリオ暦)
+static bool isLeapYear(uint32_t year) {
+    return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+}
+
 void getMonthDay(int* month, int* day) {
     if (g_dateCache.valid && g_dateCache.lastTimestamp == g_currentTimestamp) {
         *month = g_dateCache.month;
@@ -63,24 +68,19 @@ void getMonthDay(int* month, int* day) {
 
     uint32_t days = getDaysSinceEpoch();
     uint32_t year = 1970;
-    uint32_t days_in_year;
+    uint32_t daysInYear;
 
-    while (true) {
-        bool is_leap = (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
-        days_in_year = is_leap ? 366 : 365;
-        if (days < days_in_year) break;
-        days -= days_in_year;
+    while ((daysInYear = isLeapYear(year) ? 366 : 365) <= days) {
+        days -= daysInYear;
         year++;
     }
 
     static const uint8_t days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    const uint8_t dimFeb = (daysInYear == 366) ? 29 : 28;
+
     int m = 0;
-
-    bool is_leap = (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
-    uint8_t dim_feb = is_leap ? 29 : 28;
-
     for (m = 0; m < 12; m++) {
-        uint8_t dim = (m == 1) ? dim_feb : days_in_month[m];
+        uint8_t dim = (m == 1) ? dimFeb : days_in_month[m];
         if (days < dim) break;
         days -= dim;
     }
@@ -88,7 +88,7 @@ void getMonthDay(int* month, int* day) {
     g_dateCache.month = m + 1;
     g_dateCache.day = days + 1;
     g_dateCache.weekday = (getDaysSinceEpoch() + 4) % 7;
-    g_dateCache.year = (uint32_t)year;
+    g_dateCache.year = year;
     g_dateCache.lastTimestamp = g_currentTimestamp;
     g_dateCache.valid = true;
 
@@ -109,27 +109,27 @@ int getDay() {
 }
 
 int getWeekday() {
-    if (g_dateCache.valid && g_dateCache.lastTimestamp == g_currentTimestamp) {
-        return g_dateCache.weekday;
-    }
     int month, day;
-    getMonthDay(&month, &day);
+    getMonthDay(&month, &day);   // キャッシュ命中時は即返る(月日ではなく曜日を使う)
     return g_dateCache.weekday;
 }
 
 int getYear() {
-    if (!g_dateCache.valid || g_dateCache.lastTimestamp != g_currentTimestamp) {
-        int month, day;
-        getMonthDay(&month, &day);
-    }
+    int month, day;
+    getMonthDay(&month, &day);
     return g_dateCache.year;
 }
 
 // --- System Utilities ---
+// 経過秒を一括加算し、ミリ秒端数は次回へ繰り越す。3色パネルのフル更新(>10s)や
+// BLE処理でloopが詰まっても時計の遅れが蓄積しない(旧実装は1呼び出し最大+1秒で、
+// 更新のたびに数秒ずつ遅れ、end=current式で端数も毎秒捨てていた)。
 void updateTimestamp() {
-    if (g_currentMillis - g_lastCounterMillis >= 1000) {
-        g_currentTimestamp++;
-        g_lastCounterMillis = g_currentMillis;
+    unsigned long elapsed = g_currentMillis - g_lastCounterMillis;
+    if (elapsed >= 1000) {
+        unsigned long sec = elapsed / 1000;
+        g_currentTimestamp += (uint32_t)sec;
+        g_lastCounterMillis += sec * 1000;   // 端数を繰り越す
     }
 }
 
@@ -156,50 +156,53 @@ void logPrint(const char* tag, const char* format, ...) {
     Serial.println(buffer);
 }
 
-// --- ウェイクスイッチ処理 ---
-// 短押し(<0.5s) = 活動とみなしスリープタイマーをリセット(振動パルス相当)
-// 中押し(0.5-2s) = 表示モード切替(FUNCキー相当・v0.3.8)
+// --- スイッチ入力のチャタリング除去(D0ウェイク/FUNC共通) ---
+// 50ms安定ではじめて変化を確定させ、確定エッジ(押下/解放)検出時のみtrueを返す。
+static bool debounceEdge(DebouncedSwitch& sw, int pin) {
+    bool reading = digitalRead(pin);
+    if (reading != sw.lastReading) {
+        sw.lastDebounceMs = g_currentMillis;
+        sw.lastReading = reading;
+    }
+    if (g_currentMillis - sw.lastDebounceMs >= 50 && reading != sw.stable) {
+        sw.stable = reading;
+        return true;
+    }
+    return false;
+}
+
+// --- ウェイクスイッチ処理(D0・振動センサー) ---
+// 押下(導通) = 振動パルス相当の活動。スリープタイマーをリセットし、
+//   非TIMEモード表示中なら時計(主画面)へ戻す
 // 長押し(2秒以上) = 手動 System OFF(待機電流実測・テスト用)
-static bool s_swStableState = HIGH;       // プルアップなので HIGH=未押下
-static bool s_swLastReading = HIGH;
-static unsigned long s_swLastDebounceMs = 0;
+static DebouncedSwitch s_wakeSw = { HIGH, HIGH, 0 };
 static unsigned long s_swPressStartMs = 0;
 
 void processWakeSwitch() {
-    bool reading = digitalRead(WAKE_SW_GPIO);
-
-    if (reading != s_swLastReading) {
-        s_swLastDebounceMs = g_currentMillis;
-        s_swLastReading = reading;
-    }
-
-    if ((g_currentMillis - s_swLastDebounceMs) >= 50) {
-        if (reading != s_swStableState) {
-            s_swStableState = reading;
-            if (s_swStableState == LOW) {
-                // 押下開始 = 振動パルス検出(スリープタイマーをリセット)
-                s_swPressStartMs = g_currentMillis;
-                g_lastRideEventMs = g_currentMillis;
-                logPrint("SW", "Wake switch pressed (ride event)");
+    if (debounceEdge(s_wakeSw, WAKE_SW_GPIO)) {
+        if (s_wakeSw.stable == LOW) {
+            // 押下開始 = 振動パルス検出(スリープタイマーをリセット)
+            s_swPressStartMs = g_currentMillis;
+            g_lastRideEventMs = g_currentMillis;
+            logPrint("SW", "Wake switch pressed (ride event)");
+        } else {
+            // 離した = 乗車イベント。乗車中は時計が主画面なので非TIMEモードなら戻す
+            if (g_displayMode != DISPLAY_MODE_TIME) {
+                g_displayMode = DISPLAY_MODE_TIME;
+                logPrint("SW", "Ride event - return to clock");
             } else {
-                // 離した(長押し判定は押下中にも行うためここでは短押し確定のみ)。
-                // 乗車再開=時計が主画面なので非TIMEモード表示中なら時計へ戻す
-                if (g_displayMode != DISPLAY_MODE_TIME) {
-                    g_displayMode = DISPLAY_MODE_TIME;
-                    logPrint("SW", "Ride event - return to clock");
-                } else {
-                    logPrint("SW", "Wake switch released (short)");
-                }
-            }
-        } else if (s_swStableState == LOW) {
-            // 押下継続: 長押しで System OFF
-            if (s_swPressStartMs != 0 &&
-                (g_currentMillis - s_swPressStartMs) >= WAKE_SW_LONGPRESS_MS) {
-                s_swPressStartMs = 0;  // 多重発火防止
-                logPrint("SW", "Long press - manual System OFF");
-                enterSystemOff();      // 戻らない
+                logPrint("SW", "Wake switch released (short)");
             }
         }
+        return;
+    }
+    // 押下継続: 長押しで System OFF(元実装と同じくデバウス確定後のみ判定)
+    if (s_wakeSw.stable == LOW && g_currentMillis - s_wakeSw.lastDebounceMs >= 50 &&
+        s_swPressStartMs != 0 &&
+        g_currentMillis - s_swPressStartMs >= WAKE_SW_LONGPRESS_MS) {
+        s_swPressStartMs = 0;  // 多重発火防止
+        logPrint("SW", "Long press - manual System OFF");
+        enterSystemOff();      // 戻らない
     }
 }
 
@@ -209,37 +212,24 @@ void processWakeSwitch() {
 // (bikeclockのメンテナンスメニューモードへの拡張余地)。
 // v0.4.1: D2もSystem OFFからのウェイクピンのため、FUNC押下で起床した直後の
 // releaseはモード切替としない(起こすための押下と切替操作を分離する)。
-static bool s_fkStableState = HIGH;      // プルアップなので HIGH=未押下
-static bool s_fkLastReading = HIGH;
-static unsigned long s_fkLastDebounceMs = 0;
+static DebouncedSwitch s_funcKey = { HIGH, HIGH, 0 };
 static bool s_fkIgnoreFirstRelease = false;  // FUNC押下で起床した場合の初回release無視
 
 void processFuncKey() {
-    bool reading = digitalRead(FUNC_SW_GPIO);
+    if (!debounceEdge(s_funcKey, FUNC_SW_GPIO)) return;
+    if (s_funcKey.stable != HIGH) return;   // 押下開始では何もしない(解放でクリック確定)
 
-    if (reading != s_fkLastReading) {
-        s_fkLastDebounceMs = g_currentMillis;
-        s_fkLastReading = reading;
+    if (s_fkIgnoreFirstRelease) {
+        // FUNCキー押下でSystem OFFから起床した場合の「離した」。
+        // 起床操作自体はモード切替としない
+        s_fkIgnoreFirstRelease = false;
+        logPrint("FUNC", "Wake release ignored");
+        return;
     }
-
-    if ((g_currentMillis - s_fkLastDebounceMs) >= 50) {
-        if (reading != s_fkStableState) {
-            s_fkStableState = reading;
-            if (s_fkStableState == HIGH) {
-                if (s_fkIgnoreFirstRelease) {
-                    // FUNCキー押下でSystem OFFから起床した场合の「離した」。
-                    // 起床操作自体はモード切替としない
-                    s_fkIgnoreFirstRelease = false;
-                    logPrint("FUNC", "Wake release ignored");
-                    return;
-                }
-                // 離した(クリック確定)でモードを順送り
-                g_displayMode = (DisplayMode)((g_displayMode + 1) % DISPLAY_MODE_COUNT);
-                g_lastModeChangeMillis = g_currentMillis;
-                logPrint("FUNC", "Mode changed to %d", (int)g_displayMode);
-            }
-        }
-    }
+    // 離した(クリック確定)でモードを順送り
+    g_displayMode = (DisplayMode)((g_displayMode + 1) % DISPLAY_MODE_COUNT);
+    g_lastModeChangeMillis = g_currentMillis;
+    logPrint("FUNC", "Mode changed to %d", (int)g_displayMode);
 }
 
 // --- スリープ判定 ---

@@ -56,6 +56,16 @@ static bool   ep_showingLowBatt = false;
 static int8_t ep_drawnMode = -1;        // 描画済みのDisplayMode(-1=未描画・MODE復帰判定用)
 static uint32_t ep_drawnNotifySeq = 0;  // 通知モードで描いた通知の受信連番
 
+// 「次の描画を強制する」ための画面キャッシュ無効化。ビュー遷移・通知タイムアウト・
+// 低電圧発報のいずれでも、直前の画面種別に関わらず再描画させる。
+static void invalidateViewCache() {
+    ep_lastHr = -1;
+    ep_lastMin = -1;
+    ep_lastDay = -1;
+    ep_showingUnsynced = false;
+    ep_showingLowBatt = false;
+}
+
 // === 画面ジオメトリ（rotation=3 で 250x122 横長） ===
 static const int16_t EP_W = 250;
 static const int16_t EP_H = 122;
@@ -484,6 +494,21 @@ static void drawEpaperUnsynced() {
     });
 }
 
+// 通知の文字数に応じたフォントサイズと拡大倍率の段階設定
+// (文字数の昇順で定義。最後は全長文をカバーする大きな値)
+struct NotifyFontSetting {
+    int maxChars;          // この文字数以下の場合に適用
+    const uint8_t* font;   // 使用するフォント(u8g2_font_...)
+    int scale;             // 拡大倍率(1〜3)
+};
+static const NotifyFontSetting NOTIFY_FONT_SETTINGS[] = {
+    { 10,  u8g2_font_b16_t_japanese3, 3 },  // 16pxフォント3倍 48px
+    { 24,  u8g2_font_b12_t_japanese3, 3 },  // 12pxフォント3倍 36px
+    { 26,  u8g2_font_b16_t_japanese3, 2 },  // 16pxフォント2倍 32px
+    {999,  u8g2_font_b12_t_japanese3, 2 }
+};
+#define NUM_NOTIFY_FONT_SETTINGS (sizeof(NOTIFY_FONT_SETTINGS) / sizeof(NOTIFY_FONT_SETTINGS[0]))
+
 // 通知表示: 本文テキストを全画面に自動折返し描画。
 // 文字数に応じてフォントサイズを段階切替（NOTIFY_FONT_SETTINGS）。
 // ※ BLEコールバックとページループが競合しないよう、ページループ前にローカルコピーを
@@ -509,13 +534,21 @@ static void drawEpaperNotification(const char* text) {
 
     DRAW_PAGED({
         if (safeText[0] != '\0') {
+            int16_t textY = 0;
+            if (g_notificationApp[0] != '\0') {
+                // 通知元アプリ名を16pxで先頭行に(v0.4.3・従来はログ専用)
+                setFont(u8g2_font_b16_t_japanese3);
+                u8g2Fonts.setCursor(0, 16);
+                u8g2Fonts.print(g_notificationApp);
+                textY = 24;
+            }
             if (scale > 1) {
                 ScaledGFX scaledGfx(g_epaper, scale);
                 u8g2Fonts.begin(scaledGfx);
-                drawWrappedText(0, 0, safeText, font, EP_W / scale);
+                drawWrappedText(0, textY / scale, safeText, font, EP_W / scale);
                 u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
             } else {
-                drawWrappedText(0, 0, safeText, font, EP_W);
+                drawWrappedText(0, textY, safeText, font, EP_W);
             }
         } else {
             drawCenteredText("通知なし", 76, 2);
@@ -551,9 +584,11 @@ static void drawEpaperLowBattery() {
     logPrint("EPAPER", "Low battery view drawn (%.2fV)", (double)volts);
 }
 
-// 乗車開始時刻を逆算して HH:MM を得る（時刻同期後のみ有効）。
+// 乗車開始時刻を逆算して HH:MM を得る（時刻同期後のみ有効・詳細ビュー専用）。
 // 起動(振動ウェイク)=乗車開始なので 現在時刻−経過時間 が開始時刻。
-// 日跨ぎは0時を割った分だけ現在側に24h加算して返す(endHが24超えになりうる)。
+// 開始が前日にまたがる場合は当日の0時以降へ折り返す(前日付は返さない)。
+// ※ 走行区間(開始〜終了)の表示は drawEpaperDetailLarge の24時超え表記
+//    (bikeclock_esp32と同一仕様)を使う。ここは単独の「開始」行用。
 static void getRideStart(int* startH, int* startM) {
     int eh = getHours(), em = getMinutes();
     unsigned long rideMin = (millis() - g_startupMillis) / 60000UL;
@@ -613,14 +648,17 @@ static void drawEpaperDetail() {
 static void drawEpaperDetailLarge() {
     const int scale = 2;
 
-    // 終了時刻(現在)と乗車時間(起床からのmillis)から開始時刻を逆算
+    // 終了時刻(現在)と乗車時間(起床からのmillis)から開始時刻を逆算。
+    // 日をまたいだ場合は終端に24h超え表記(例: "22:00〜26:30") —
+    // bikeclock_esp32 と同一仕様(v0.4.4: omp整理による折り返し表記への
+    // 勝手な仕様変更を原状回復)
     int eh = getHours(), em = getMinutes();
     unsigned long rideSec = (millis() - g_startupMillis) / 1000UL;
     int endMin = eh * 60 + em;
     int startMin = endMin - (int)(rideSec / 60);
     if (endMin < startMin) endMin += 24 * 60;   // 日をまたいだ → 24時間超え表記
     while (startMin < 0) startMin += 24 * 60;   // 逆算で0時を割った場合の防御
-    const int sh2 = startMin / 60, sm2 = startMin % 60;
+    const int sh = startMin / 60, sm = startMin % 60;
     const int fh = endMin / 60, fm = endMin % 60;
     const int rh = (int)(rideSec / 3600), rm = (int)((rideSec / 60) % 60);
 
@@ -649,7 +687,7 @@ static void drawEpaperDetailLarge() {
         y += 15;                 // → ③走行区間行
 
         // ③ 走行区間 (開始〜終了)
-        snprintf(buf, sizeof(buf), "%02d:%02d〜%02d:%02d", sh2, sm2, fh, fm);
+        snprintf(buf, sizeof(buf), "%02d:%02d〜%02d:%02d", sh, sm, fh, fm);
         setFont(u8g2_font_b16_t_japanese3);  // ②行(drawHHMM)で変わったフォントを戻す
         u8g2Fonts.setCursor(3, y);
         u8g2Fonts.print(buf);
@@ -736,9 +774,9 @@ void setupEpaper() {
 //   - 未同期 → 「時刻未同期」+バージョン固定
 //   - 同期済 → 分/日が変わるか初回に時計を毎分フル更新
 void updateEpaperDisplay() {
-    // === FUNCキー(中押し)で切替えた表示モードの自動復帰 ===
+    // === FUNCキーで切替えた表示モードの自動復帰 ===
     // 60秒で時計へ戻る(bikeclockの5s自動復帰を3色パネルの低速フル更新に合わせ延長)。
-    // 乗車イベント(短押し)でも時計へ戻る(processWakeSwitch・二重の自己修復)。
+    // 乗車イベント(振動)でも時計へ戻る(processWakeSwitch・二重の自己修復)。
     if (g_displayMode != DISPLAY_MODE_TIME &&
         g_currentMillis - g_lastModeChangeMillis >= MODE_AUTO_RETURN_MS) {
         logPrint("MODE", "Auto return to clock");
@@ -747,31 +785,30 @@ void updateEpaperDisplay() {
 
     // === 非TIMEモードの描画(bikeclock_esp32と同じ4モード構成) ===
     // モード2(通知)は新着受信(g_notificationSeq)で内容を更新する。
-    // モード3(詳細)/モード4(詳細大)はスナップショット1回描き(bikeclock_esp32と同じ)。
-    if (g_displayMode == DISPLAY_MODE_NOTIFICATION) {
-        if (ep_drawnMode != DISPLAY_MODE_NOTIFICATION ||
-            ep_drawnNotifySeq != g_notificationSeq) {
-            drawEpaperNotification(g_notificationText);   // 空テキストは「通知なし」
-            ep_drawnNotifySeq = g_notificationSeq;
-            ep_drawnMode = DISPLAY_MODE_NOTIFICATION;
-            logPrint("MODE", "Notification view drawn (seq %lu)",
-                     (unsigned long)g_notificationSeq);
-        }
-        return;
-    }
-    if (g_displayMode == DISPLAY_MODE_DETAIL) {
-        if (ep_drawnMode != DISPLAY_MODE_DETAIL) {
-            drawEpaperDetail();
-            ep_drawnMode = DISPLAY_MODE_DETAIL;
-            logPrint("MODE", "Detail view drawn");
-        }
-        return;
-    }
-    if (g_displayMode == DISPLAY_MODE_DETAIL_LARGE) {
-        if (ep_drawnMode != DISPLAY_MODE_DETAIL_LARGE) {
-            drawEpaperDetailLarge();
-            ep_drawnMode = DISPLAY_MODE_DETAIL_LARGE;
-            logPrint("MODE", "Detail-large view drawn");
+    // モード3(詳細)/モード4(詳細大)はスナップショット1回描き。
+    if (g_displayMode != DISPLAY_MODE_TIME) {
+        const bool stale =
+            ep_drawnMode != g_displayMode ||
+            (g_displayMode == DISPLAY_MODE_NOTIFICATION &&
+             ep_drawnNotifySeq != g_notificationSeq);
+        if (stale) {
+            switch (g_displayMode) {
+                case DISPLAY_MODE_NOTIFICATION:
+                    drawEpaperNotification(g_notificationText);  // 空テキストは「通知なし」
+                    ep_drawnNotifySeq = g_notificationSeq;
+                    logPrint("MODE", "Notification view drawn (seq %lu)",
+                             (unsigned long)g_notificationSeq);
+                    break;
+                case DISPLAY_MODE_DETAIL:
+                    drawEpaperDetail();
+                    logPrint("MODE", "Detail view drawn");
+                    break;
+                default:  // DISPLAY_MODE_DETAIL_LARGE
+                    drawEpaperDetailLarge();
+                    logPrint("MODE", "Detail-large view drawn");
+                    break;
+            }
+            ep_drawnMode = g_displayMode;
         }
         return;
     }
@@ -779,22 +816,14 @@ void updateEpaperDisplay() {
     // === TIMEモード(モードからの復帰直後は全ビューを強制再描画) ===
     if (ep_drawnMode != DISPLAY_MODE_TIME) {
         ep_drawnMode = DISPLAY_MODE_TIME;
-        ep_lastHr = -1;
-        ep_lastMin = -1;
-        ep_lastDay = -1;
-        ep_showingUnsynced = false;
-        ep_showingLowBatt = false;
+        invalidateViewCache();
     }
 
     // === 通知表示の自動切替・自動復帰(bikeclock_esp32と同一構造) ===
     if (g_notificationActive && g_currentMillis >= g_notificationEndTime) {
         logPrint("NOTIFY", "Timeout - returning to clock");
         g_notificationActive = false;
-        ep_lastHr = -1;               // 時計を強制再描画(低電圧時は下の分岐で要充電画面へ復帰)
-        ep_lastMin = -1;
-        ep_lastDay = -1;
-        ep_showingUnsynced = false;
-        ep_showingLowBatt = false;
+        invalidateViewCache();   // 時計を強制再描画(低電圧時は下の分岐で要充電画面へ復帰)
     }
 
     if (g_notificationActive) {
@@ -811,12 +840,9 @@ void updateEpaperDisplay() {
     // 3.6V以上へ回復したら解除し、キャッシュ無効化済みなので時計へ即復帰する。
     if (batteryLowActive()) {
         if (!ep_showingLowBatt) {
+            invalidateViewCache();   // 解除後の時計即再描画用
             drawEpaperLowBattery();
             ep_showingLowBatt = true;
-            ep_lastHr = -1;           // 解除後の時計即再描画用
-            ep_lastMin = -1;
-            ep_lastDay = -1;
-            ep_showingUnsynced = false;
         }
         return;
     }
@@ -832,10 +858,7 @@ void updateEpaperDisplay() {
 
     if (ep_showingUnsynced) {
         // 未同期→同期の遷移: キャッシュを無効化して即時描画
-        ep_lastHr = -1;
-        ep_lastMin = -1;
-        ep_lastDay = -1;
-        ep_showingUnsynced = false;
+        invalidateViewCache();
     }
 
     const int h = getHours();

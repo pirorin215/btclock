@@ -37,7 +37,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 4
-#define FIRMWARE_VERSION_PATCH 1
+#define FIRMWARE_VERSION_PATCH 4
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -118,40 +118,21 @@ extern volatile uint32_t g_notificationSeq;  // 通知受信連番(手動通知�
 // --- Notification (bikeclock_esp32 Phase 10 から移植) ---
 #define NOTIFICATION_DISPLAY_TIMEOUT_MS 60000UL  // 通知表示時間。esp32版は30秒だが、現行3色
                                                  // パネルのフル更新に>10秒かかるため60秒とする
-#define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null(ログ/将来用。描画には未使用)
+#define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null(ログ+通知ビュー先頭行)
 #define NOTIFY_TEXT_LEN  201   // 通知本文上限 200B + null
-
-// 通知の文字数に応じたフォントサイズと拡大倍率の設定構造体
-struct NotifyFontSetting {
-    int maxChars;          // この文字数以下の場合に適用
-    const uint8_t* font;   // 使用するフォント(u8g2_font_...)
-    int scale;             // 拡大倍率(1〜3)
-};
-
-// フォントと拡大倍率の段階設定(文字数の昇順で定義。最後は全長文をカバーする大きな値)
-static const NotifyFontSetting NOTIFY_FONT_SETTINGS[] = {
-    { 10,  u8g2_font_b16_t_japanese3, 3 },  // 16pxフォント3倍 48px
-    { 24,  u8g2_font_b12_t_japanese3, 3 },  // 12pxフォント3倍 36px
-    { 26,  u8g2_font_b16_t_japanese3, 2 },  // 16pxフォント2倍 32px
-    {999,  u8g2_font_b12_t_japanese3, 2 }
-};
-#define NUM_NOTIFY_FONT_SETTINGS (sizeof(NOTIFY_FONT_SETTINGS) / sizeof(NOTIFY_FONT_SETTINGS[0]))
 
 // --- BLE UUIDs (bikeclock / bikeclock_esp32 と共通・アプリ互換) ---
 #define BLE_SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914c"
 #define BLE_CHAR_COMMAND_UUID   "beb5483e-36e1-4688-b7f5-ea07361b26a0"  // Read/Write/Notify: 時刻同期コマンド
 
-// --- Time Settings ---
-#define DISPLAY_UPDATE_INTERVAL_MS  1000  // (内部処理用・ePaper描画は分変化トリガ)
-
 // --- Onboard LED state ---
 enum LedState {
     LED_STATE_BOOT,              // 起動直後: 赤点灯
-    LED_STATE_NO_SYNC,           // 未接続+未同期: 赤点滅(1s)
+    LED_STATE_NO_SYNC,           // 未接続+未同期: 赤点滅(2s)
     LED_STATE_SYNCED,            // 未接続+同期済: 緑点灯
-    LED_STATE_CONNECTED_NO_SYNC, // 接続中+未同期: 青点滅(1s)
+    LED_STATE_CONNECTED_NO_SYNC, // 接続中+未同期: 青点滅(2s)
     LED_STATE_CONNECTED_SYNCED,  // 接続中+同期済: 青点灯
-    LED_STATE_ERROR              // エラー: 赤高速点滅(0.2s)
+    LED_STATE_ERROR              // エラー: 赤点滅(0.5s)
 };
 
 // --- Date cache structure ---
@@ -162,6 +143,15 @@ struct DateCache {
     int year;
     uint32_t lastTimestamp;
     bool valid;
+};
+
+// --- チャタリング除去つきスイッチ入力(cycleclock.ino で使用) ---
+// .ino関数の引数に自作型を使うと自動プロトタイプ生成(型定義より前に挿入される)が
+// 壊れるため、このヘッダで定義する(Adafruit_GFX等をここに集約するのと同じ理由)。
+struct DebouncedSwitch {
+    bool stable;                    // デバウス確定後の安定値(プルアップなのでHIGH=未押下)
+    bool lastReading;               // 前回の生読み取り値
+    unsigned long lastDebounceMs;   // 最後に読み取りが変化した時刻
 };
 
 // --- Global Variables ---
