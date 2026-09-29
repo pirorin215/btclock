@@ -19,12 +19,14 @@
 void enterSystemOff() {
     // 押下されたまま System OFF に入ると DETECT が即成立して即時起床してしまう
     // (見かけ上「停止→再起動」になる)。離されるのを待ってから寝る。
-    // ただし導通が続く(SW-18020P誘導導通・断線ショート等)場合にここで永久ハング
-    // すると System OFF に入れず電池を食い潰すため、上限付きで待つ。
-    // 導通中に寝れば即再起床(見かけ上の再起動)するが、振動が止まれば自己解決する。
+    // D0(振動)とD2(FUNC)の両方について待つ(v0.4.1・FUNC押しっぱなし放置でも
+    // 再起床ループを防ぐ)。ただし導通が続く(SW-18020P誘導導通・断線ショート等)
+    // 場合にここで永久ハングすると System OFF に入れず電池を食い潰すため、
+    // 上限付きで待つ。導通中に寝れば即再起床(見かけ上の再起動)するが、
+    // 振動が止まれば自己解決する。
     logPrint("POWER", "Sleep requested - waiting for switch release...");
     uint32_t releaseWaitStart = millis();
-    while (digitalRead(WAKE_SW_GPIO) == LOW) {
+    while (digitalRead(WAKE_SW_GPIO) == LOW || digitalRead(FUNC_SW_GPIO) == LOW) {
         if (millis() - releaseWaitStart > WAKE_SW_RELEASE_TIMEOUT_MS) {
             logPrint("POWER", "Switch conducting for %d ms - entering System OFF anyway",
                      (int)WAKE_SW_RELEASE_TIMEOUT_MS);
@@ -38,7 +40,8 @@ void enterSystemOff() {
     // (通常時計のままだと停車中に今の時刻と勘違いされるため・ゼロ電力で保持される)
     drawEpaperSleep();
 
-    logPrint("POWER", "Entering System OFF (wake on %d LOW)", WAKE_SW_GPIO);
+    logPrint("POWER", "Entering System OFF (wake on %d/%d LOW)",
+             WAKE_SW_GPIO, FUNC_SW_GPIO);
     Serial.flush();
     delay(50);
 
@@ -52,8 +55,12 @@ void enterSystemOff() {
 
     // ウェイクピンを SENSE LOW(導通=LOW)で構成して System OFF に入る。
     // PIN_CNF は System OFF 中も保持され、導通が DETECT 信号を発生させる。
+    // D0(振動センサー)に加え D2(FUNCキー)も対象(v0.4.1・nRF52のDETECTは
+    // ピンごとのSENSE条件のORなので、どちらかの導通で起床する)。
     // (内部プルアップは残るため、開放時0消費・導通時のみ瞬時電流が流れる)
     nrf_gpio_cfg_sense_input(g_ADigitalPinMap[WAKE_SW_GPIO],
+                             NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
+    nrf_gpio_cfg_sense_input(g_ADigitalPinMap[FUNC_SW_GPIO],
                              NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_SENSE_LOW);
 
     // 戻らない: 復帰はリセット相当のコールドスタート

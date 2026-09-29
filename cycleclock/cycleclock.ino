@@ -207,9 +207,12 @@ void processWakeSwitch() {
 // 短押し(クリック)で表示モードを順送り。bikeclockのFUNCキーと同じ。
 // D0(振動)と分離済みのため走行中の振動で誤発動しない。長押しは未使用
 // (bikeclockのメンテナンスメニューモードへの拡張余地)。
+// v0.4.1: D2もSystem OFFからのウェイクピンのため、FUNC押下で起床した直後の
+// releaseはモード切替としない(起こすための押下と切替操作を分離する)。
 static bool s_fkStableState = HIGH;      // プルアップなので HIGH=未押下
 static bool s_fkLastReading = HIGH;
 static unsigned long s_fkLastDebounceMs = 0;
+static bool s_fkIgnoreFirstRelease = false;  // FUNC押下で起床した場合の初回release無視
 
 void processFuncKey() {
     bool reading = digitalRead(FUNC_SW_GPIO);
@@ -223,6 +226,13 @@ void processFuncKey() {
         if (reading != s_fkStableState) {
             s_fkStableState = reading;
             if (s_fkStableState == HIGH) {
+                if (s_fkIgnoreFirstRelease) {
+                    // FUNCキー押下でSystem OFFから起床した场合の「離した」。
+                    // 起床操作自体はモード切替としない
+                    s_fkIgnoreFirstRelease = false;
+                    logPrint("FUNC", "Wake release ignored");
+                    return;
+                }
                 // 離した(クリック確定)でモードを順送り
                 g_displayMode = (DisplayMode)((g_displayMode + 1) % DISPLAY_MODE_COUNT);
                 g_lastModeChangeMillis = g_currentMillis;
@@ -278,6 +288,14 @@ void setup() {
     // ウェイクスイッチ(内部プルアップ・導通=LOW)とFUNCキー(同結線)
     pinMode(WAKE_SW_GPIO, INPUT_PULLUP);
     pinMode(FUNC_SW_GPIO, INPUT_PULLUP);
+
+    // FUNCキー押下での起床(v0.4.1): RESETREASではD0/D2の判別ができないため
+    // 起動直後のピン読みで推定する。押したまま起床しているので初回releaseを
+    // モード切替にしない(processFuncKey の s_fkIgnoreFirstRelease)
+    if (digitalRead(FUNC_SW_GPIO) == LOW) {
+        s_fkIgnoreFirstRelease = true;
+        logPrint("POWER", "Wakeup via FUNC key");
+    }
 
     // 電池電圧を即測定(アプリの初回GET:batteryに間に合わせる)
     g_currentMillis = millis();
