@@ -9,6 +9,10 @@
  * - v0.3.2: 通知ビューを bikeclock_esp32 (Phase 10) から復活・移植
  * - v0.3.3: 低電圧警告ビュー(電池アイコン+「要充電」+電圧)を追加。
  *   優先度: 通知 > 低電圧 > 未同期 > 時計
+ * - v0.3.8: FUNCキー機構をbikeclockから移植(中押しでモード切替)。
+ *   優先度: モード(電池詳細/バージョン) > 通知 > 低電圧 > 未同期 > 時計
+ * - v0.3.9: FUNCキーを専用GPIO(D2)に分離(v0.3.8の押下時間分離は廃止)。
+ *   ビュー側の構造は変更なし
  *
  * 表示レイアウト（250x122 横長, rotation=3）:
  *
@@ -46,6 +50,8 @@ static int8_t ep_lastDay = -1;
 static bool   ep_showingUnsynced = false;
 static bool   ep_showingNotification = false;
 static bool   ep_showingLowBatt = false;
+static int8_t ep_drawnMode = -1;      // 描画済みのDisplayMode(-1=未描画・MODE復帰判定用)
+static float  ep_drawnBattV = -1.0f;  // 電池ビューで描いた電圧(変化時のみ再描画)
 
 // === 画面ジオメトリ（rotation=3 で 250x122 横長） ===
 static const int16_t EP_W = 250;
@@ -536,6 +542,32 @@ static void drawEpaperLowBattery() {
     logPrint("EPAPER", "Low battery view drawn (%.2fV)", (double)volts);
 }
 
+// 電池詳細ビュー(FUNCキー=中押しで切替): 電圧を大きく+右下にピクト+状態。
+// 安電源による校正や充電判断の「その場確認」に使う(BATT_DIV_MULT校正時は
+// アプリを開かなくても実機だけで読める)。電圧は60秒毎の測定で変化したら再描画。
+static void drawEpaperBatteryView() {
+    const float volts = batteryVoltageCached();
+
+    DRAW_PAGED({
+        drawCenteredText("電池電圧", 20);
+        if (volts >= 0.0f) {
+            char vbuf[10];
+            snprintf(vbuf, sizeof(vbuf), "%.2fV", (double)volts);
+            drawCenteredText(vbuf, 78, 3);   // 16px×3=48px相当
+        } else {
+            drawCenteredText("測定中...", 78, 2);
+        }
+        if (batteryLowActive()) {
+            drawCenteredText("充電してください", 106);
+        } else if (batteryWarnActive()) {
+            drawCenteredText("まもなく充電", 106);
+        } else {
+            drawCenteredText("残量あり", 106);
+        }
+        drawBatteryPict();   // 右下固定(時計/スリープと共通)
+    });
+}
+
 // スリープ画面: 停止時点のスナップショット。System OFF直前に1回だけ描画され、
 // ゼロ電力で保持され続ける。通常の時計表示のままだと停車中に「今の時刻」と
 // 勘違いされるため、日付+走行区間という明らかに時計でない形式にする
@@ -650,12 +682,55 @@ void setupEpaper() {
 }
 
 // loop から毎回呼ばれる。表示すべき内容が変わった時だけ描画。
-//   - 通知活性中 → 通知ビューを1回だけ描画(最優先)。分更新を抑制し、
+//   - 非TIMEモード → 電池詳細/バージョン ビュー(中押しで切替・60秒で自動復帰)
+//   - 通知活性中 → 通知ビューを1回だけ描画。分更新を抑制し、
 //                  タイムアウトで通知を終了して下位ビューへ強制復帰
 //   - 低電圧     → 「要充電」ビュー(通知の次を優先・3.6V以上で解除)
 //   - 未同期 → 「時刻未同期」固定
 //   - 同期済 → 分/日が変わるか初回に時計を毎分フル更新
 void updateEpaperDisplay() {
+    // === FUNCキー(中押し)で切替えた表示モードの自動復帰 ===
+    // 60秒で時計へ戻る(bikeclockの5s自動復帰を3色パネルの低速フル更新に合わせ延長)。
+    // 乗車イベント(短押し)でも時計へ戻る(processWakeSwitch・二重の自己修復)。
+    if (g_displayMode != DISPLAY_MODE_TIME &&
+        g_currentMillis - g_lastModeChangeMillis >= MODE_AUTO_RETURN_MS) {
+        logPrint("MODE", "Auto return to clock");
+        g_displayMode = DISPLAY_MODE_TIME;
+    }
+
+    // === 非TIMEモードの描画(ユーザーが意図して切替えた画面なので最優先) ===
+    if (g_displayMode == DISPLAY_MODE_BATTERY) {
+        const float v = batteryVoltageCached();
+        // 電圧が変化したら再描画(校正時の安電源掃き・放電観察で値を追いたい)
+        if (ep_drawnMode != DISPLAY_MODE_BATTERY ||
+            (v >= 0.0f && (v - ep_drawnBattV > 0.01f || ep_drawnBattV - v > 0.01f))) {
+            drawEpaperBatteryView();
+            ep_drawnBattV = v;
+            ep_drawnMode = DISPLAY_MODE_BATTERY;
+            logPrint("MODE", "Battery view drawn");
+        }
+        return;
+    }
+    if (g_displayMode == DISPLAY_MODE_VERSION) {
+        if (ep_drawnMode != DISPLAY_MODE_VERSION) {
+            drawEpaperSplash();
+            ep_drawnMode = DISPLAY_MODE_VERSION;
+            logPrint("MODE", "Version view drawn");
+        }
+        return;
+    }
+
+    // === TIMEモード(モードからの復帰直後は全ビューを強制再描画) ===
+    if (ep_drawnMode != DISPLAY_MODE_TIME) {
+        ep_drawnMode = DISPLAY_MODE_TIME;
+        ep_drawnBattV = -1.0f;
+        ep_lastHr = -1;
+        ep_lastMin = -1;
+        ep_lastDay = -1;
+        ep_showingUnsynced = false;
+        ep_showingLowBatt = false;
+    }
+
     // === 通知表示の自動切替・自動復帰(bikeclock_esp32と同一構造) ===
     if (g_notificationActive && g_currentMillis >= g_notificationEndTime) {
         logPrint("NOTIFY", "Timeout - returning to clock");

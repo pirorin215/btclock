@@ -32,6 +32,10 @@ unsigned long g_notificationEndTime = 0;
 char g_notificationApp[NOTIFY_APP_LEN] = {0};    // アプリ名(ログ用・描画未使用)
 char g_notificationText[NOTIFY_TEXT_LEN] = {0};  // 通知本文
 
+// --- Display Mode (FUNCキー機構・bikeclock から移植) ---
+DisplayMode g_displayMode = DISPLAY_MODE_TIME;
+unsigned long g_lastModeChangeMillis = 0;
+
 // --- Time Helper Functions (bikeclock.ino から移植) ---
 int getHours() {
     return (g_currentTimestamp % 86400) / 3600;
@@ -152,7 +156,8 @@ void logPrint(const char* tag, const char* format, ...) {
 }
 
 // --- ウェイクスイッチ処理 ---
-// 短押し = 活動とみなしスリープタイマーをリセット
+// 短押し(<0.5s) = 活動とみなしスリープタイマーをリセット(振動パルス相当)
+// 中押し(0.5-2s) = 表示モード切替(FUNCキー相当・v0.3.8)
 // 長押し(2秒以上) = 手動 System OFF(待機電流実測・テスト用)
 static bool s_swStableState = HIGH;       // プルアップなので HIGH=未押下
 static bool s_swLastReading = HIGH;
@@ -176,8 +181,14 @@ void processWakeSwitch() {
                 g_lastRideEventMs = g_currentMillis;
                 logPrint("SW", "Wake switch pressed (ride event)");
             } else {
-                // 離した(長押し判定は押下中にも行うためここでは短押し確定のみ)
-                logPrint("SW", "Wake switch released (short)");
+                // 離した(長押し判定は押下中にも行うためここでは短押し確定のみ)。
+                // 乗車再開=時計が主画面なので非TIMEモード表示中なら時計へ戻す
+                if (g_displayMode != DISPLAY_MODE_TIME) {
+                    g_displayMode = DISPLAY_MODE_TIME;
+                    logPrint("SW", "Ride event - return to clock");
+                } else {
+                    logPrint("SW", "Wake switch released (short)");
+                }
             }
         } else if (s_swStableState == LOW) {
             // 押下継続: 長押しで System OFF
@@ -186,6 +197,35 @@ void processWakeSwitch() {
                 s_swPressStartMs = 0;  // 多重発火防止
                 logPrint("SW", "Long press - manual System OFF");
                 enterSystemOff();      // 戻らない
+            }
+        }
+    }
+}
+
+// --- FUNCキー処理(v0.3.9・専用GPIO=D2) ---
+// 短押し(クリック)で表示モードを順送り。bikeclockのFUNCキーと同じ。
+// D0(振動)と分離済みのため走行中の振動で誤発動しない。長押しは未使用
+// (bikeclockのメンテナンスメニューモードへの拡張余地)。
+static bool s_fkStableState = HIGH;      // プルアップなので HIGH=未押下
+static bool s_fkLastReading = HIGH;
+static unsigned long s_fkLastDebounceMs = 0;
+
+void processFuncKey() {
+    bool reading = digitalRead(FUNC_SW_GPIO);
+
+    if (reading != s_fkLastReading) {
+        s_fkLastDebounceMs = g_currentMillis;
+        s_fkLastReading = reading;
+    }
+
+    if ((g_currentMillis - s_fkLastDebounceMs) >= 50) {
+        if (reading != s_fkStableState) {
+            s_fkStableState = reading;
+            if (s_fkStableState == HIGH) {
+                // 離した(クリック確定)でモードを順送り
+                g_displayMode = (DisplayMode)((g_displayMode + 1) % DISPLAY_MODE_COUNT);
+                g_lastModeChangeMillis = g_currentMillis;
+                logPrint("FUNC", "Mode changed to %d", (int)g_displayMode);
             }
         }
     }
@@ -234,8 +274,9 @@ void setup() {
     // 電源安定待ち(電池コールドスタート直後のePaper初期化失敗回避)
     delay(500);
 
-    // ウェイクスイッチ(内部プルアップ・導通=LOW)
+    // ウェイクスイッチ(内部プルアップ・導通=LOW)とFUNCキー(同結線)
     pinMode(WAKE_SW_GPIO, INPUT_PULLUP);
+    pinMode(FUNC_SW_GPIO, INPUT_PULLUP);
 
     // 電池電圧を即測定(アプリの初回GET:batteryに間に合わせる)
     g_currentMillis = millis();
@@ -259,6 +300,7 @@ void loop() {
     g_currentMillis = millis();
 
     processWakeSwitch();
+    processFuncKey();
     updateLed();
     updateTimestamp();
     updateBattery();
