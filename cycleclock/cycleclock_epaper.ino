@@ -13,6 +13,9 @@
  *   優先度: モード(電池詳細/バージョン) > 通知 > 低電圧 > 未同期 > 時計
  * - v0.3.9: FUNCキーを専用GPIO(D2)に分離(v0.3.8の押下時間分離は廃止)。
  *   ビュー側の構造は変更なし
+ * - v0.4.0: FUNCモードをbikeclock_esp32と同一の4モード構成へ
+ *   (時計/通知/詳細/詳細大)。電池詳細・バージョンモードは廃止
+ *   (電圧は詳細ビューの行+ピクトに統合・未同期画面にバージョン表示)
  *
  * 表示レイアウト（250x122 横長, rotation=3）:
  *
@@ -50,8 +53,8 @@ static int8_t ep_lastDay = -1;
 static bool   ep_showingUnsynced = false;
 static bool   ep_showingNotification = false;
 static bool   ep_showingLowBatt = false;
-static int8_t ep_drawnMode = -1;      // 描画済みのDisplayMode(-1=未描画・MODE復帰判定用)
-static float  ep_drawnBattV = -1.0f;  // 電池ビューで描いた電圧(変化時のみ再描画)
+static int8_t ep_drawnMode = -1;        // 描画済みのDisplayMode(-1=未描画・MODE復帰判定用)
+static uint32_t ep_drawnNotifySeq = 0;  // 通知モードで描いた通知の受信連番
 
 // === 画面ジオメトリ（rotation=3 で 250x122 横長） ===
 static const int16_t EP_W = 250;
@@ -467,11 +470,17 @@ static void drawEpaperClock() {
     });
 }
 
-// 未同期画面
+// 未同期画面: タイトル+「時刻未同期」+ バージョン。
+// 同期成立までの間（アプリが近くにないと数分〜）見続ける画面のため、
+// どのファームで動いているか分かるようバージョンも表示する(v0.4.0)。
 static void drawEpaperUnsynced() {
     DRAW_PAGED({
-        drawCenteredText("CycleClock", 54, 2);       // 実32px相当（中央上寄り）
-        drawCenteredText("時刻未同期", 98, 2);        // 実32px相当（中央下寄り）
+        drawCenteredText("CycleClock", 38, 2);    // 実32px相当
+        drawCenteredText("時刻未同期", 82, 2);     // 実32px相当
+        char vbuf[20];
+        snprintf(vbuf, sizeof(vbuf), "ver %d.%d.%d",
+                 FIRMWARE_VERSION_MAJOR, FIRMWARE_VERSION_MINOR, FIRMWARE_VERSION_PATCH);
+        drawCenteredText(vbuf, 114);              // 16px・下段
     });
 }
 
@@ -542,54 +551,67 @@ static void drawEpaperLowBattery() {
     logPrint("EPAPER", "Low battery view drawn (%.2fV)", (double)volts);
 }
 
-// 電池詳細ビュー(FUNCキー=中押しで切替): 電圧を大きく+右下にピクト+状態。
-// 安電源による校正や充電判断の「その場確認」に使う(BATT_DIV_MULT校正時は
-// アプリを開かなくても実機だけで読める)。電圧は60秒毎の測定で変化したら再描画。
-static void drawEpaperBatteryView() {
+// 乗車開始時刻を逆算して HH:MM を得る（時刻同期後のみ有効）。
+// 起動(振動ウェイク)=乗車開始なので 現在時刻−経過時間 が開始時刻。
+// 日跨ぎは0時を割った分だけ現在側に24h加算して返す(endHが24超えになりうる)。
+static void getRideStart(int* startH, int* startM) {
+    int eh = getHours(), em = getMinutes();
+    unsigned long rideMin = (millis() - g_startupMillis) / 60000UL;
+    int startMin = (eh * 60 + em) - (int)rideMin;
+    while (startMin < 0) startMin += 24 * 60;
+    *startH = startMin / 60;
+    *startM = startMin % 60;
+}
+
+// 詳細ビュー(モード3・bikeclock_esp32のdrawEpaperDetail相当):
+// 開始/経過/現在日時/電池電圧。スナップショット(モード切替時に1回のみ描画)。
+// bikeclock_esp32のHIDキー設定行の代わりに、cycleclock固有のバッテリー電圧を
+// 表示する(ソーラー運用のその場確認用・右下にピクトも併記)。
+static void drawEpaperDetail() {
     const float volts = batteryVoltageCached();
 
     DRAW_PAGED({
-        drawCenteredText("電池電圧", 20);
-        if (volts >= 0.0f) {
-            char vbuf[10];
-            snprintf(vbuf, sizeof(vbuf), "%.2fV", (double)volts);
-            drawCenteredText(vbuf, 78, 3);   // 16px×3=48px相当
-        } else {
-            drawCenteredText("測定中...", 78, 2);
-        }
-        if (batteryLowActive()) {
-            drawCenteredText("充電してください", 106);
-        } else if (batteryWarnActive()) {
-            drawCenteredText("まもなく充電", 106);
-        } else {
-            drawCenteredText("残量あり", 106);
-        }
-        drawBatteryPict();   // 右下固定(時計/スリープと共通)
+        setFont(u8g2_font_unifont_t_japanese3);
+
+        char buf[48];
+        const int16_t x = 4;
+        const int16_t lh = 17;
+        int16_t y = 14;
+
+        int sh, sm;
+        getRideStart(&sh, &sm);
+        snprintf(buf, sizeof(buf), "開始 %02d:%02d", sh, sm);
+        u8g2Fonts.setCursor(x, y);
+        u8g2Fonts.print(buf);
+        y += lh;
+
+        int rh, rm;
+        getRideTime(&rh, &rm);
+        snprintf(buf, sizeof(buf), "経過 %d時間%02d分", rh, rm);
+        u8g2Fonts.setCursor(x, y);
+        u8g2Fonts.print(buf);
+        y += lh;
+
+        snprintf(buf, sizeof(buf), "現在 %04d/%02d/%02d %s %02d:%02d",
+                 getYear(), getMonth(), getDay(), WEEKDAY_JP[getWeekday()],
+                 getHours(), getMinutes());
+        u8g2Fonts.setCursor(x, y);
+        u8g2Fonts.print(buf);
+        y += lh + 4;
+
+        snprintf(buf, sizeof(buf), "電池 %.2fV", (double)volts);
+        u8g2Fonts.setCursor(x, y);
+        u8g2Fonts.print(buf);
+
+        drawBatteryPict();   // 右下固定(時計/詳細大と共通)
     });
 }
 
-// スリープ画面: 停止時点のスナップショット。System OFF直前に1回だけ描画され、
-// ゼロ電力で保持され続ける。通常の時計表示のままだと停車中に「今の時刻」と
-// 勘違いされるため、日付+走行区間という明らかに時計でない形式にする
-// (bikeclock_esp32 の詳細大表示と同一思想)。
-//   ① 日付+曜日           2026/09/26 土
-//   ② 乗車時間(時計アイコン)    １２：３４
-//   ③ 走行区間             10:00〜12:34  (日跨ぎは終端が24時超え表記)
-// 未同期のまま寝る場合は「時刻未同期」画面を維持(スナップショット不能)。
-// 低電圧時はスナップショットより「要充電」を優先して残画化する(駐輪〜翌日も
-// 警告が見え続けるのが低電圧通知の主目的・充電忘れ防止)。
-void drawEpaperSleep() {
-    if (batteryLowActive()) {
-        if (!ep_showingLowBatt) {
-            drawEpaperLowBattery();
-            ep_showingLowBatt = true;
-        }
-        return;
-    }
-    if (!g_timeSynced) {
-        logPrint("EPAPER", "Sleep view skipped (time not synced)");
-        return;
-    }
+// 詳細大ビュー(モード4・bikeclock_esp32のdrawEpaperDetailLarge相当):
+// 日付+曜日 / 経過(時計アイコン+HH:MM) / 開始〜現在 を2倍拡大で3行。
+// スリープ残画もこの関数で描く(同一内容・右下にピクト)。スナップショット。
+static void drawEpaperDetailLarge() {
+    const int scale = 2;
 
     // 終了時刻(現在)と乗車時間(起床からのmillis)から開始時刻を逆算
     int eh = getHours(), em = getMinutes();
@@ -598,14 +620,9 @@ void drawEpaperSleep() {
     int startMin = endMin - (int)(rideSec / 60);
     if (endMin < startMin) endMin += 24 * 60;   // 日をまたいだ → 24時間超え表記
     while (startMin < 0) startMin += 24 * 60;   // 逆算で0時を割った場合の防御
-    const int sh = startMin / 60, sm = startMin % 60;
+    const int sh2 = startMin / 60, sm2 = startMin % 60;
     const int fh = endMin / 60, fm = endMin % 60;
     const int rh = (int)(rideSec / 3600), rm = (int)((rideSec / 60) % 60);
-
-    logPrint("EPAPER", "Sleep view: ride %d:%02d-%02d:%02d (%d min)",
-             sh, sm, fh, fm, (int)(rideSec / 60));
-
-    const int scale = 2;
 
     DRAW_PAGED({
         ScaledGFX scaledGfx(g_epaper, scale);
@@ -632,7 +649,7 @@ void drawEpaperSleep() {
         y += 15;                 // → ③走行区間行
 
         // ③ 走行区間 (開始〜終了)
-        snprintf(buf, sizeof(buf), "%02d:%02d〜%02d:%02d", sh, sm, fh, fm);
+        snprintf(buf, sizeof(buf), "%02d:%02d〜%02d:%02d", sh2, sm2, fh, fm);
         setFont(u8g2_font_b16_t_japanese3);  // ②行(drawHHMM)で変わったフォントを戻す
         u8g2Fonts.setCursor(3, y);
         u8g2Fonts.print(buf);
@@ -643,6 +660,35 @@ void drawEpaperSleep() {
         // 保持されるため「寝ている間の電池量」が翌日まで見える
         drawBatteryPict();
     });
+}
+
+// スリープ画面: 停止時点のスナップショット。System OFF直前に1回だけ描画され、
+// ゼロ電力で保持され続ける。通常の時計表示のままだと停車中に「今の時刻」と
+// 勘違いされるため、日付+走行区間という明らかに時計でない形式にする
+// (bikeclock_esp32 の詳細大表示と同一思想・実体は drawEpaperDetailLarge)。
+// 未同期のまま寝る場合は「時刻未同期」画面を維持(スナップショット不能)。
+// 低電圧時はスナップショットより「要充電」を優先して残画化する(駐輪〜翌日も
+// 警告が見え続けるのが低電圧通知の主目的・充電忘れ防止)。
+void drawEpaperSleep() {
+    if (batteryLowActive()) {
+        if (!ep_showingLowBatt) {
+            drawEpaperLowBattery();
+            ep_showingLowBatt = true;
+        }
+        return;
+    }
+    if (!g_timeSynced) {
+        logPrint("EPAPER", "Sleep view skipped (time not synced)");
+        return;
+    }
+
+    unsigned long rideSec = (millis() - g_startupMillis) / 1000UL;
+    int sh, sm;
+    getRideStart(&sh, &sm);
+    logPrint("EPAPER", "Sleep view: ride %02d:%02d-%02d:%02d (%d min)",
+             sh, sm, getHours(), getMinutes(), (int)(rideSec / 60));
+
+    drawEpaperDetailLarge();
 }
 
 // ブートスプラッシュ（タイトル + バージョン巨大表示）
@@ -682,11 +728,12 @@ void setupEpaper() {
 }
 
 // loop から毎回呼ばれる。表示すべき内容が変わった時だけ描画。
-//   - 非TIMEモード → 電池詳細/バージョン ビュー(中押しで切替・60秒で自動復帰)
+//   - 非TIMEモード → 通知(モード2)/詳細(モード3)/詳細大(モード4)
+//                    (FUNCキーで切替・60秒で自動復帰)
 //   - 通知活性中 → 通知ビューを1回だけ描画。分更新を抑制し、
 //                  タイムアウトで通知を終了して下位ビューへ強制復帰
 //   - 低電圧     → 「要充電」ビュー(通知の次を優先・3.6V以上で解除)
-//   - 未同期 → 「時刻未同期」固定
+//   - 未同期 → 「時刻未同期」+バージョン固定
 //   - 同期済 → 分/日が変わるか初回に時計を毎分フル更新
 void updateEpaperDisplay() {
     // === FUNCキー(中押し)で切替えた表示モードの自動復帰 ===
@@ -698,24 +745,33 @@ void updateEpaperDisplay() {
         g_displayMode = DISPLAY_MODE_TIME;
     }
 
-    // === 非TIMEモードの描画(ユーザーが意図して切替えた画面なので最優先) ===
-    if (g_displayMode == DISPLAY_MODE_BATTERY) {
-        const float v = batteryVoltageCached();
-        // 電圧が変化したら再描画(校正時の安電源掃き・放電観察で値を追いたい)
-        if (ep_drawnMode != DISPLAY_MODE_BATTERY ||
-            (v >= 0.0f && (v - ep_drawnBattV > 0.01f || ep_drawnBattV - v > 0.01f))) {
-            drawEpaperBatteryView();
-            ep_drawnBattV = v;
-            ep_drawnMode = DISPLAY_MODE_BATTERY;
-            logPrint("MODE", "Battery view drawn");
+    // === 非TIMEモードの描画(bikeclock_esp32と同じ4モード構成) ===
+    // モード2(通知)は新着受信(g_notificationSeq)で内容を更新する。
+    // モード3(詳細)/モード4(詳細大)はスナップショット1回描き(bikeclock_esp32と同じ)。
+    if (g_displayMode == DISPLAY_MODE_NOTIFICATION) {
+        if (ep_drawnMode != DISPLAY_MODE_NOTIFICATION ||
+            ep_drawnNotifySeq != g_notificationSeq) {
+            drawEpaperNotification(g_notificationText);   // 空テキストは「通知なし」
+            ep_drawnNotifySeq = g_notificationSeq;
+            ep_drawnMode = DISPLAY_MODE_NOTIFICATION;
+            logPrint("MODE", "Notification view drawn (seq %lu)",
+                     (unsigned long)g_notificationSeq);
         }
         return;
     }
-    if (g_displayMode == DISPLAY_MODE_VERSION) {
-        if (ep_drawnMode != DISPLAY_MODE_VERSION) {
-            drawEpaperSplash();
-            ep_drawnMode = DISPLAY_MODE_VERSION;
-            logPrint("MODE", "Version view drawn");
+    if (g_displayMode == DISPLAY_MODE_DETAIL) {
+        if (ep_drawnMode != DISPLAY_MODE_DETAIL) {
+            drawEpaperDetail();
+            ep_drawnMode = DISPLAY_MODE_DETAIL;
+            logPrint("MODE", "Detail view drawn");
+        }
+        return;
+    }
+    if (g_displayMode == DISPLAY_MODE_DETAIL_LARGE) {
+        if (ep_drawnMode != DISPLAY_MODE_DETAIL_LARGE) {
+            drawEpaperDetailLarge();
+            ep_drawnMode = DISPLAY_MODE_DETAIL_LARGE;
+            logPrint("MODE", "Detail-large view drawn");
         }
         return;
     }
@@ -723,7 +779,6 @@ void updateEpaperDisplay() {
     // === TIMEモード(モードからの復帰直後は全ビューを強制再描画) ===
     if (ep_drawnMode != DISPLAY_MODE_TIME) {
         ep_drawnMode = DISPLAY_MODE_TIME;
-        ep_drawnBattV = -1.0f;
         ep_lastHr = -1;
         ep_lastMin = -1;
         ep_lastDay = -1;

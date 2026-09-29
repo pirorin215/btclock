@@ -31,6 +31,7 @@ volatile bool g_notificationActive = false;      // BLEコールバック(onWrit
 unsigned long g_notificationEndTime = 0;
 char g_notificationApp[NOTIFY_APP_LEN] = {0};    // アプリ名(ログ用・描画未使用)
 char g_notificationText[NOTIFY_TEXT_LEN] = {0};  // 通知本文
+volatile uint32_t g_notificationSeq = 0;         // 受信連番(手動通知モードの再描画判定)
 
 // --- Display Mode (FUNCキー機構・bikeclock から移植) ---
 DisplayMode g_displayMode = DISPLAY_MODE_TIME;

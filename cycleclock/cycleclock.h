@@ -36,8 +36,8 @@
 
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
-#define FIRMWARE_VERSION_MINOR 3
-#define FIRMWARE_VERSION_PATCH 9
+#define FIRMWARE_VERSION_MINOR 4
+#define FIRMWARE_VERSION_PATCH 0
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -82,26 +82,30 @@
 #define LED_PULSE_INTERVAL_MS   2000   // 通常点滅間隔
 #define LED_ERROR_INTERVAL_MS   500    // エラー時の点滅間隔
 
-// --- Display Mode (bikeclock の FUNC キー機構・v0.3.9 で専用GPIOに分離) ---
-// FUNCキーは専用GPIO(FUNC_SW_GPIO=D2・振動センサーとは別スイッチ)。走行中の
-// 振動が常にD0へ短押しパルスを入れるため「単押しでモード切替」をD0と共有すると
-// 走行中に表示が切り替わり続ける。単押しUXと振動検出は排他要件なので v0.3.8 の
-// 押下時間分離(0.5-2s中押し)を廃止し、bikeclock と同じく専用キーに分離した。
-//   D0 短押し(振動パルス) = 乗車イベント。非TIMEモード中なら時計へ復帰
-//   D0 長押し(2s)         = 手動 System OFF(既存)
-//   D2 短押し             = 表示モード切替(bikeclockのFUNC短押しと同じ)
+// --- Display Mode (bikeclock_esp32 と同一の4モード構成・v0.4.0) ---
+// FUNCキー(D2)クリックでモード1〜4を循環する。bikeclock_esp32のFUNC_MODE_TABLE
+// と同じ構成(ePaper単独・7セグなし)。cycleclock独自としてバッテリー情報
+// (時計画面右下ピクト+詳細ビューの電圧行)を追加している。
+//   モード1 時計     : 標準時計(曜日/日付/時刻/乗車時間/電池ピクト)
+//   モード2 通知     : 最終受信通知(未受信なら「通知なし」)。新着で内容更新
+//   モード3 詳細     : 開始/経過/現在日時/電池電圧 (スナップショット1回描き)
+//   モード4 詳細大   : 日付+曜日/経過/開始〜現在 (スリープ残画と同内容+ピクト)
 // 非TIMEモードは60秒で時計へ自動復帰(bikeclockの5sを3色パネルの低速フル更新
-// に合わせ延長)。乗車イベントでも時計へ戻る二重の自己修復付き。
+// に合わせ延長)。乗車イベント(振動)でも時計へ戻る二重の自己修復付き。
+// 通知・低電圧の自動ビューはモード表示に優先しない(bikeclock_esp32では通知が
+// 一時オーバーライドだが、cycleclockは通知もFUNCモード化して統一)。
 enum DisplayMode {
-    DISPLAY_MODE_TIME,      // 時計画面(デフォルト)
-    DISPLAY_MODE_BATTERY,   // 電池詳細(電圧大表示+ピクト・校正時のその場確認用)
-    DISPLAY_MODE_VERSION,   // バージョン表示(スプラッシュと同一内容)
+    DISPLAY_MODE_TIME,         // モード1: 時計
+    DISPLAY_MODE_NOTIFICATION, // モード2: 通知(最終受信・手動選択可)
+    DISPLAY_MODE_DETAIL,       // モード3: 詳細
+    DISPLAY_MODE_DETAIL_LARGE, // モード4: 詳細大
     DISPLAY_MODE_COUNT
 };
 #define FUNC_SW_GPIO         D2       // FUNCキー(他端GND・内部プルアップ)
 #define MODE_AUTO_RETURN_MS  60000UL  // 非TIMEモードから時計への自動復帰時間
 extern DisplayMode g_displayMode;
 extern unsigned long g_lastModeChangeMillis;
+extern volatile uint32_t g_notificationSeq;  // 通知受信連番(手動通知モードの再描画判定)
 
 // --- BLE Settings ---
 // アプリ(BTClockMob)は "BikeClock-" 接頭辞でデバイスを解決するため、命名規則を維持する
@@ -175,7 +179,6 @@ extern volatile bool g_notificationActive;    // 通知表示中フラグ(BLEコ
 extern unsigned long g_notificationEndTime;   // 通知表示の終了時刻(millis())
 extern char g_notificationApp[];              // アプリ名(ログ用)
 extern char g_notificationText[];             // 通知本文
-
 // --- Function Prototypes ---
 
 // cycleclock.ino

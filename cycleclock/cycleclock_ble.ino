@@ -248,6 +248,7 @@ void handleNotify(const char* command) {
     // --- 通知活性化(描画は updateEpaperDisplay が検出) ---
     g_notificationEndTime = millis() + NOTIFICATION_DISPLAY_TIMEOUT_MS;
     g_notificationActive = true;
+    g_notificationSeq++;   // 手動通知モード(モード2)表示中の再描画判定用
 
     logPrint("NOTIFY", "Received (app='%s', text=%d bytes): %s",
              g_notificationApp, (int)textLen,
