@@ -15,10 +15,29 @@
 // --- Battery Monitoring ---
 #define BATTERY_REFRESH_MS  60000UL  // 電池電圧のキャッシュ測定間隔(fastrec2と同じ60秒)
 
+// 低電圧警告(「要充電」ePaper表示)の閾値。トリガ3.5V以下・解除3.6V以上の
+// ヒステリシスで、測定値が境界付近で揃った時の表示切替チラつきを防ぐ。
+// 3.5Vは18650の実用下限(満充電4.2V・残量約1割目安)。
+#define BATT_LOW_THRESHOLD_V   3.50f
+#define BATT_LOW_CLEAR_V       3.60f
+
+// 残量表示(ピクト・GET:battery)用の中央値フィルタ窓。60秒測定×5=5分。
+// 負荷dip等の単発ノイズを打ち消し「残量」として正しい弛緩電圧に寄せる
+// (放電は物理的にゆっくりなので、窓内の急な下落はノイズ扱いでよい)。
+#define BATT_MEDIAN_WINDOW     5
+
+// 時計画面の電池ピクトグラム(5段階)と警告「!」の閾値。
+// 3.60-4.10Vを0.1V刻みの5段階で表示(<3.60Vは0本の空枠・>=4.00Vで満枠)。
+// 3.65V未満で警告「!」を追加(解除は3.70V以上のヒステリシス)。
+#define BATT_PICT_MIN_V        3.60f
+#define BATT_PICT_STEP_V       0.10f
+#define BATT_WARN_THRESHOLD_V  3.65f
+#define BATT_WARN_CLEAR_V      3.70f
+
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 3
-#define FIRMWARE_VERSION_PATCH 2
+#define FIRMWARE_VERSION_PATCH 7
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -161,6 +180,7 @@ void sendResponse(const char* message);
 void setupEpaper();
 void updateEpaperDisplay();
 void drawEpaperSleep();
+bool epaperIdle();
 
 // cycleclock_power.ino
 void enterSystemOff();
@@ -173,6 +193,9 @@ void updateLedStateBasedOnStatus();
 // cycleclock_battery.ino
 void updateBattery();
 float batteryVoltageCached();
+bool batteryLowActive();
+bool batteryWarnActive();
+int  batteryLevelPict();
 
 // Logging
 void setupLog();

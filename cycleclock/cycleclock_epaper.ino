@@ -7,15 +7,19 @@
  * - スプラッシュのプラットフォーム表記を nRF52840 に変更
  * - 詳細/OTA/QR ビューを削除(時計・未同期・スプラッシュ+通知)
  * - v0.3.2: 通知ビューを bikeclock_esp32 (Phase 10) から復活・移植
+ * - v0.3.3: 低電圧警告ビュー(電池アイコン+「要充電」+電圧)を追加。
+ *   優先度: 通知 > 低電圧 > 未同期 > 時計
  *
  * 表示レイアウト（250x122 横長, rotation=3）:
  *
  *        ┌────────┬─────────────────────┐
  *        │   月   │      １ ２ ： ３ ４  │  時刻(logisoso62, 右寄せ)
  *        │ (曜日) │═════════════════════│  ← 横線
- *        │   15   │      ０ ０ ： １ ５  │  乗車時間(logisoso32, 右寄せ)
- *        │ (日付) │                     │
+ *        │   15   │ ⏲ ０ ０ ： １ ５   ▯ │  乗車時間(logisoso32, 左オフセット)
+ *        │ (日付) │                 [▮] │  電池ピクト(右下固定・縦型5段階)
  *        └────────┴─────────────────────┘
+ *
+ * スリープ画面(残画)にも同じ右下位置に電池ピクトを描く(System OFF中も見える)。
  *
  * 更新戦略: 分/日変化・ビュー切替時のみフル更新(にじみ防止)。
  * ePaper更新はブロッキング(フル~3s)だが、BLEスタックはSoftDeviceが
@@ -31,12 +35,17 @@ static GxEPD2_BW<GxEPD2_213_B74, GxEPD2_213_B74::HEIGHT> g_epaper(
     GxEPD2_213_B74(EPD_CS_GPIO, EPD_DC_GPIO, EPD_RST_GPIO, EPD_BUSY_GPIO));
 static U8G2_FOR_ADAFRUIT_GFX u8g2Fonts;
 
+// setupEpaper()完了フラグ。完了前のBUSYピンは未初期化(浮き)のため
+// epaperIdle()のBUSY判定を無効化する(起動直後の即測定を守る)。
+static bool s_epaperReady = false;
+
 // === 表示状態（前回描画内容のキャッシュで無駄な更新を省く） ===
 static int8_t ep_lastHr  = -1;
 static int8_t ep_lastMin = -1;
 static int8_t ep_lastDay = -1;
 static bool   ep_showingUnsynced = false;
 static bool   ep_showingNotification = false;
+static bool   ep_showingLowBatt = false;
 
 // === 画面ジオメトリ（rotation=3 で 250x122 横長） ===
 static const int16_t EP_W = 250;
@@ -48,7 +57,8 @@ static const int16_t LEFT_MARGIN  = 4;    // 左欄文字の左端マージン
 static const int16_t RIGHT_MARGIN = 8;    // 右欄の右端マージン
 static const int16_t TIME_BLY     = 62;   // 時刻(logisoso62)のベースライン（上段中央）
 static const int16_t RIDE_BLY     = 119;  // 乗車時間(logisoso32)のベースライン（下段中央）
-static const int16_t ICON_CX      = 136;  // 乗車時間アイコン(時計)の中心x
+static const int16_t RIDE_RIGHT_X = 206;  // 乗車時間の右端(右下の電池ピクト分オフセット)
+static const int16_t ICON_CX      = 90;   // 乗車時間アイコン(時計)の中心x(乗車時間の左オフセットに合わせ左へ)
 static const int16_t ICON_CY      = 104;  // 乗車時間アイコン(時計)の中心y
 static const int16_t ICON_R       = 12;   // 乗車時間アイコン(時計)の半径
 
@@ -364,6 +374,13 @@ static void drawVersionBig(const uint8_t* font, int16_t baselineY, int16_t dotR)
 // 画面描画
 // ====================================================================
 
+// パネルが物理更新中かどうか。BUSY=HIGHが更新中(B74極性)。
+// setupEpaper()前はBUSYピンが未初期化のため「idle」を返す(起動直後の即測定を守る)。
+// battery測定の負荷スパイク回避ガード(cycleclock_battery.ino)から使う。
+bool epaperIdle() {
+    return !s_epaperReady || digitalRead(EPD_BUSY_GPIO) == LOW;
+}
+
 // 描画前にパネルが実際にidle(BUSY解除)になるのを待つ。
 // 現状の3色パネルはフル更新がGxEPD2_213_B74のBUSYタイムアウト(10秒固定)より
 // 長く、_waitWhileBusyは10秒で諦めて制御を返した後もパネルは物理更新を続けて
@@ -396,6 +413,34 @@ static void waitPanelIdle() {
         __VA_ARGS__; \
     } while (g_epaper.nextPage())
 
+// 時計画面・スリープ画面共用の電池ピクトグラム。画面右下に固定配置(v0.3.5で
+// 横型から縦型へ変更・両ビュー同一位置)。縦型は乗車時間を左へオフセットしても
+// 時計アイコン+数字+ピクトが右欄176pxに収まるため(横型だと最悪幅で衝突する)。
+// 5段階: 3.60-4.10Vを0.1V刻み・<3.60Vは0本の空枠・>=4.00V満枠。バーは下から積み上げ。
+// 3.65V未満の警告帯では左に「!」(ePaperは点滅不可のため静的マーク)。
+// 描画は毎分の時計更新・スリープ直前の残画に乗る(スリープ画面でも電池量が見える)。
+static void drawBatteryPict() {
+    const int lvl = batteryLevelPict();
+    if (lvl < 0) return;   // 電圧未測定(起動直後の取りこぼし防御)
+
+    const int16_t bx = 222, by = 86, bw = 18, bh = 34;
+    // 本体外枠(2px) + 上部端子(下が本体に接する)
+    g_epaper.fillRect(bx, by, bw, 2, GxEPD_BLACK);
+    g_epaper.fillRect(bx, by + bh - 2, bw, 2, GxEPD_BLACK);
+    g_epaper.fillRect(bx, by, 2, bh, GxEPD_BLACK);
+    g_epaper.fillRect(bx + bw - 2, by, 2, bh, GxEPD_BLACK);
+    g_epaper.fillRect(bx + 6, by - 6, 6, 6, GxEPD_BLACK);
+    // 段階バー(内部 x224-238: 5本×5px+1px間隔・下から積み上げ)
+    for (int i = 0; i < lvl; i++) {
+        g_epaper.fillRect(bx + 2, by + bh - 7 - i * 6, bw - 4, 5, GxEPD_BLACK);
+    }
+    // 警告「!」(ピクトの左・縦中央)
+    if (batteryWarnActive()) {
+        g_epaper.fillRect(208, 97, 3, 12, GxEPD_BLACK);
+        g_epaper.fillRect(208, 112, 3, 3, GxEPD_BLACK);
+    }
+}
+
 // 時計画面（常にフル更新）
 static void drawEpaperClock() {
     DRAW_PAGED({
@@ -404,13 +449,15 @@ static void drawEpaperClock() {
         // 時刻（右寄せ、上段）
         drawClockDigitsRight(g_epaper, EP_W - RIGHT_MARGIN, TIME_BLY, getHours(), getMinutes(),
                              u8g2_font_logisoso62_tn, 30, 4, 11);
-        // 乗車時間（右寄せ、下段）
+        // 乗車時間（右寄せ・右下のピクト分オフセット、下段）
         int rideH, rideM;
         getRideTime(&rideH, &rideM);
-        drawClockDigitsRight(g_epaper, EP_W - RIGHT_MARGIN, RIDE_BLY, rideH, rideM,
+        drawClockDigitsRight(g_epaper, RIDE_RIGHT_X, RIDE_BLY, rideH, rideM,
                              u8g2_font_logisoso32_tn, 14, 2, 5);
         // 乗車時間アイコン（時計）
         drawClockIcon(g_epaper, ICON_CX, ICON_CY, ICON_R);
+        // 電池ピクトグラム（右下固定）
+        drawBatteryPict();
     });
 }
 
@@ -461,6 +508,34 @@ static void drawEpaperNotification(const char* text) {
     });
 }
 
+// 低電圧警告画面: 電池アイコン(残量1目盛) + 「要充電」 + 実測電圧。
+// 乗車中は時計に代わって表示し、スリープ時はこの画面を残画とする。
+// 電圧表示は BATT_DIV_MULT 校正(テスタ突合)のその場確認にも使える。
+static void drawEpaperLowBattery() {
+    const float volts = batteryVoltageCached();
+
+    DRAW_PAGED({
+        // 電池アイコン(中央上段): 外枠 + 右端子 + 内部1目盛(残量少)
+        const int16_t bw = 56, bh = 28;
+        const int16_t bx = (EP_W - bw - 6) / 2;   // 端子(6px)込みで中央寄せ
+        const int16_t by = 22;
+        g_epaper.fillRect(bx, by, bw, 2, GxEPD_BLACK);              // 上辺
+        g_epaper.fillRect(bx, by + bh - 2, bw, 2, GxEPD_BLACK);     // 下辺
+        g_epaper.fillRect(bx, by, 2, bh, GxEPD_BLACK);              // 左辺
+        g_epaper.fillRect(bx + bw - 2, by, 2, bh, GxEPD_BLACK);     // 右辺
+        g_epaper.fillRect(bx + bw, by + 9, 6, 10, GxEPD_BLACK);     // 端子
+        g_epaper.fillRect(bx + 5, by + 5, 9, bh - 10, GxEPD_BLACK); // 残量1目盛
+
+        drawCenteredText("要充電", 96, 2);                          // 16px×2=32px
+        if (volts >= 0.0f) {
+            char vbuf[10];
+            snprintf(vbuf, sizeof(vbuf), "%.2fV", (double)volts);
+            drawCenteredText(vbuf, EP_H - 4);
+        }
+    });
+    logPrint("EPAPER", "Low battery view drawn (%.2fV)", (double)volts);
+}
+
 // スリープ画面: 停止時点のスナップショット。System OFF直前に1回だけ描画され、
 // ゼロ電力で保持され続ける。通常の時計表示のままだと停車中に「今の時刻」と
 // 勘違いされるため、日付+走行区間という明らかに時計でない形式にする
@@ -469,7 +544,16 @@ static void drawEpaperNotification(const char* text) {
 //   ② 乗車時間(時計アイコン)    １２：３４
 //   ③ 走行区間             10:00〜12:34  (日跨ぎは終端が24時超え表記)
 // 未同期のまま寝る場合は「時刻未同期」画面を維持(スナップショット不能)。
+// 低電圧時はスナップショットより「要充電」を優先して残画化する(駐輪〜翌日も
+// 警告が見え続けるのが低電圧通知の主目的・充電忘れ防止)。
 void drawEpaperSleep() {
+    if (batteryLowActive()) {
+        if (!ep_showingLowBatt) {
+            drawEpaperLowBattery();
+            ep_showingLowBatt = true;
+        }
+        return;
+    }
     if (!g_timeSynced) {
         logPrint("EPAPER", "Sleep view skipped (time not synced)");
         return;
@@ -522,6 +606,10 @@ void drawEpaperSleep() {
         u8g2Fonts.print(buf);
 
         u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
+
+        // 電池ピクトグラム(時計と同じ右下固定位置)。System OFF中もゼロ電力で
+        // 保持されるため「寝ている間の電池量」が翌日まで見える
+        drawBatteryPict();
     });
 }
 
@@ -556,12 +644,15 @@ void setupEpaper() {
              EPD_CS_GPIO, EPD_DC_GPIO, EPD_RST_GPIO, EPD_BUSY_GPIO,
              EPD_SPI_SCK_GPIO, EPD_SPI_MOSI_GPIO);
 
+    s_epaperReady = true;
+
     drawEpaperSplash();
 }
 
 // loop から毎回呼ばれる。表示すべき内容が変わった時だけ描画。
-//   - 通知活性中 → 通知ビューを1回だけ描画(未同期より優先)。分更新を抑制し、
-//                  タイムアウトで通知を終了して時計(または未同期)へ強制復帰
+//   - 通知活性中 → 通知ビューを1回だけ描画(最優先)。分更新を抑制し、
+//                  タイムアウトで通知を終了して下位ビューへ強制復帰
+//   - 低電圧     → 「要充電」ビュー(通知の次を優先・3.6V以上で解除)
 //   - 未同期 → 「時刻未同期」固定
 //   - 同期済 → 分/日が変わるか初回に時計を毎分フル更新
 void updateEpaperDisplay() {
@@ -569,10 +660,11 @@ void updateEpaperDisplay() {
     if (g_notificationActive && g_currentMillis >= g_notificationEndTime) {
         logPrint("NOTIFY", "Timeout - returning to clock");
         g_notificationActive = false;
-        ep_lastHr = -1;               // 時計(または未同期画面)を強制再描画
+        ep_lastHr = -1;               // 時計を強制再描画(低電圧時は下の分岐で要充電画面へ復帰)
         ep_lastMin = -1;
         ep_lastDay = -1;
         ep_showingUnsynced = false;
+        ep_showingLowBatt = false;
     }
 
     if (g_notificationActive) {
@@ -583,6 +675,22 @@ void updateEpaperDisplay() {
         return;   // 通知表示中は分変化による時計更新を抑制
     }
     ep_showingNotification = false;
+
+    // === 低電圧警告(通知の次を優先・60秒毎の電圧測定ラッチに従う) ===
+    // 発報中は時計の代わりに「要充電」を表示し続ける。ソーラー充電等で
+    // 3.6V以上へ回復したら解除し、キャッシュ無効化済みなので時計へ即復帰する。
+    if (batteryLowActive()) {
+        if (!ep_showingLowBatt) {
+            drawEpaperLowBattery();
+            ep_showingLowBatt = true;
+            ep_lastHr = -1;           // 解除後の時計即再描画用
+            ep_lastMin = -1;
+            ep_lastDay = -1;
+            ep_showingUnsynced = false;
+        }
+        return;
+    }
+    ep_showingLowBatt = false;
 
     if (!g_timeSynced) {
         if (!ep_showingUnsynced) {
