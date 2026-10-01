@@ -16,8 +16,9 @@
  * - v0.4.0: FUNCモードをbikeclock_esp32と同一の4モード構成へ
  *   (時計/通知/詳細/詳細大)。電池詳細・バージョンモードは廃止
  *   (電圧は詳細ビューの行+ピクトに統合・未同期画面にバージョン表示)
+ * - v0.4.5: ePaper表示を180度回転(setRotation 3→1・取付向きに合わせる)
  *
- * 表示レイアウト（250x122 横長, rotation=3）:
+ * 表示レイアウト（250x122 横長, rotation=1）:
  *
  *        ┌────────┬─────────────────────┐
  *        │   月   │      １ ２ ： ３ ４  │  時刻(logisoso62, 右寄せ)
@@ -66,7 +67,7 @@ static void invalidateViewCache() {
     ep_showingLowBatt = false;
 }
 
-// === 画面ジオメトリ（rotation=3 で 250x122 横長） ===
+// === 画面ジオメトリ（rotation=1 で 250x122 横長） ===
 static const int16_t EP_W = 250;
 static const int16_t EP_H = 122;
 static const int16_t DIVIDER_X    = 63;   // 縦線のx（左欄幅=63px）
@@ -752,7 +753,7 @@ void setupEpaper() {
     pinMode(EPD_SPI_MISO_GPIO, INPUT_PULLDOWN);
     // init: 第1引数を0にしてライブラリ内部の Serial 出力を停止
     g_epaper.init(0, true, 2, false);
-    g_epaper.setRotation(3);  // 横長 250x122
+    g_epaper.setRotation(1);  // 横長 250x122（v0.4.5: 旧rotation=3から180度回転）
 
     u8g2Fonts.begin(g_epaper);
 
