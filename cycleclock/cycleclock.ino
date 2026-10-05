@@ -206,6 +206,31 @@ void processWakeSwitch() {
     }
 }
 
+// --- 振動パルス検出(v0.4.8・GPIOTE割り込み) ---
+// SW-18020Pの導通パルスは1ms級の瞬間導通で、System OFFからの復帰はDETECT(ハード)が
+// 拾えるが起床後はソフト検出のみ。50msデバウンス(v0.4.6以前)もloop毎のレベル
+// ポーリング(v0.4.7)でも短すぎて取りこぼすため、GPIOTEチャネルのFALLINGイベントで
+// 検出する。イベントはハードがラッチするためパルス終了後も検出は失われない。
+// ISRはフラグを立てるだけにし、タイマー延長とログ出力はloop側で行う
+// (連続振動でのログ氾濫防止に間隔制限)。
+static volatile bool s_pulseDetected = false;
+static unsigned long s_lastPulseLogMs = 0;
+
+static void wakePulseISR() {
+    s_pulseDetected = true;
+}
+
+void processWakePulse() {
+    if (!s_pulseDetected) return;
+    s_pulseDetected = false;
+
+    g_lastRideEventMs = g_currentMillis;
+    if (g_currentMillis - s_lastPulseLogMs >= WAKE_PULSE_LOG_INTERVAL_MS) {
+        s_lastPulseLogMs = g_currentMillis;
+        logPrint("SW", "D0 pulse - sleep timer extended");
+    }
+}
+
 // --- FUNCキー処理(v0.3.9・専用GPIO=D2) ---
 // 短押し(クリック)で表示モードを順送り。bikeclockのFUNCキーと同じ。
 // D0(振動)と分離済みのため走行中の振動で誤発動しない。長押しは未使用
@@ -279,6 +304,10 @@ void setup() {
     pinMode(WAKE_SW_GPIO, INPUT_PULLUP);
     pinMode(FUNC_SW_GPIO, INPUT_PULLUP);
 
+    // 振動パルスはGPIOTE割り込みで検出(v0.4.8)。パルスは1ms級でloopポーリングでは
+    // 取りこぼすため、エッジイベントをハードラッチさせる
+    attachInterrupt(digitalPinToInterrupt(WAKE_SW_GPIO), wakePulseISR, FALLING);
+
     // FUNCキー押下での起床(v0.4.1): RESETREASではD0/D2の判別ができないため
     // 起動直後のピン読みで推定する。押したまま起床しているので初回releaseを
     // モード切替にしない(processFuncKey の s_fkIgnoreFirstRelease)
@@ -309,6 +338,7 @@ void loop() {
     g_currentMillis = millis();
 
     processWakeSwitch();
+    processWakePulse();
     processFuncKey();
     updateLed();
     updateTimestamp();

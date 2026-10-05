@@ -37,7 +37,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 4
-#define FIRMWARE_VERSION_PATCH 5
+#define FIRMWARE_VERSION_PATCH 8
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -70,6 +70,9 @@
 #define RIDE_INACTIVITY_TIMEOUT_MS  180000UL  // 3分
 #define WAKE_SW_LONGPRESS_MS    2000      // ウェイクスイッチ長押しで手動 System OFF (測定・テスト用)
 #define WAKE_SW_RELEASE_TIMEOUT_MS  10000UL  // System OFF前のスイッチ解放待ち上限(導通継続時のハング防止)
+// 振動パルス延長ログの最小間隔。SW-18020Pは振動中に毎秒多数の導通パルスを出すため
+// ログだけレート制限する(タイマー延長自体は全パルスで行う)。
+#define WAKE_PULSE_LOG_INTERVAL_MS  1000
 
 // --- LED dimming ---
 // XIAO BLEのRGB LEDはcommon anode(HIGH=消灯)。
