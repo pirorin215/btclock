@@ -20,18 +20,12 @@ void enterSystemOff() {
     // 押下されたまま System OFF に入ると DETECT が即成立して即時起床してしまう
     // (見かけ上「停止→再起動」になる)。離されるのを待ってから寝る。
     // D0(振動)とD2(FUNC)の両方について待つ(v0.4.1・FUNC押しっぱなし放置でも
-    // 再起床ループを防ぐ)。ただし導通が続く(SW-18020P誘導導通・断線ショート等)
-    // 場合にここで永久ハングすると System OFF に入れず電池を食い潰すため、
-    // 上限付きで待つ。導通中に寝れば即再起床(見かけ上の再起動)するが、
-    // 振動が止まれば自己解決する。
+    // 再起床ループを防ぐ)。導通が続く限り寝ないのは「振動が続く限り起きて
+    // いる」仕様と同じ扱いとし、打ち切り上限は設けない(v0.4.9・短絡時に
+    // 打ち切って寝ると即再起床を繰り返す再起動ループになり電池を食うため。
+    // 導通中はBLE切断後の軽いポーリング待ちで留まり、離れればそのまま寝る)。
     logPrint("POWER", "Sleep requested - waiting for switch release...");
-    uint32_t releaseWaitStart = millis();
     while (digitalRead(WAKE_SW_GPIO) == LOW || digitalRead(FUNC_SW_GPIO) == LOW) {
-        if (millis() - releaseWaitStart > WAKE_SW_RELEASE_TIMEOUT_MS) {
-            logPrint("POWER", "Switch conducting for %d ms - entering System OFF anyway",
-                     (int)WAKE_SW_RELEASE_TIMEOUT_MS);
-            break;
-        }
         delay(10);
     }
     delay(100);  // チャタリング解放分のマージン

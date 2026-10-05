@@ -415,31 +415,10 @@ bool epaperIdle() {
     return !s_epaperReady || digitalRead(EPD_BUSY_GPIO) == LOW;
 }
 
-// 描画前にパネルが実際にidle(BUSY解除)になるのを待つ。
-// 現状の3色パネルはフル更新がGxEPD2_213_B74のBUSYタイムアウト(10秒固定)より
-// 長く、_waitWhileBusyは10秒で諦めて制御を返した後もパネルは物理更新を続けて
-// いる。その間に送ったページデータ/リフレッシュコマンドはコントローラに
-// 無視される(実害: 分更新直後にスリープ画面を描こうとして消える)。通常の
-// 60秒間隔の更新では待ちは発生しない(即idle)。
-// B74のBUSY極性はHIGH=更新中。上限は3色パネルのフル更新最悪値を想定した30秒。
-static void waitPanelIdle() {
-    if (digitalRead(EPD_BUSY_GPIO) == LOW) return;  // 即idle・無待ち
-    uint32_t t0 = millis();
-    logPrint("EPAPER", "Panel busy - waiting before draw...");
-    while (digitalRead(EPD_BUSY_GPIO) == HIGH) {
-        if (millis() - t0 > EPD_BUSY_GUARD_TIMEOUT_MS) {
-            logPrint("EPAPER", "Panel still busy after %d ms - drawing anyway",
-                     (int)EPD_BUSY_GUARD_TIMEOUT_MS);
-            break;
-        }
-        delay(10);
-    }
-    delay(20);  // BUSY解除直後のコマンド受付マージン
-}
-
 // フル画面をページ単位で描画。GxEPD2 の paged-update 定型句の共通化。
+// 物理更新中の新規描画はGxEPD2内部のBUSY待ち(_waitWhileBusy)が守る
+// (BW版パネルのフル更新は2-3秒でB74のBUSYタイムアウト内に収まる)。
 #define DRAW_PAGED(...) \
-    waitPanelIdle(); \
     g_epaper.setFullWindow(); \
     g_epaper.firstPage(); \
     do { \
@@ -782,7 +761,7 @@ void setupEpaper() {
 
 // loop から毎回呼ばれる。表示すべき内容が変わった時だけ描画。
 //   - 非TIMEモード → 通知(モード2)/詳細(モード3)/詳細大(モード4)
-//                    (FUNCキーで切替・60秒で自動復帰)
+//                    (FUNCキーで切替・10秒で自動復帰)
 //   - 通知活性中 → 通知ビューを1回だけ描画。分更新を抑制し、
 //                  タイムアウトで通知を終了して下位ビューへ強制復帰
 //   - 低電圧     → 「要充電」ビュー(通知の次を優先・3.6V以上で解除)
@@ -790,7 +769,7 @@ void setupEpaper() {
 //   - 同期済 → 分/日が変わるか初回に時計を毎分フル更新
 void updateEpaperDisplay() {
     // === FUNCキーで切替えた表示モードの自動復帰 ===
-    // 60秒で時計へ戻る(bikeclockの5s自動復帰を3色パネルの低速フル更新に合わせ延長)。
+    // 10秒で時計へ戻る(bikeclock_esp32と同一)。
     // 乗車イベント(振動)でも時計へ戻る(processWakeSwitch・二重の自己修復)。
     if (g_displayMode != DISPLAY_MODE_TIME &&
         g_currentMillis - g_lastModeChangeMillis >= MODE_AUTO_RETURN_MS) {

@@ -37,7 +37,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 4
-#define FIRMWARE_VERSION_PATCH 8
+#define FIRMWARE_VERSION_PATCH 9
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -53,23 +53,17 @@
 #define EPD_SPI_MOSI_GPIO  D5   // SPI MOSI (モジュール印字: SDA)
 #define EPD_SPI_MISO_GPIO  D1   // SPI MISO (未使用・ダミー)
 
-// 描画前のBUSY解除待ち上限。3色パネルのフル更新はB74ドライバのBUSYタイムアウト
-// (10秒)より長くなるため、直前の更新が物理的に続いている間に描画すると消える。
-// 最悪値を見て30秒(通常の分更新間隔60秒では待ち自体が発生しない)。
-#define EPD_BUSY_GUARD_TIMEOUT_MS  30000UL
-
 // ウェイクスイッチ: 他端GND・内部プルアップ・導通(LOW)で System OFF から復帰
 // (開発中はタクトスイッチ、最終形は SW-18020P 系振動センサー)
 #define WAKE_SW_GPIO    D0
 
 // --- Sleep Policy ---
-// 「ウェイクスイッチ導通(振動パルス)がこの時間無ければ BLE接続中でもスリープする」。
-// 乗車中は振動が継続的に導通を作るため起き続け、駐輪後はスマホが近くにいても
-// 確実に System OFF へ入る(スマホの位置に依存しない=振動の有無がスイッチ)。
+// 「ウェイクスイッチ導通(振動パルス)がこの時間無ければ System OFF へ入る」。
+// 乗車中は振動が継続的に導通を作るため起き続ける。
+// BLE接続中はアプリ操作中とみなしてスリープせず、切断後に無振動3分が
+// 経過済みなら直ちに System OFF へ入る(v0.4.9)。
 // 開発中のタクトスイッチでは「押下」が振動パルスに相当する。
 #define RIDE_INACTIVITY_TIMEOUT_MS  180000UL  // 3分
-#define WAKE_SW_LONGPRESS_MS    2000      // ウェイクスイッチ長押しで手動 System OFF (測定・テスト用)
-#define WAKE_SW_RELEASE_TIMEOUT_MS  10000UL  // System OFF前のスイッチ解放待ち上限(導通継続時のハング防止)
 // 振動パルス延長ログの最小間隔。SW-18020Pは振動中に毎秒多数の導通パルスを出すため
 // ログだけレート制限する(タイマー延長自体は全パルスで行う)。
 #define WAKE_PULSE_LOG_INTERVAL_MS  1000
@@ -93,8 +87,8 @@
 //   モード2 通知     : 最終受信通知(未受信なら「通知なし」)。新着で内容更新
 //   モード3 詳細     : 開始/経過/現在日時/電池電圧 (スナップショット1回描き)
 //   モード4 詳細大   : 日付+曜日/経過/開始〜現在 (スリープ残画と同内容+ピクト)
-// 非TIMEモードは60秒で時計へ自動復帰(bikeclockの5sを3色パネルの低速フル更新
-// に合わせ延長)。乗車イベント(振動)でも時計へ戻る二重の自己修復付き。
+// 非TIMEモードは10秒で時計へ自動復帰(bikeclock_esp32と同一)。
+// 乗車イベント(振動)でも時計へ戻る二重の自己修復付き。
 // 通知・低電圧の自動ビューはモード表示に優先しない(bikeclock_esp32では通知が
 // 一時オーバーライドだが、cycleclockは通知もFUNCモード化して統一)。
 enum DisplayMode {
@@ -105,7 +99,7 @@ enum DisplayMode {
     DISPLAY_MODE_COUNT
 };
 #define FUNC_SW_GPIO         D2       // FUNCキー(他端GND・内部プルアップ)
-#define MODE_AUTO_RETURN_MS  60000UL  // 非TIMEモードから時計への自動復帰時間
+#define MODE_AUTO_RETURN_MS  10000UL  // 非TIMEモードから時計への自動復帰時間(bikeclock_esp32と同一)
 extern DisplayMode g_displayMode;
 extern unsigned long g_lastModeChangeMillis;
 extern volatile uint32_t g_notificationSeq;  // 通知受信連番(手動通知モードの再描画判定)
@@ -119,8 +113,7 @@ extern volatile uint32_t g_notificationSeq;  // 通知受信連番(手動通知�
 #define BLE_CMD_MAX_LEN       247
 
 // --- Notification (bikeclock_esp32 Phase 10 から移植) ---
-#define NOTIFICATION_DISPLAY_TIMEOUT_MS 60000UL  // 通知表示時間。esp32版は30秒だが、現行3色
-                                                 // パネルのフル更新に>10秒かかるため60秒とする
+#define NOTIFICATION_DISPLAY_TIMEOUT_MS 30000UL  // 通知表示時間(bikeclock_esp32と同一)
 #define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null(ログ+通知ビュー先頭行)
 #define NOTIFY_TEXT_LEN  201   // 通知本文上限 200B + null
 
@@ -164,7 +157,7 @@ extern bool g_timeSynced;                     // 時刻同期済み
 extern LedState g_currentLedState;
 extern unsigned long g_currentMillis;         // loop冒頭で更新される現在時刻
 extern unsigned long g_startupMillis;         // 起動時刻(ログタイムスタンプ・乗車時間の基点)
-extern unsigned long g_lastRideEventMs;       // 最終振動検出時刻(スリープ判定の唯一の基準)
+extern unsigned long g_lastRideEventMs;       // 最終振動検出時刻(無振動スリープ判定の基準・BLE接続中は判定停止)
 extern DateCache g_dateCache;
 
 // --- Notification (BLE受信→ePaper通知表示) ---

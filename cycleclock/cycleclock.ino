@@ -121,7 +121,7 @@ int getYear() {
 }
 
 // --- System Utilities ---
-// 経過秒を一括加算し、ミリ秒端数は次回へ繰り越す。3色パネルのフル更新(>10s)や
+// 経過秒を一括加算し、ミリ秒端数は次回へ繰り越す。ePaperのフル更新や
 // BLE処理でloopが詰まっても時計の遅れが蓄積しない(旧実装は1呼び出し最大+1秒で、
 // 更新のたびに数秒ずつ遅れ、end=current式で端数も毎秒捨てていた)。
 void updateTimestamp() {
@@ -174,35 +174,24 @@ static bool debounceEdge(DebouncedSwitch& sw, int pin) {
 // --- ウェイクスイッチ処理(D0・振動センサー) ---
 // 押下(導通) = 振動パルス相当の活動。スリープタイマーをリセットし、
 //   非TIMEモード表示中なら時計(主画面)へ戻す
-// 長押し(2秒以上) = 手動 System OFF(待機電流実測・テスト用)
+// (1ms級パルスの取りこぼし対策はGPIOTE検出 processWakePulse() が担当。
+//  手動で寝る経路は無く、無振動3分放置で System OFF に入る)
 static DebouncedSwitch s_wakeSw = { HIGH, HIGH, 0 };
-static unsigned long s_swPressStartMs = 0;
 
 void processWakeSwitch() {
-    if (debounceEdge(s_wakeSw, WAKE_SW_GPIO)) {
-        if (s_wakeSw.stable == LOW) {
-            // 押下開始 = 振動パルス検出(スリープタイマーをリセット)
-            s_swPressStartMs = g_currentMillis;
-            g_lastRideEventMs = g_currentMillis;
-            logPrint("SW", "Wake switch pressed (ride event)");
+    if (!debounceEdge(s_wakeSw, WAKE_SW_GPIO)) return;
+    if (s_wakeSw.stable == LOW) {
+        // 押下開始 = 振動パルス検出(スリープタイマーをリセット)
+        g_lastRideEventMs = g_currentMillis;
+        logPrint("SW", "Wake switch pressed (ride event)");
+    } else {
+        // 離した = 乗車イベント。乗車中は時計が主画面なので非TIMEモードなら戻す
+        if (g_displayMode != DISPLAY_MODE_TIME) {
+            g_displayMode = DISPLAY_MODE_TIME;
+            logPrint("SW", "Ride event - return to clock");
         } else {
-            // 離した = 乗車イベント。乗車中は時計が主画面なので非TIMEモードなら戻す
-            if (g_displayMode != DISPLAY_MODE_TIME) {
-                g_displayMode = DISPLAY_MODE_TIME;
-                logPrint("SW", "Ride event - return to clock");
-            } else {
-                logPrint("SW", "Wake switch released (short)");
-            }
+            logPrint("SW", "Wake switch released (short)");
         }
-        return;
-    }
-    // 押下継続: 長押しで System OFF(元実装と同じくデバウス確定後のみ判定)
-    if (s_wakeSw.stable == LOW && g_currentMillis - s_wakeSw.lastDebounceMs >= 50 &&
-        s_swPressStartMs != 0 &&
-        g_currentMillis - s_swPressStartMs >= WAKE_SW_LONGPRESS_MS) {
-        s_swPressStartMs = 0;  // 多重発火防止
-        logPrint("SW", "Long press - manual System OFF");
-        enterSystemOff();      // 戻らない
     }
 }
 
@@ -259,22 +248,16 @@ void processFuncKey() {
 
 // --- スリープ判定 ---
 // 振動系の導通(乗車中の振動/タクト押下)が RIDE_INACTIVITY_TIMEOUT_MS 無ければ
-// System OFF に入る。BLE接続中でも同様(先に切断してから寝る)。
-// 「振動がある=乗っている」は物理的事実なので、スマホが近くにいる・いないに
+// System OFF に入る。「振動がある=乗っている」は物理的事実なので、スマホの位置に
 // 依存せず確実に眠る。逆に振動が続く限り(信号待ち含む)起き続ける。
+// BLE接続中はアプリで操作/閲覧中とみなし判定自体を停止する(v0.4.9)。切断後は
+// 無振動3分が既に経過していれば直ちに System OFF へ入る。
 void checkSleepTimeout() {
+    if (g_deviceConnected) return;   // BLE接続中はスリープしない
     if (g_currentMillis - g_lastRideEventMs < RIDE_INACTIVITY_TIMEOUT_MS) return;
 
-    if (g_deviceConnected) {
-        logPrint("SLEEP", "No vibration for %lu min while connected - disconnecting",
-                 (unsigned long)(RIDE_INACTIVITY_TIMEOUT_MS / 60000));
-        // 先に切断: アプリが切断イベントとして履歴を記録できる
-        Bluefruit.disconnect(Bluefruit.connHandle());
-        delay(200);   // 切断が相手へ伝わるのを待つ
-    } else {
-        logPrint("SLEEP", "No vibration for %lu min - entering System OFF",
-                 (unsigned long)(RIDE_INACTIVITY_TIMEOUT_MS / 60000));
-    }
+    logPrint("SLEEP", "No vibration for %lu min - entering System OFF",
+             (unsigned long)(RIDE_INACTIVITY_TIMEOUT_MS / 60000));
     enterSystemOff();  // 戻らない
 }
 

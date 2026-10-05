@@ -60,8 +60,7 @@ static float battMedian(const float* v, int n) {
 void updateBattery() {
     // パネル物理更新中の測定は禁止: ePaperの負荷スパイクで数十〜数百mV低めに
     // 落ちる(fastrec2の「アイドル時キャッシュ測定」教訓。安電源の電流制限下では
-    // 特に大きく出る)。BUSY=HIGHは更新中(B74極性)。display()はBUSYタイムアウト
-    // (10s)で先に返りパネルが更新を続けるため、直後のloopでここに当たる。
+    // 特に大きく出る)。BUSY=HIGHは更新中(B74極性・BW版フル更新は2-3秒)。
     // スキップ中はs_lastBattMsを進めないので、idleに戻り次第すぐ測る。
     if (!epaperIdle()) return;
 
