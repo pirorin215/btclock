@@ -17,6 +17,8 @@
  *   (時計/通知/詳細/詳細大)。電池詳細・バージョンモードは廃止
  *   (電圧は詳細ビューの行+ピクトに統合・未同期画面にバージョン表示)
  * - v0.4.5: ePaper表示を180度回転(setRotation 3→1・取付向きに合わせる)
+ * - v0.4.6: 日付数字をlogisoso38→46へ拡大。「日」は12pxに縮小し右端
+ *   (縦線手前)・ベースライン下端に固定配置(2桁日でも数字と重ならない)
  *
  * 表示レイアウト（250x122 横長, rotation=1）:
  *
@@ -77,6 +79,7 @@ static const int16_t LEFT_MARGIN  = 4;    // 左欄文字の左端マージン
 static const int16_t RIGHT_MARGIN = 8;    // 右欄の右端マージン
 static const int16_t TIME_BLY     = 62;   // 時刻(logisoso62)のベースライン（上段中央）
 static const int16_t RIDE_BLY     = 119;  // 乗車時間(logisoso32)のベースライン（下段中央）
+static const int16_t DAY_BLY      = 120;  // 日付(logisoso46)のベースライン（左欄下段）
 static const int16_t RIDE_RIGHT_X = 206;  // 乗車時間の右端(右下の電池ピクト分オフセット)
 static const int16_t ICON_CX      = 90;   // 乗車時間アイコン(時計)の中心x(乗車時間の左オフセットに合わせ左へ)
 static const int16_t ICON_CY      = 104;  // 乗車時間アイコン(時計)の中心y
@@ -150,6 +153,19 @@ static void drawKanji16x16(int16_t x, int16_t y, const uint16_t* bmp, int16_t sc
         for (int16_t col = 0; col < 16; col++) {
             if (bits & (0x8000 >> col)) {
                 g_epaper.fillRect(x + col * scale, y + row * scale, scale, scale, GxEPD_BLACK);
+            }
+        }
+    }
+}
+
+// 16x16 ビットマップを最近傍で縮小描画（日付の「日」16→12px用）。
+// src→dst の順引きで各黒ピクセルを落とさず対応付ける
+static void drawKanji16x16Small(int16_t x, int16_t y, const uint16_t* bmp, int16_t size) {
+    for (int16_t row = 0; row < 16; row++) {
+        uint16_t bits = bmp[row];
+        for (int16_t col = 0; col < 16; col++) {
+            if (bits & (0x8000 >> col)) {
+                g_epaper.drawPixel(x + col * size / 16, y + row * size / 16, GxEPD_BLACK);
             }
         }
     }
@@ -239,20 +255,18 @@ static void drawLeftPanel() {
     int16_t ky = DIVIDER_Y / 2 - kw / 2;
     drawKanji16x16Bold(kx, ky, KANJI_WEEKDAY[getWeekday()], 3);
 
-    // --- 日付数字 logisoso38（下段中央、左端配置） ---
-    setFont(u8g2_font_logisoso38_tn);
+    // --- 日付数字 logisoso46（下段、左端配置） ---
+    setFont(u8g2_font_logisoso46_tn);
 
     char dayBuf[4];
     snprintf(dayBuf, sizeof(dayBuf), "%d", getDay());
-    int dayW = u8g2Fonts.getUTF8Width(dayBuf);
-    int16_t asc = u8g2Fonts.getFontAscent();
-    int16_t dx = LEFT_MARGIN - 5;                    // 数字は左端からさらに5px左（視覚的左寄せ）
-    int16_t dBaselineY = (DIVIDER_Y + EP_H) / 2 + asc / 2;
-    u8g2Fonts.setCursor(dx, dBaselineY);
+    int16_t dx = LEFT_MARGIN - 6;                    // 左ベアリング3px分さらに左へ（視覚的左寄せ）
+    u8g2Fonts.setCursor(dx, DAY_BLY);
     u8g2Fonts.print(dayBuf);
 
-    // 数字の右に小さく「日」(16px)。数字の下寄りに配置
-    drawKanji16x16(dx + dayW + 2, dBaselineY - 14, KANJI_WEEKDAY[0], 1);
+    // 「日」は12pxに縮小し縦線の1px手前・ベースライン下端に固定配置
+    // （2桁日でも数字と重ならないよう、日幅に依存しない右端固定）
+    drawKanji16x16Small(DIVIDER_X - 10, DAY_BLY - 11, KANJI_WEEKDAY[0], 12);
 }
 
 // 拡大描画用の Adafruit_GFX ラッパークラス
