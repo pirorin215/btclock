@@ -10,5 +10,5 @@
 - **bikeclock/**: XIAO BLE (nRF52840) 向けファームウェア → [bikeclock/AGENTS.md](bikeclock/AGENTS.md)
 - **bikeclock_esp32/**: ESP32-S3 向けファームウェア → [bikeclock_esp32/AGENTS.md](bikeclock_esp32/AGENTS.md)
 - **cycleclock/**: 自転車用 ePaper 時計（XIAO BLE + 18650 + 振動ウェイク・System OFF）→ [cycleclock/AGENTS.md](cycleclock/AGENTS.md)
-- **cycleclock_vibetest/**: 振動センサー(SW-18020P/BMI160)感度調整用テストファーム（一時的・導通で緑LED点灯+Serial統計）→ [cycleclock_vibetest/AGENTS.md](cycleclock_vibetest/AGENTS.md)
+- **cycleclock_vibetest/**: 振動センサーSW-18020P感度調整用テストファーム（一時的・導通で緑LED点灯+Serial統計）→ [cycleclock_vibetest/AGENTS.md](cycleclock_vibetest/AGENTS.md)
 - **cycleclock_diag/**: System OFF 0.5mA 問題の切り分けファーム（一時的・10秒スリープ+診断ログ+hibernateスイッチ）→ [cycleclock_diag/AGENTS.md](cycleclock_diag/AGENTS.md)
