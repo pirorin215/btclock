@@ -51,23 +51,20 @@ int getSeconds() {
     return g_currentTimestamp % 60;
 }
 
-uint32_t getDaysSinceEpoch() {
-    return g_currentTimestamp / 86400;
-}
-
 // 閏年判定(グレゴリオ暦)
 static bool isLeapYear(uint32_t year) {
     return year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
 }
 
-void getMonthDay(int* month, int* day) {
+// 日付換算(年/月日/曜日)。同一秒内の getMonth/getDay/getWeekday/getYear の
+// 再計算を g_dateCache に1回にまとめる(呼び出し側はキャッシュを意識しない)。
+static const DateCache& dateCache() {
     if (g_dateCache.valid && g_dateCache.lastTimestamp == g_currentTimestamp) {
-        *month = g_dateCache.month;
-        *day = g_dateCache.day;
-        return;
+        return g_dateCache;
     }
 
-    uint32_t days = getDaysSinceEpoch();
+    uint32_t daysSinceEpoch = g_currentTimestamp / 86400;
+    uint32_t days = daysSinceEpoch;
     uint32_t year = 1970;
     uint32_t daysInYear;
 
@@ -88,37 +85,27 @@ void getMonthDay(int* month, int* day) {
 
     g_dateCache.month = m + 1;
     g_dateCache.day = days + 1;
-    g_dateCache.weekday = (getDaysSinceEpoch() + 4) % 7;
+    g_dateCache.weekday = (daysSinceEpoch + 4) % 7;   // 1970-01-01は木曜(0=日曜で+4)
     g_dateCache.year = year;
     g_dateCache.lastTimestamp = g_currentTimestamp;
     g_dateCache.valid = true;
-
-    *month = g_dateCache.month;
-    *day = g_dateCache.day;
+    return g_dateCache;
 }
 
 int getMonth() {
-    int month, day;
-    getMonthDay(&month, &day);
-    return month;
+    return dateCache().month;
 }
 
 int getDay() {
-    int month, day;
-    getMonthDay(&month, &day);
-    return day;
+    return dateCache().day;
 }
 
 int getWeekday() {
-    int month, day;
-    getMonthDay(&month, &day);   // キャッシュ命中時は即返る(月日ではなく曜日を使う)
-    return g_dateCache.weekday;
+    return dateCache().weekday;
 }
 
 int getYear() {
-    int month, day;
-    getMonthDay(&month, &day);
-    return g_dateCache.year;
+    return dateCache().year;
 }
 
 // --- System Utilities ---
@@ -157,34 +144,28 @@ void logPrint(const char* tag, const char* format, ...) {
     Serial.println(buffer);
 }
 
-// --- スイッチ入力のチャタリング除去(FUNCキー) ---
-// 50ms安定ではじめて変化を確定させ、確定エッジ(押下/解放)検出時のみtrueを返す。
-// (v0.4.15からD0のソフト検出は廃止。振動センサーはSystem OFF復帰のDETECT専用)
-static bool debounceEdge(DebouncedSwitch& sw, int pin) {
-    bool reading = digitalRead(pin);
-    if (reading != sw.lastReading) {
-        sw.lastDebounceMs = g_currentMillis;
-        sw.lastReading = reading;
-    }
-    if (g_currentMillis - sw.lastDebounceMs >= 50 && reading != sw.stable) {
-        sw.stable = reading;
-        return true;
-    }
-    return false;
-}
-
 // --- FUNCキー処理(v0.3.9・専用GPIO=D2) ---
-// 短押し(クリック)で表示モードを順送り。bikeclockのFUNCキーと同じ。
+// 50ms安定ではじめて変化を確定させ、解放エッジ(クリック確定)でモードを順送り。
+// 押下開始エッジでは何もしない。(v0.4.15からD0のソフト検出は廃止。
+// 振動センサーはSystem OFF復帰のDETECT専用)
 // D0(振動)と分離済みのため走行中の振動で誤発動しない。長押しは未使用
 // (bikeclockのメンテナンスメニューモードへの拡張余地)。
 // v0.4.1: D2もSystem OFFからのウェイクピンのため、FUNC押下で起床した直後の
 // releaseはモード切替としない(起こすための押下と切替操作を分離する)。
-static DebouncedSwitch s_funcKey = { HIGH, HIGH, 0 };
+static bool s_fkStable = HIGH;               // デバウス確定後の安定値(プルアップ・HIGH=未押下)
+static bool s_fkLastReading = HIGH;          // 前回の生読み取り値
+static unsigned long s_fkLastChangeMs = 0;   // 最後に読み取りが変化した時刻
 static bool s_fkIgnoreFirstRelease = false;  // FUNC押下で起床した場合の初回release無視
 
 void processFuncKey() {
-    if (!debounceEdge(s_funcKey, FUNC_SW_GPIO)) return;
-    if (s_funcKey.stable != HIGH) return;   // 押下開始では何もしない(解放でクリック確定)
+    bool reading = digitalRead(FUNC_SW_GPIO);
+    if (reading != s_fkLastReading) {
+        s_fkLastChangeMs = g_currentMillis;
+        s_fkLastReading = reading;
+    }
+    if (g_currentMillis - s_fkLastChangeMs < 50 || reading == s_fkStable) return;
+    s_fkStable = reading;
+    if (s_fkStable != HIGH) return;   // 押下開始では何もしない(解放でクリック確定)
 
     if (s_fkIgnoreFirstRelease) {
         // FUNCキー押下でSystem OFFから起床した場合の「離した」。

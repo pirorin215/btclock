@@ -65,13 +65,7 @@ void enterSystemOff() {
     Serial.flush();
     delay(50);
 
-    // LED全消灯(コモンアノード: HIGH=消灯)
-    pinMode(LED_RED, OUTPUT);
-    pinMode(LED_GREEN, OUTPUT);
-    pinMode(LED_BLUE, OUTPUT);
-    digitalWrite(LED_RED, HIGH);
-    digitalWrite(LED_GREEN, HIGH);
-    digitalWrite(LED_BLUE, HIGH);
+    ledsAllOff();
 
     // ウェイクピンを SENSE LOW(導通=LOW)で構成して System OFF に入る。
     // PIN_CNF は System OFF 中も保持され、導通が DETECT 信号を発生させる。
@@ -98,14 +92,19 @@ void enterSystemOff() {
 unsigned long g_lastLedBlink = 0;
 bool g_ledPulseOn = false;
 
-void setupLed() {
+// RGB3色をGPIO出力のHIGH(コモンアノード=消灯)へ。analogWriteのPWMを確実に
+// 止める(起動時初期化とSystem OFF前の全消灯で共用)。
+static void ledsAllOff() {
     pinMode(LED_RED, OUTPUT);
-    pinMode(LED_GREEN, OUTPUT);
-    pinMode(LED_BLUE, OUTPUT);
-    // 全消灯(common anode: HIGH=消灯)
     digitalWrite(LED_RED, HIGH);
+    pinMode(LED_GREEN, OUTPUT);
     digitalWrite(LED_GREEN, HIGH);
+    pinMode(LED_BLUE, OUTPUT);
     digitalWrite(LED_BLUE, HIGH);
+}
+
+void setupLed() {
+    ledsAllOff();
     g_currentLedState = LED_STATE_BOOT;
     g_ledPulseOn = false;
     setLedColor(true, false, false);

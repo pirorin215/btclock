@@ -40,7 +40,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 4
-#define FIRMWARE_VERSION_PATCH 18
+#define FIRMWARE_VERSION_PATCH 19
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -175,15 +175,6 @@ struct DateCache {
     bool valid;
 };
 
-// --- チャタリング除去つきスイッチ入力(cycleclock.ino で使用) ---
-// .ino関数の引数に自作型を使うと自動プロトタイプ生成(型定義より前に挿入される)が
-// 壊れるため、このヘッダで定義する(Adafruit_GFX等をここに集約するのと同じ理由)。
-struct DebouncedSwitch {
-    bool stable;                    // デバウス確定後の安定値(プルアップなのでHIGH=未押下)
-    bool lastReading;               // 前回の生読み取り値
-    unsigned long lastDebounceMs;   // 最後に読み取りが変化した時刻
-};
-
 // --- Global Variables ---
 extern volatile uint32_t g_currentTimestamp;  // JST Unix timestamp (アプリがJST換算で送信)
 extern bool g_deviceConnected;                // BLE接続状態
@@ -222,6 +213,7 @@ void checkSleepTimeout();
 void setupBLE();
 void handleTimeSync(const char* command);
 void handleGetVersion();
+void handleGetBattery();
 void handleNotify(const char* command);
 void sendResponse(const char* message);
 

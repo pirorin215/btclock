@@ -44,6 +44,17 @@ static unsigned long s_flashLastMs = 0;
 // --- InternalFS保存(/fwake.bin と同じLittleFS・固定3バイト上書き) ---
 #define LEDSTRIP_FILE "/ledstrip.bin"
 
+// 保存済み常亮色の読み出し(ファイルを開け3バイト読めればtrue)。
+// setupLedStripの復元とledinfoの報告で共用する。
+static bool ledSavedColor(uint8_t* rgb) {
+    using namespace Adafruit_LittleFS_Namespace;
+    File f = InternalFS.open(LEDSTRIP_FILE, FILE_O_READ);
+    if (!f) return false;
+    bool ok = (f.read(rgb, 3) == 3);
+    f.close();
+    return ok;
+}
+
 // --- シリアル1行バッファ ---
 static char s_cmdBuf[64];
 static int s_cmdLen = 0;
@@ -72,17 +83,12 @@ void setupLedStrip() {
     s_strip.show();   // 全消灯ラッチ(VDD未通電でも定義動作)
 
     // 保存済みの常亮色があれば既定値の代わりに復元(調整結果の反映)
-    using namespace Adafruit_LittleFS_Namespace;
-    File f = InternalFS.open(LEDSTRIP_FILE, FILE_O_READ);
-    if (f) {
-        uint8_t rgb[3] = {0, 0, 0};
-        if (f.read(rgb, sizeof(rgb)) == (int)sizeof(rgb)) {
-            s_idleR = rgb[0];
-            s_idleG = rgb[1];
-            s_idleB = rgb[2];
-            logPrint("LED", "Restored idle color %d,%d,%d", s_idleR, s_idleG, s_idleB);
-        }
-        f.close();
+    uint8_t rgb[3];
+    if (ledSavedColor(rgb)) {
+        s_idleR = rgb[0];
+        s_idleG = rgb[1];
+        s_idleB = rgb[2];
+        logPrint("LED", "Restored idle color %d,%d,%d", s_idleR, s_idleG, s_idleB);
     }
 }
 
@@ -146,16 +152,6 @@ void updateLedStrip() {
 }
 
 // --- シリアル調整コマンド処理 ---
-
-// 保存状態を調べて報告用に使う(開ければ保存あり)
-static bool ledSavedColor(uint8_t* rgb) {
-    using namespace Adafruit_LittleFS_Namespace;
-    File f = InternalFS.open(LEDSTRIP_FILE, FILE_O_READ);
-    if (!f) return false;
-    bool ok = (f.read(rgb, 3) == 3);
-    f.close();
-    return ok;
-}
 
 static void processLedStripCommand(const char* line) {
     int r = 0, g = 0, b = 0;
