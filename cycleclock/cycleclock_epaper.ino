@@ -740,7 +740,7 @@ static void drawEpaperSplash() {
 // ====================================================================
 
 void setupEpaper() {
-    // --- ePaper電源ON(v0.4.10・TPS22810 EN=HIGH) ---
+    // --- ePaper電源ON(v0.4.10・電源制御ピン D1=HIGH) ---
     // SPI/ePaper初期化より先に電源を入れる。電源のないモジュールへのSPI通信は
     // BUSY不定で誤動作するため順序は厳守(cycleclock_diag 2026-10-06 の教訓)
     pinMode(EPD_POWER_GPIO, OUTPUT);
@@ -761,7 +761,7 @@ void setupEpaper() {
 
     u8g2Fonts.begin(g_epaper);
 
-    logPrint("EPAPER", "Init OK (CS=%d DC=%d RST=%d BUSY=%d, SCK=%d MOSI=%d) power=TPS22810@D%d",
+    logPrint("EPAPER", "Init OK (CS=%d DC=%d RST=%d BUSY=%d, SCK=%d MOSI=%d) power@D%d",
              EPD_CS_GPIO, EPD_DC_GPIO, EPD_RST_GPIO, EPD_BUSY_GPIO,
              EPD_SPI_SCK_GPIO, EPD_SPI_MOSI_GPIO, EPD_POWER_GPIO);
 

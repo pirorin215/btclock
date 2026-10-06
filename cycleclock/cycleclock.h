@@ -8,6 +8,7 @@
 #include <U8g2_for_Adafruit_GFX.h>
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>   // Seeeduino版のInternalFS定義(bondingもこれを使用)
+#include <Adafruit_NeoPixel.h>    // WS2812B装飾LED(v0.4.16・nRF52はNRF_PWM+EasyDMA)
 
 // 注意: Arduinoの自動プロトタイプ生成(nRF52コアのレガシープリプロセッサ)が
 // .ino内関数のプロトタイプを最初の.ino位置=各.inoのincludeより前に挿入する
@@ -39,7 +40,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 4
-#define FIRMWARE_VERSION_PATCH 15
+#define FIRMWARE_VERSION_PATCH 18
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -53,12 +54,8 @@
 #define EPD_BUSY_GPIO   D9   // ePaper BUSY(モジュール印字: BUSY)
 #define EPD_SPI_SCK_GPIO   D7   // SPI SCK  (モジュール印字: SCL)
 #define EPD_SPI_MOSI_GPIO  D5   // SPI MOSI (モジュール印字: SDA)
-// v0.4.10: ePaper電源スイッチ(TPS22810 EN)制御ピン。旧MISOダミーD1を転用。
-// TPS22810(SOT-23-6: 1=VIN/3V3, 2=GND, 3=EN/D1+100kΩプルダウン, 4=CT開放,
-// 5=QOD→VOUT直結, 6=VOUT/ePaper VCC)でePaper給電をGPIO制御する。
-// EN=HIGHの間だけ給電・Hi-ZでプルダウンがLOWに自己保持=System OFF中もOFF維持
-// (リーク0.5µA typ・QODがVOUTを0V放電・残画はパネルが保持)。
-// 実測: System OFF電流 0.5mA(v0.4.9)→11µA(v0.4.10・2026-10-06 cycleclock_diagで実証)
+// v0.4.10: ePaper電源のGPIO制御ピン(旧MISOダミーD1を転用)。現行実機は
+// ePaper VCC=3V3直結のため配線なし・HIGH/LOW制御は無害。
 #define EPD_POWER_GPIO     D1
 #define EPD_POWER_STABLE_MS 100UL   // EN=HIGH後のePaper電源安定待ち(起動時に1回)
 
@@ -92,6 +89,29 @@
 #define LED_PULSE_MS            50     // 点滅系のパルス幅
 #define LED_PULSE_INTERVAL_MS   2000   // 通常点滅間隔
 #define LED_ERROR_INTERVAL_MS   500    // エラー時の点滅間隔
+
+// --- ePaper上 WS2812B (v0.4.16) ---
+// ePaper上部の透明テープを照らす装飾LED×1。DIN=D6・VDDはXIAO 3V3から分岐
+// (System OFF中も通電のためDINは10kΩプルダウン必須)。D6は起動シーケンスの
+// 早い段階でLOW出力へ確定すること(setupLedStrip()をsetupEpaper()より先に
+// 呼ぶ・DIN浮き誤点灯防止)。
+#define STRIP_GPIO          D6
+#define STRIP_COUNT         1
+#define STRIP_IDLE_R        30     // 接続中の常亮色(暖白・暗所向けの低輝度)
+#define STRIP_IDLE_G        22
+#define STRIP_IDLE_B        10
+#define STRIP_BOOT_R        200    // 起動演出(白点滅・配線確認用)
+#define STRIP_BOOT_G        200
+#define STRIP_BOOT_B        200
+#define STRIP_BOOT_FLASH    2      // 起動演出の点滅回数
+#define STRIP_NOTIFY_R      90     // 通知受信演出(品紅点滅)
+#define STRIP_NOTIFY_G      0
+#define STRIP_NOTIFY_B      90
+#define STRIP_LOWBATT_R     70     // 低電圧演出(赤点滅)
+#define STRIP_LOWBATT_G     0
+#define STRIP_LOWBATT_B     0
+#define STRIP_FLASH_TIMES   3      // 通知/低電圧演出の点滅回数
+#define STRIP_FLASH_MS      120    // 同・on/off各時間
 
 // --- Display Mode (bikeclock_esp32 と同一の4モード構成・v0.4.0) ---
 // FUNCキー(D2)クリックでモード1〜4を循環する。bikeclock_esp32のFUNC_MODE_TABLE
@@ -219,6 +239,13 @@ void updateLed();
 void setLedState(LedState state);
 void setLedError();
 void updateLedStateBasedOnStatus();
+
+// cycleclock_ledstrip.ino
+void setupLedStrip();        // D6をLOW出力に確定(VOUT上電前に必ず呼ぶ)
+void ledStripFlash(uint8_t r, uint8_t g, uint8_t b, uint8_t times);  // 非ブロッキング点滅演出
+void updateLedStrip();       // loopから毎回:演出進行+接続中の常亮
+void ledStripPowerDown();    // System OFF直前:消灯ラッチ送信(VOUT断の前に)
+void handleLedStripSerial(); // loopから毎回:シリアル調整コマンド(led/ledsave/...)
 
 // cycleclock_battery.ino
 void updateBattery();

@@ -38,13 +38,15 @@ void enterSystemOff() {
     // (通常時計のままだと停車中に今の時刻と勘違いされるため・ゼロ電力で保持される)
     drawEpaperSleep();
 
+    // WS2812Bを消灯ラッチしてから寝る(v0.4.16)
+    ledStripPowerDown();
+
     // --- ePaper系の電流経路を完全に切る(v0.4.10・実測0.5mA→11µA) ---
     // ①パネルをdeep sleepへ(フル更新後のpower off止まりだとリークが残る)
     // ②信号ピンを入力(Hi-Z)化: モジュール基板の信号プルアップとXIAO出力の
     //   間に流れる電流を断つ(nRF52はSystem OFF中もGPIO出力状態を保持するため)
-    // ③TPS22810をOFF: ENをHi-Zにすると100kΩプルダウンでLOWに自己保持=
-    //   ePaperへの給電が完全切断(リーク0.5µA typ・QODがVOUTを0V放電)。
-    //   残画はパネルが保持するため停車中の表示機能はそのまま
+    // ③ePaper電源をD1(GPIO)制御でOFF。残画はパネルが保持するため
+    //   停車中の表示機能はそのまま
     epaperHibernate();
     SPI.end();
     pinMode(EPD_CS_GPIO, INPUT);
@@ -53,9 +55,10 @@ void enterSystemOff() {
     pinMode(EPD_BUSY_GPIO, INPUT);
     pinMode(EPD_SPI_SCK_GPIO, INPUT);
     pinMode(EPD_SPI_MOSI_GPIO, INPUT);
+    pinMode(STRIP_GPIO, INPUT);   // WS2812B DINもHi-Zへ(LEDは無電のためLOWと等価)
     digitalWrite(EPD_POWER_GPIO, LOW);
     pinMode(EPD_POWER_GPIO, INPUT);
-    logPrint("EPAPER", "Power cut: panel hibernate + pins Hi-Z + TPS22810 OFF");
+    logPrint("EPAPER", "Power cut: panel hibernate + pins Hi-Z + power OFF");
 
     logPrint("POWER", "Entering System OFF (wake on %d/%d LOW)",
              WAKE_SW_GPIO, FUNC_SW_GPIO);

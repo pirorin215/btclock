@@ -39,9 +39,10 @@ XIAO BLE (nRF52840) を使った自転車搭載用 ePaper 時計デバイス「C
 | D0 | SW-18020P（振動センサー）（他端GND） | 受動接点1つ・内部プルアップ。導通パルス=乗車イベント(非TIMEモード中は時計へ復帰) |
 | D1 | （配線不要） | ePaperがMISO未使用のためSPIダミーとして内部使用 |
 | D2 | FUNCキー押ボタン（他端GND） | **System OFFからの復帰ピンを兼ねる**(導通で起床・起床直後のreleaseではモードは変わらない)。クリックで時計→通知(最終受信)→詳細→詳細大を循環・10秒で時計へ自動復帰。詳細=開始/経過/現在日時/電池電圧、詳細大=日付/経過/開始〜現在+ピクト(スリープ残画と同内容) |
-| D3, D6 | （未使用） | |
+| D3 | （未使用） | |
 | D4 | ePaper **CS** | SPIチップセレクト |
 | D5 | ePaper **SDA** | SPI MOSI（`SPI.setPins`で割当） |
+| D6 | WS2812B **DIN**（v0.4.16〜） | 装飾LED×1。DINは10kΩでGNDへプルダウン（必須）。VDDはXIAO 3V3（下記「WS2812B 装飾LED」参照） |
 | D7 | ePaper **SCL** | SPI SCK（同上） |
 | D8 | ePaper **D/C** | Data/Command選択 |
 | D9 | ePaper **BUSY** | HIGH=パネル更新中 |
@@ -64,6 +65,7 @@ ePaperのSCK/MOSIはnRF52840のPSEL割当で任意GPIOに配置可能（2026-09-
 | `cycleclock_epaper.ino` | ePaper描画(時計/未同期/スプラッシュ/通知) | bikeclock_esp32_epaper.ino |
 | `cycleclock_battery.ino` | バッテリー電圧監視 | fastrec2 battery.c |
 | `cycleclock_power.ino` | System OFF出入り・LED | 新規(nRF52正規API) |
+| `cycleclock_ledstrip.ino` | WS2812B装飾LED(常亮/演出/シリアル調整/System OFF断電) | 新規(v0.4.16〜) |
 
 ### BLE仕様(bikeclock/bikeclock_esp32 と共通・アプリ互換)
 
@@ -121,6 +123,44 @@ bikeclock_esp32(バイク版)と同じ仕組みを移植。アプリの通知リ
   薄点灯(エラーは500ms間隔)。自作キーボード界隈の「ほぼ消えているが生きている」LED表現
 - 消灯時は digital LOW/HIGH に戻してPWMを停止(スリープ電流を守る)
 - 調整: `LED_DIM_PWM_VALUE`(小さく=明るい)・`LED_PULSE_MS`/`LED_PULSE_INTERVAL_MS`(cycleclock.h)
+
+### WS2812B 装飾LED (v0.4.16)
+
+ePaper上部の透明テープを照らす装飾用 WS2812B ×1。
+
+```
+XIAO 3V3 ───────── WS2812B VDD
+GND ─────────────── WS2812B GND
+XIAO D6 ──┬──────── WS2812B DIN
+          └─[10kΩ]── GND（プルダウン・必須）
+```
+
+- VDDはXIAO 3V3から直接（3.3V駆動）。カタログ範囲（3.5〜5.3V）をわずかに下回るが
+  3.3V駆動は実績が多く、低輝度用途では問題なし（VIH=0.7×VDD<3.3VでGPIOとの
+  論理レベルも整合）
+- System OFF中もVDDに電気が来るため**DINの10kΩプルダウンは必須**（消灯ラッチは
+  保持されるが、電源瞬断/リセット後のDIN浮き誤点灯を防ぐ）
+- ファームは起動シーケンスの早い段階でD6をLOW出力へ確定する（`setupLedStrip()`
+  を`setupEpaper()`より先に呼ぶ）。上電直後のDIN浮き誤点灯防止
+- 動作: **BLE接続中だけ暖色常亮**（乗っている/見ている間だけ光る寿命モデルに一致）。
+  起動直後に白点滅（配線確認用）、通知受信で品紅点滅、低電圧警告で赤点滅。
+  System OFF直前は消灯フレームを送ってからピンをHi-Z化
+- 送信は Adafruit_NeoPixel（nRF52はNRF_PWM+EasyDMA・SoftDevice割込で時序が壊れない）。
+  演出はloop駆動の非ブロッキング状態機
+- 調整（シリアルコマンド・v0.4.18・調整段階専用）: consolelog.sh を止めてから
+  `arduino-cli monitor -p <PORT> --config baudrate=115200` で対話接続し、
+  1行タイプしてEnterで送る。
+  - `led R G B` — 常亮色を即変更（0-255・**BLE未接続でもプレビュー点灯**するため
+    スマホなしで調整可。視認性の確認は `led 0 0 255` 等の純色・最大輝度も有効）
+  - `ledsave` — 現在の常亮色をInternalFS（`/ledstrip.bin`）へ保存・再起動後も有効
+  - `leddefault` — 保存を消して `STRIP_IDLE_*` の既定値へ戻す
+  - `ledflash R G B` — 点滅演出のプレビュー / `ledinfo` — 現在値と保存状態を表示
+  - コマンド受信のたびにスリープ判定を延長（未接続の調整作業が1分でSystem OFFに
+    潰れない。**入力がないまま1分経つと通常どおり寝る**。本番の見た目=常亮は
+    BLE接続中の状態なので、最終確認はスマホ接続で行う）
+- コンパイル時の既定値: `STRIP_IDLE_R/G/B`（常亮色）・`STRIP_FLASH_TIMES`/`STRIP_FLASH_MS`
+  （演出）・`STRIP_GPIO`（ピン変更）。**ledsaveでの調整が決まったら cycleclock.h へ
+  転記して leddefault で保存を消す**（ドキュメント=マスターの一致維持）
 
 ## 必要ライブラリ
 

@@ -257,8 +257,14 @@ void setup() {
 
     setupLed();
 
-    // ePaper初期化+スプラッシュ表示
+    // WS2812B(v0.4.16): ePaper電源上電の前にDINをLOWへ確定
+    setupLedStrip();
+
+    // ePaper初期化+スプラッシュ表示(EN=HIGHでVOUT上電=WS2812Bにも通電)
     setupEpaper();
+
+    // 起動演出(VOUT上電後なのでLEDが受信できる・配線確認用の白点滅)
+    ledStripFlash(STRIP_BOOT_R, STRIP_BOOT_G, STRIP_BOOT_B, STRIP_BOOT_FLASH);
 
     // BLE初期化+アドバタイズ開始
     setupBLE();
@@ -274,6 +280,8 @@ void loop() {
 
     processFuncKey();
     updateLed();
+    updateLedStrip();
+    handleLedStripSerial();
     updateTimestamp();
     updateBattery();
     updateEpaperDisplay();
