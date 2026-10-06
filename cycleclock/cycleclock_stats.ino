@@ -1,24 +1,21 @@
 /**
- * CycleClock - 誤起動・D0短絡の統計(v0.4.11)
+ * CycleClock - 誤起動の統計(v0.4.11〜・v0.4.15でD0振動検知カウントは廃止)
  *
  * フィールド運用の観測要件(2026-10-06 ユーザー要件):
  * - 誤起動回数: 「BT接続されないままスタンバイに入った」回数(不在時の誤起動=
  *   電池を静かに食う犯人)。BT接続ありのスタンバイで0にリセット(=正当な起動)。
  *   System OFF は RAM を保持しないため内部フラッシュ(InternalFS/LittleFS)へ
  *   永続化する。書込みはスタンバイ直前の1回だけなのでフラッシュ耐久は問題なし。
- * - D0短絡回数: BT接続中にD0が導通した回数。カウントは processWakeSwitch の
- *   デバウンス確定(=「[SW] Wake switch pressed」ログと同タイミング)で行う
- *   (cycleclock.ino 参照)。RAMのみ(スタンバイ入りでリセット=今回の乗車
- *   セッションの値)。
  *
- * どちらも詳細ビュー(モード3)に表示する。
+ * 詳細ビュー(モード3)に表示する。
+ * (v0.4.15: 振動センサーは System OFF 復帰専用になったため、D0パルスの
+ *  カウント・表示は廃止。旧 g_d0ShortCount/g_d0PulseCount)
  */
 
 #include "cycleclock.h"
 
 // --- Global Variables ---
 uint32_t g_falseWakeCount = 0;
-uint32_t g_d0ShortCount = 0;
 bool g_everConnectedThisBoot = false;
 
 // --- 永続化ファイル ---
@@ -62,14 +59,11 @@ void commitStatsAtSleep() {
             g_falseWakeCount = 0;
             persistFalseWakeCount();
         }
-        logPrint("STATS", "Sleep after BT session: falseWake reset, d0Short=%lu",
-                 (unsigned long)g_d0ShortCount);
+        logPrint("STATS", "Sleep after BT session: falseWake reset");
     } else {
         g_falseWakeCount++;
         persistFalseWakeCount();
-        logPrint("STATS", "Sleep without BT (false wake): count=%lu, d0Short=%lu",
-                 (unsigned long)g_falseWakeCount, (unsigned long)g_d0ShortCount);
+        logPrint("STATS", "Sleep without BT (false wake): count=%lu",
+                 (unsigned long)g_falseWakeCount);
     }
-    // D0短絡回数は「スタンバイに入る時にリセット」の仕様
-    g_d0ShortCount = 0;
 }

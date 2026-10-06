@@ -37,6 +37,9 @@ void onDisconnect(uint16_t conn_handle, uint8_t reason) {
     (void)conn_handle;
     logPrint("BLE", "Device disconnected (reason=%u)", reason);
     g_deviceConnected = false;
+    // v0.4.15: 切断時刻をスリープ判定の基点に。1分以内の再接続なら継続
+    // (瞬断対策)、再接続されなければ1分で System OFF
+    g_sleepTimerStartMs = millis();
     updateLedStateBasedOnStatus();
 }
 

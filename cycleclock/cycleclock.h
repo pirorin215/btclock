@@ -39,7 +39,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 4
-#define FIRMWARE_VERSION_PATCH 11
+#define FIRMWARE_VERSION_PATCH 15
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -66,24 +66,21 @@
 // (開発中はタクトスイッチ、最終形は SW-18020P 系振動センサー)
 #define WAKE_SW_GPIO    D0
 
-// --- Sleep Policy ---
-// 「ウェイクスイッチ導通(振動パルス)がこの時間無ければ System OFF へ入る」。
-// 乗車中は振動が継続的に導通を作るため起き続ける。
-// BLE接続中はアプリ操作中とみなしてスリープせず、切断後に無振動3分が
-// 経過済みなら直ちに System OFF へ入る(v0.4.9)。
-// 開発中のタクトスイッチでは「押下」が振動パルスに相当する。
-#define RIDE_INACTIVITY_TIMEOUT_MS  180000UL  // 3分
-// 振動パルス延長ログの最小間隔。SW-18020Pは振動中に毎秒多数の導通パルスを出すため
-// ログだけレート制限する(タイマー延長自体は全パルスで行う)。
-#define WAKE_PULSE_LOG_INTERVAL_MS  1000
+// --- Sleep Policy (v0.4.15: BLE接続有無のみで判定) ---
+// 「このシステムは BLE 接続なしには何もできない(時計表示も時刻同期も)」が前提。
+// 振動センサーは System OFF からの復帰(起動)専用とし、起動後の D0 パルスは
+// ソフトウェアでは一切扱わない。
+//   - 起動: この時間以内に BLE 接続が来なければ System OFF(不在時の誤起動対策)
+//   - 接続中: スリープしない(アプリ操作/閲覧中とみなす)
+//   - 切断: 切断時刻を基点にこの時間待ち、再接続されなければ System OFF
+//     (瞬断は1分以内の再接続で継続・アドバタイズは自動再開)
+#define SLEEP_IDLE_TIMEOUT_MS  60000UL  // 1分
 
-// --- 誤起動・D0短絡の統計(v0.4.11・cycleclock_stats.ino) ---
+// --- 誤起動の統計(v0.4.11・cycleclock_stats.ino) ---
 // 誤起動: BT接続されないままスタンバイに入った回数(不在時の誤起動の観測用)。
 //   System OFFはRAMを保持しないため内部フラッシュ(InternalFS/LittleFS)へ永続化する。
 //   BT接続ありのスタンバイで0にリセット(接続された=正当な起動)。
-// D0短絡: BT接続中にD0が導通した回数(processWakeSwitchのデバウンス確定=
-//   「[SW] Wake switch pressed」ログと同タイミングでカウント)。
-//   RAMのみ(スタンバイ入りでリセット=今回の乗車セッションの値)。
+// (v0.4.15: D0振動検知回数のカウントは廃止。振動センサーは起動専用のため)
 
 // --- LED dimming ---
 // XIAO BLEのRGB LEDはcommon anode(HIGH=消灯)。
@@ -174,9 +171,8 @@ extern bool g_timeSynced;                     // 時刻同期済み
 extern LedState g_currentLedState;
 extern unsigned long g_currentMillis;         // loop冒頭で更新される現在時刻
 extern unsigned long g_startupMillis;         // 起動時刻(ログタイムスタンプ・乗車時間の基点)
-extern unsigned long g_lastRideEventMs;       // 最終振動検出時刻(無振動スリープ判定の基準・BLE接続中は判定停止)
+extern unsigned long g_sleepTimerStartMs;     // スリープ判定の基点(起床時刻で初期化・切断時に更新)
 extern uint32_t g_falseWakeCount;             // 誤起動回数(BT未接続のままスタンバイ=永続化)
-extern uint32_t g_d0ShortCount;               // 今セッションのD0短絡回数(BT接続中の連続導通)
 extern bool g_everConnectedThisBoot;          // 今回の起動で一度でもBT接続されたか
 extern DateCache g_dateCache;
 
@@ -199,7 +195,6 @@ int getMonth();
 int getDay();
 int getWeekday();
 int getYear();
-void processWakeSwitch();
 void processFuncKey();
 void checkSleepTimeout();
 

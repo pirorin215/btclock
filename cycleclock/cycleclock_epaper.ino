@@ -629,10 +629,9 @@ static void drawEpaperDetail() {
         u8g2Fonts.print(buf);
         y += lh;
 
-        // v0.4.11: 運用統計(誤起動=BT未接続のままスタンバイに入った累積回数
-        // ・フラッシュ永続化 / D0短絡=今回セッション中のBT接続中連続導通回数)
-        snprintf(buf, sizeof(buf), "誤起動%lu回 短絡%lu回",
-                 (unsigned long)g_falseWakeCount, (unsigned long)g_d0ShortCount);
+        // v0.4.11: 運用統計(誤起動=BT未接続のままスタンバイに入った累積回数・
+        // フラッシュ永続化。v0.4.15でD0振動検知カウントは廃止・振動は起動専用)
+        snprintf(buf, sizeof(buf), "誤起動%lu回", (unsigned long)g_falseWakeCount);
         u8g2Fonts.setCursor(x, y);
         u8g2Fonts.print(buf);
 
@@ -793,7 +792,8 @@ void epaperHibernate() {
 void updateEpaperDisplay() {
     // === FUNCキーで切替えた表示モードの自動復帰 ===
     // 10秒で時計へ戻る(bikeclock_esp32と同一)。
-    // 乗車イベント(振動)でも時計へ戻る(processWakeSwitch・二重の自己修復)。
+    // (旧v0.4.14までは振動でも時計へ戻していたが、v0.4.15で振動は起動専用に
+    //  なったため FUNC キー操作と10秒自動復帰のみ)
     if (g_displayMode != DISPLAY_MODE_TIME &&
         g_currentMillis - g_lastModeChangeMillis >= MODE_AUTO_RETURN_MS) {
         logPrint("MODE", "Auto return to clock");
