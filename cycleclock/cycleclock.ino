@@ -29,7 +29,7 @@ DateCache g_dateCache = {0, 0, 0, 0, 0, false};
 // --- Notification (bikeclock_esp32 Phase 10 から移植) ---
 volatile bool g_notificationActive = false;      // BLEコールバック(onWrite)が立てる
 unsigned long g_notificationEndTime = 0;
-char g_notificationApp[NOTIFY_APP_LEN] = {0};    // アプリ名(ログ用・描画未使用)
+char g_notificationApp[NOTIFY_APP_LEN] = {0};    // アプリ名(ログ用・本文空の時の代替表示)
 char g_notificationText[NOTIFY_TEXT_LEN] = {0};  // 通知本文
 volatile uint32_t g_notificationSeq = 0;         // 受信連番(手動通知モードの再描画判定)
 
@@ -184,6 +184,7 @@ void processWakeSwitch() {
         // 押下開始 = 振動パルス検出(スリープタイマーをリセット)
         g_lastRideEventMs = g_currentMillis;
         logPrint("SW", "Wake switch pressed (ride event)");
+        if (g_deviceConnected) g_d0ShortCount++;   // v0.4.11: BT接続中のD0導通回数(詳細画面)
     } else {
         // 離した = 乗車イベント。乗車中は時計が主画面なので非TIMEモードなら戻す
         if (g_displayMode != DISPLAY_MODE_TIME) {
@@ -265,6 +266,7 @@ void checkSleepTimeout() {
 void setup() {
     Serial.begin(115200);
     setupLog();
+    setupStats();   // v0.4.11: 誤起動回数をフラッシュから復元
 
     logPrint("CYCLECLOCK", __DATE__ " " __TIME__);
 

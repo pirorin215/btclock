@@ -6,6 +6,8 @@
 #include <SPI.h>
 #include <GxEPD2_BW.h>
 #include <U8g2_for_Adafruit_GFX.h>
+#include <Adafruit_LittleFS.h>
+#include <InternalFileSystem.h>   // Seeeduino版のInternalFS定義(bondingもこれを使用)
 
 // 注意: Arduinoの自動プロトタイプ生成(nRF52コアのレガシープリプロセッサ)が
 // .ino内関数のプロトタイプを最初の.ino位置=各.inoのincludeより前に挿入する
@@ -37,7 +39,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 4
-#define FIRMWARE_VERSION_PATCH 9
+#define FIRMWARE_VERSION_PATCH 11
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -51,7 +53,14 @@
 #define EPD_BUSY_GPIO   D9   // ePaper BUSY(モジュール印字: BUSY)
 #define EPD_SPI_SCK_GPIO   D7   // SPI SCK  (モジュール印字: SCL)
 #define EPD_SPI_MOSI_GPIO  D5   // SPI MOSI (モジュール印字: SDA)
-#define EPD_SPI_MISO_GPIO  D1   // SPI MISO (未使用・ダミー)
+// v0.4.10: ePaper電源スイッチ(TPS22810 EN)制御ピン。旧MISOダミーD1を転用。
+// TPS22810(SOT-23-6: 1=VIN/3V3, 2=GND, 3=EN/D1+100kΩプルダウン, 4=CT開放,
+// 5=QOD→VOUT直結, 6=VOUT/ePaper VCC)でePaper給電をGPIO制御する。
+// EN=HIGHの間だけ給電・Hi-ZでプルダウンがLOWに自己保持=System OFF中もOFF維持
+// (リーク0.5µA typ・QODがVOUTを0V放電・残画はパネルが保持)。
+// 実測: System OFF電流 0.5mA(v0.4.9)→11µA(v0.4.10・2026-10-06 cycleclock_diagで実証)
+#define EPD_POWER_GPIO     D1
+#define EPD_POWER_STABLE_MS 100UL   // EN=HIGH後のePaper電源安定待ち(起動時に1回)
 
 // ウェイクスイッチ: 他端GND・内部プルアップ・導通(LOW)で System OFF から復帰
 // (開発中はタクトスイッチ、最終形は SW-18020P 系振動センサー)
@@ -67,6 +76,14 @@
 // 振動パルス延長ログの最小間隔。SW-18020Pは振動中に毎秒多数の導通パルスを出すため
 // ログだけレート制限する(タイマー延長自体は全パルスで行う)。
 #define WAKE_PULSE_LOG_INTERVAL_MS  1000
+
+// --- 誤起動・D0短絡の統計(v0.4.11・cycleclock_stats.ino) ---
+// 誤起動: BT接続されないままスタンバイに入った回数(不在時の誤起動の観測用)。
+//   System OFFはRAMを保持しないため内部フラッシュ(InternalFS/LittleFS)へ永続化する。
+//   BT接続ありのスタンバイで0にリセット(接続された=正当な起動)。
+// D0短絡: BT接続中にD0が導通した回数(processWakeSwitchのデバウンス確定=
+//   「[SW] Wake switch pressed」ログと同タイミングでカウント)。
+//   RAMのみ(スタンバイ入りでリセット=今回の乗車セッションの値)。
 
 // --- LED dimming ---
 // XIAO BLEのRGB LEDはcommon anode(HIGH=消灯)。
@@ -114,7 +131,7 @@ extern volatile uint32_t g_notificationSeq;  // 通知受信連番(手動通知�
 
 // --- Notification (bikeclock_esp32 Phase 10 から移植) ---
 #define NOTIFICATION_DISPLAY_TIMEOUT_MS 30000UL  // 通知表示時間(bikeclock_esp32と同一)
-#define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null(ログ+通知ビュー先頭行)
+#define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null(ログ+本文空時の代替表示)
 #define NOTIFY_TEXT_LEN  201   // 通知本文上限 200B + null
 
 // --- BLE UUIDs (bikeclock / bikeclock_esp32 と共通・アプリ互換) ---
@@ -158,15 +175,21 @@ extern LedState g_currentLedState;
 extern unsigned long g_currentMillis;         // loop冒頭で更新される現在時刻
 extern unsigned long g_startupMillis;         // 起動時刻(ログタイムスタンプ・乗車時間の基点)
 extern unsigned long g_lastRideEventMs;       // 最終振動検出時刻(無振動スリープ判定の基準・BLE接続中は判定停止)
+extern uint32_t g_falseWakeCount;             // 誤起動回数(BT未接続のままスタンバイ=永続化)
+extern uint32_t g_d0ShortCount;               // 今セッションのD0短絡回数(BT接続中の連続導通)
+extern bool g_everConnectedThisBoot;          // 今回の起動で一度でもBT接続されたか
 extern DateCache g_dateCache;
 
 // --- Notification (BLE受信→ePaper通知表示) ---
 extern volatile bool g_notificationActive;    // 通知表示中フラグ(BLEコールバックが立てる)
 extern unsigned long g_notificationEndTime;   // 通知表示の終了時刻(millis())
-extern char g_notificationApp[];              // アプリ名(ログ用)
+extern char g_notificationApp[];              // アプリ名(ログ用・本文空の時の代替表示)
 extern char g_notificationText[];             // 通知本文
 // --- Function Prototypes ---
 
+// cycleclock_stats.ino
+void setupStats();              // 起動時: 誤起動回数をフラッシュから読み出し
+void commitStatsAtSleep();      // enterSystemOffから: 誤起動判定+フラッシュ書込み
 // cycleclock.ino
 void updateTimestamp();
 int getHours();
@@ -192,6 +215,7 @@ void setupEpaper();
 void updateEpaperDisplay();
 void drawEpaperSleep();
 bool epaperIdle();
+void epaperHibernate();   // v0.4.10: パネルdeep sleep(System OFF前のリーク対策)
 
 // cycleclock_power.ino
 void enterSystemOff();

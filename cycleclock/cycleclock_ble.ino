@@ -29,6 +29,7 @@ void onConnect(uint16_t conn_handle) {
     (void)conn_handle;
     logPrint("BLE", "Device connected");
     g_deviceConnected = true;
+    g_everConnectedThisBoot = true;   // v0.4.11: 誤起動判定用(今回の起動は正当)
     updateLedStateBasedOnStatus();
 }
 

@@ -17,6 +17,10 @@
 
 // --- System OFF ---
 void enterSystemOff() {
+    // 統計の確定と永続化(v0.4.11): この下の解放待ちループで長時間拘束される
+    // 可能性があるため、最初に実行してフラッシュへ書き込む
+    commitStatsAtSleep();
+
     // 押下されたまま System OFF に入ると DETECT が即成立して即時起床してしまう
     // (見かけ上「停止→再起動」になる)。離されるのを待ってから寝る。
     // D0(振動)とD2(FUNC)の両方について待つ(v0.4.1・FUNC押しっぱなし放置でも
@@ -33,6 +37,25 @@ void enterSystemOff() {
     // 停車中の表示を「停止時点のスナップショット」に切り替える
     // (通常時計のままだと停車中に今の時刻と勘違いされるため・ゼロ電力で保持される)
     drawEpaperSleep();
+
+    // --- ePaper系の電流経路を完全に切る(v0.4.10・実測0.5mA→11µA) ---
+    // ①パネルをdeep sleepへ(フル更新後のpower off止まりだとリークが残る)
+    // ②信号ピンを入力(Hi-Z)化: モジュール基板の信号プルアップとXIAO出力の
+    //   間に流れる電流を断つ(nRF52はSystem OFF中もGPIO出力状態を保持するため)
+    // ③TPS22810をOFF: ENをHi-Zにすると100kΩプルダウンでLOWに自己保持=
+    //   ePaperへの給電が完全切断(リーク0.5µA typ・QODがVOUTを0V放電)。
+    //   残画はパネルが保持するため停車中の表示機能はそのまま
+    epaperHibernate();
+    SPI.end();
+    pinMode(EPD_CS_GPIO, INPUT);
+    pinMode(EPD_DC_GPIO, INPUT);
+    pinMode(EPD_RST_GPIO, INPUT);
+    pinMode(EPD_BUSY_GPIO, INPUT);
+    pinMode(EPD_SPI_SCK_GPIO, INPUT);
+    pinMode(EPD_SPI_MOSI_GPIO, INPUT);
+    digitalWrite(EPD_POWER_GPIO, LOW);
+    pinMode(EPD_POWER_GPIO, INPUT);
+    logPrint("EPAPER", "Power cut: panel hibernate + pins Hi-Z + TPS22810 OFF");
 
     logPrint("POWER", "Entering System OFF (wake on %d/%d LOW)",
              WAKE_SW_GPIO, FUNC_SW_GPIO);

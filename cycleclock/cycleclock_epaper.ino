@@ -505,6 +505,8 @@ static const NotifyFontSetting NOTIFY_FONT_SETTINGS[] = {
 
 // 通知表示: 本文テキストを全画面に自動折返し描画。
 // 文字数に応じてフォントサイズを段階切替（NOTIFY_FONT_SETTINGS）。
+// アプリ名の常設先頭行は廃止(v0.4.11・本文エリア圧迫で4行目が切れるため)。
+// 本文が空の時だけアプリ名を代わりに表示し、両方空なら「通知なし」。
 // ※ BLEコールバックとページループが競合しないよう、ページループ前にローカルコピーを
 //    取り、ループ内ではそのコピーを使う(paged update は各ページで再描画するため)。
 static void drawEpaperNotification(const char* text) {
@@ -512,10 +514,12 @@ static void drawEpaperNotification(const char* text) {
     strncpy(safeText, text, NOTIFY_TEXT_LEN - 1);
     safeText[NOTIFY_TEXT_LEN - 1] = '\0';
 
+    const char* body = (safeText[0] != '\0') ? safeText : g_notificationApp;
+
     // 文字数でフォントサイズとスケーリングを判定
     const uint8_t* font = u8g2_font_b10_t_japanese2; // デフォルトフォールバック
     int scale = 1;
-    const int n = utf8CharCount(safeText);
+    const int n = utf8CharCount(body);
     for (size_t i = 0; i < NUM_NOTIFY_FONT_SETTINGS; i++) {
         if (n <= NOTIFY_FONT_SETTINGS[i].maxChars) {
             font = NOTIFY_FONT_SETTINGS[i].font;
@@ -527,22 +531,14 @@ static void drawEpaperNotification(const char* text) {
     logPrint("NOTIFY", "Drawing: UTF8 chars=%d, scale=%dx", n, scale);
 
     DRAW_PAGED({
-        if (safeText[0] != '\0') {
-            int16_t textY = 0;
-            if (g_notificationApp[0] != '\0') {
-                // 通知元アプリ名を16pxで先頭行に(v0.4.3・従来はログ専用)
-                setFont(u8g2_font_b16_t_japanese3);
-                u8g2Fonts.setCursor(0, 16);
-                u8g2Fonts.print(g_notificationApp);
-                textY = 24;
-            }
+        if (body[0] != '\0') {
             if (scale > 1) {
                 ScaledGFX scaledGfx(g_epaper, scale);
                 u8g2Fonts.begin(scaledGfx);
-                drawWrappedText(0, textY / scale, safeText, font, EP_W / scale);
+                drawWrappedText(0, 0, body, font, EP_W / scale);
                 u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
             } else {
-                drawWrappedText(0, textY, safeText, font, EP_W);
+                drawWrappedText(0, 0, body, font, EP_W);
             }
         } else {
             drawCenteredText("通知なし", 76, 2);
@@ -629,6 +625,14 @@ static void drawEpaperDetail() {
         y += lh + 4;
 
         snprintf(buf, sizeof(buf), "電池 %.2fV", (double)volts);
+        u8g2Fonts.setCursor(x, y);
+        u8g2Fonts.print(buf);
+        y += lh;
+
+        // v0.4.11: 運用統計(誤起動=BT未接続のままスタンバイに入った累積回数
+        // ・フラッシュ永続化 / D0短絡=今回セッション中のBT接続中連続導通回数)
+        snprintf(buf, sizeof(buf), "誤起動%lu回 短絡%lu回",
+                 (unsigned long)g_falseWakeCount, (unsigned long)g_d0ShortCount);
         u8g2Fonts.setCursor(x, y);
         u8g2Fonts.print(buf);
 
@@ -737,26 +741,45 @@ static void drawEpaperSplash() {
 // ====================================================================
 
 void setupEpaper() {
+    // --- ePaper電源ON(v0.4.10・TPS22810 EN=HIGH) ---
+    // SPI/ePaper初期化より先に電源を入れる。電源のないモジュールへのSPI通信は
+    // BUSY不定で誤動作するため順序は厳守(cycleclock_diag 2026-10-06 の教訓)
+    pinMode(EPD_POWER_GPIO, OUTPUT);
+    digitalWrite(EPD_POWER_GPIO, HIGH);
+    delay(EPD_POWER_STABLE_MS);
+
     // SPIピンをユーザー指定の物理配線へ割当(nRF52840はPSELで任意GPIO可)。
     // setPins は begin() より前に呼ぶこと(beginが保持ピンで初期化する)。
-    // MISOはePaperが未使用だがAPI上必要なため空きピンD1をダミー割当。
-    SPI.setPins(EPD_SPI_MISO_GPIO, EPD_SPI_SCK_GPIO, EPD_SPI_MOSI_GPIO);
+    // MISOはePaperが未使用。D1(EPD_POWER_GPIO)をPSEL上のMISOに指定したまま
+    // begin後にGPIO出力で上書きする(SPIMの送信のみで受信は使わない・diag実績)
+    SPI.setPins(EPD_POWER_GPIO, EPD_SPI_SCK_GPIO, EPD_SPI_MOSI_GPIO);
     SPI.begin();
-    // ダミーMISOピンの浮き入力を確定させる(System OFF時の入力バッファ漏れ対策)
-    pinMode(EPD_SPI_MISO_GPIO, INPUT_PULLDOWN);
+    pinMode(EPD_POWER_GPIO, OUTPUT);       // SPI.beginの構成をGPIO出力で上書き
+    digitalWrite(EPD_POWER_GPIO, HIGH);    // ePaper給電を維持
     // init: 第1引数を0にしてライブラリ内部の Serial 出力を停止
     g_epaper.init(0, true, 2, false);
     g_epaper.setRotation(1);  // 横長 250x122（v0.4.5: 旧rotation=3から180度回転）
 
     u8g2Fonts.begin(g_epaper);
 
-    logPrint("EPAPER", "Init OK (CS=%d DC=%d RST=%d BUSY=%d, SCK=%d MOSI=%d)",
+    logPrint("EPAPER", "Init OK (CS=%d DC=%d RST=%d BUSY=%d, SCK=%d MOSI=%d) power=TPS22810@D%d",
              EPD_CS_GPIO, EPD_DC_GPIO, EPD_RST_GPIO, EPD_BUSY_GPIO,
-             EPD_SPI_SCK_GPIO, EPD_SPI_MOSI_GPIO);
+             EPD_SPI_SCK_GPIO, EPD_SPI_MOSI_GPIO, EPD_POWER_GPIO);
 
     s_epaperReady = true;
 
     drawEpaperSplash();
+}
+
+// --- パネルをdeep sleepへ(v0.4.10) ---
+// フル更新後のパネルはpower off止まりで、deep sleep(0x10)は hibernate() の
+// 呼び出し時だけ送られる(GxEPD2_213_B74::hibernate())。System OFF前の
+// リーク対策の第一段。次回の描画は GxEPD2 が _hibernating フラグで
+// reset→再initして復帰する(起床=コールドスタートで setupEpaper() が走る)
+void epaperHibernate() {
+    if (!s_epaperReady) return;
+    g_epaper.hibernate();
+    logPrint("EPAPER", "Panel deep sleep (hibernate)");
 }
 
 // loop から毎回呼ばれる。表示すべき内容が変わった時だけ描画。

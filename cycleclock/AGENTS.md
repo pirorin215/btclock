@@ -44,3 +44,25 @@
 - **電源**: 18650 を XIAO 裏面 BAT+/BAT- パッド直結（オンボード充電器・USB書込中も併用可）
 - **表示**: WeAct 2.13" ePaper (SSD1680, GxEPD2_213_B74)
 - **ライブラリ**: GxEPD2 1.6.9 / U8g2_for_Adafruit_GFX 1.8.0（~/dev/Arduino/libraries/）＋ Seeeduino nRF52 1.1.13 同梱の Bluefruit52Lib
+
+## ePaper 電源スイッチ TPS22810（v0.4.10・ハード構成）
+
+System OFF 中の ePaper モジュール基板リーク（実測 0.5mA）を断つため、
+ePaper の VCC を TPS22810 ロードスイッチ（部品台帳 seed048）で GPIO 制御する。
+**ハード未実装の機体では v0.4.10 は従来どおり動くが電流改善はない（D1 は旧 MISO
+ダミーで物理未接続のため衝突もしない）。** 経緯と実測値は `../cycleclock_diag/AGENTS.md`。
+
+```
+XIAO 3V3 ────── [1]VIN  TPS22810  VOUT[6] ────── ePaper VCC
+GND ─────────── [2]GND              CT[4] ── 開放
+XIAO D1 ─────── [3]EN               QOD[5] ── VOUT[6]へ直結
+                  │
+                  └── 100kΩ ── GND
+```
+
+- SOT-23-6・ピン1は端面の窪み側・左列上から 1,2,3 / 右列上から 6,5,4
+- ファーム側: `EPD_POWER_GPIO=D1`（cycleclock.h）。setupEpaper() が EN=HIGH→
+  100ms 安定待ち→SPI 開始（MISO の PSEL に D1 を渡したまま begin 後 GPIO 出力で
+  上書き・実績パターン）。enterSystemOff() が hibernate→信号6本 Hi-Z→EN を
+  INPUT（100kΩプルダウンで OFF 自己保持）
+- 実測: System OFF 電流 0.5mA（v0.4.9）→ 11µA（diag 検証・新品 XIAO 裸と同等）
