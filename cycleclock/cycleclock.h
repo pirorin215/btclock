@@ -40,7 +40,7 @@
 // --- Firmware Version Information ---
 #define FIRMWARE_VERSION_MAJOR 0
 #define FIRMWARE_VERSION_MINOR 4
-#define FIRMWARE_VERSION_PATCH 19
+#define FIRMWARE_VERSION_PATCH 23
 
 // --- GPIO Pin Definitions (XIAO BLE) ---
 // ePaper: WeAct 2.13" (SSD1680)
@@ -125,6 +125,8 @@
 // 乗車イベント(振動)でも時計へ戻る二重の自己修復付き。
 // 通知・低電圧の自動ビューはモード表示に優先しない(bikeclock_esp32では通知が
 // 一時オーバーライドだが、cycleclockは通知もFUNCモード化して統一)。
+// v0.4.20: 通知ビュー(モード2・時計への新着自動上書き)表示中はFUNCクリックが
+// ページ送りに割当てられる(詳細はprocessFuncKey/notifyPageAdvance)。
 enum DisplayMode {
     DISPLAY_MODE_TIME,         // モード1: 時計
     DISPLAY_MODE_NOTIFICATION, // モード2: 通知(最終受信・手動選択可)
@@ -149,7 +151,15 @@ extern volatile uint32_t g_notificationSeq;  // 通知受信連番(手動通知�
 // --- Notification (bikeclock_esp32 Phase 10 から移植) ---
 #define NOTIFICATION_DISPLAY_TIMEOUT_MS 30000UL  // 通知表示時間(bikeclock_esp32と同一)
 #define NOTIFY_APP_LEN   33    // アプリ名上限 32B + null(ログ+本文空時の代替表示)
-#define NOTIFY_TEXT_LEN  201   // 通知本文上限 200B + null
+#define NOTIFY_TEXT_LEN  513   // 通知本文上限 512B + null(v0.4.23: 分割転送で200B→512Bへ拡大)
+#define NOTIFY_CHUNK_MAX 8     // 分割転送の最大チャンク数(NOTIFY:app=X/N の N)
+
+// 通知ビューのページ送り結果(v0.4.20・FUNCクリックの割当て用)
+enum NotifyPageResult {
+    NOTIFY_PAGE_ADVANCED,   // 次ページへ進んだ(再描画・表示タイマー延長済み)
+    NOTIFY_PAGE_LAST,       // 最終ページだった(進めない→呼び出し側で通常動作へ合流)
+    NOTIFY_PAGE_SINGLE      // 1ページに収まる通知(ページ送り不要→従来のモード順送り)
+};
 
 // --- BLE UUIDs (bikeclock / bikeclock_esp32 と共通・アプリ互換) ---
 #define BLE_SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914c"
@@ -215,6 +225,8 @@ void handleTimeSync(const char* command);
 void handleGetVersion();
 void handleGetBattery();
 void handleNotify(const char* command);
+void handleNotifyAdd(const char* command);
+void handleGetFeatures();
 void sendResponse(const char* message);
 
 // cycleclock_epaper.ino
@@ -223,6 +235,8 @@ void updateEpaperDisplay();
 void drawEpaperSleep();
 bool epaperIdle();
 void epaperHibernate();   // v0.4.10: パネルdeep sleep(System OFF前のリーク対策)
+NotifyPageResult notifyPageAdvance();  // v0.4.20: 通知ビューの次ページへ(FUNCクリック)
+void notifyDismiss();                  // v0.4.20: 通知の自動上書きを閉じる(読了)
 
 // cycleclock_power.ino
 void enterSystemOff();

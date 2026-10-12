@@ -148,6 +148,58 @@ class BleDeviceManager(
     }
 
     /**
+     * 通知分割転送の対応probe（cycleclock v0.4.23以降・旧ファームはERRORを返す）
+     *
+     * @return 受信バッファ上限(バイト)、非対応・失敗時はnull
+     */
+    suspend fun getNotifyChunkMax(connectionState: ConnectionState): Int? {
+        if (connectionState !is ConnectionState.Connected) {
+            return null
+        }
+
+        return bleMutex.withLock {
+            if (_currentOperation.value != BleOperation.IDLE) {
+                logManager.addDebugLog("機能probeをスキップ: ${_currentOperation.value} 実行中")
+                return@withLock null
+            }
+
+            try {
+                _currentOperation.value = BleOperation.FETCHING_FEATURES
+                rawResponseBuffer.reset()
+                val completion = CompletableDeferred<Pair<Boolean, String?>>()
+                currentCommandCompletion = completion
+
+                sendCommand(BleConstants.CMD_GET_FEATURES)
+
+                val (success, response) = withTimeoutOrNull(BleTimeoutConstants.TIME_SYNC_TIMEOUT_MS) {
+                    completion.await()
+                } ?: Pair(false, "タイムアウト")
+
+                if (!success) {
+                    // 旧ファーム(bikeclock/bikeclock_esp32)はERROR: Unknown commandを返す
+                    logManager.addDebugLog("機能probe失敗(旧ファームの可能性): ${response?.take(48)}")
+                    null
+                } else {
+                    val bytes = Regex("OK:features:notifychunk:(\\d+)")
+                        .find(response ?: "")?.groupValues?.get(1)?.toIntOrNull()
+                    if (bytes == null) {
+                        logManager.addDebugLog("機能probe応答の解析に失敗: ${response?.take(48)}")
+                    } else {
+                        logManager.addDebugLog("通知分割転送対応: ${bytes}B")
+                    }
+                    bytes
+                }
+            } catch (e: Exception) {
+                logManager.addDebugLog("機能probe中にエラー: ${e.message}")
+                null
+            } finally {
+                _currentOperation.value = BleOperation.IDLE
+                currentCommandCompletion = null
+            }
+        }
+    }
+
+    /**
      * 定期時刻同期ジョブを開始する
      * 1分ごとにベストエフォートで時刻同期を行う
      */
@@ -211,6 +263,16 @@ class BleDeviceManager(
             BleOperation.FETCHING_BATTERY -> {
                 val response = rawResponseBuffer.toUtf8String()
                 if (response.startsWith(BleConstants.RESPONSE_OK_BATTERY)) {
+                    currentCommandCompletion?.complete(Pair(true, response))
+                    rawResponseBuffer.reset()
+                } else if (response.startsWith(BleConstants.RESPONSE_ERROR + BleConstants.COMMAND_SEPARATOR)) {
+                    currentCommandCompletion?.complete(Pair(false, response))
+                    rawResponseBuffer.reset()
+                }
+            }
+            BleOperation.FETCHING_FEATURES -> {
+                val response = rawResponseBuffer.toUtf8String()
+                if (response.startsWith(BleConstants.RESPONSE_OK_FEATURES)) {
                     currentCommandCompletion?.complete(Pair(true, response))
                     rawResponseBuffer.reset()
                 } else if (response.startsWith(BleConstants.RESPONSE_ERROR + BleConstants.COMMAND_SEPARATOR)) {

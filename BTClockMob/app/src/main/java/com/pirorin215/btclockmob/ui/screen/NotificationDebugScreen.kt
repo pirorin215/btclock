@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pirorin215.btclockmob.data.ConnectionState
+import com.pirorin215.btclockmob.data.NotificationSplitter
 import com.pirorin215.btclockmob.viewModel.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,9 +49,11 @@ fun NotificationDebugScreen(
             .joinToString(" ")
     }
 
-    val maxBytes = 180
+    // 分割転送の受信上限(0=非対応→従来の単一Write上限180B)
+    val chunkMax by mainViewModel.notifyChunkMaxBytes.collectAsState()
+    val maxBytes = if (chunkMax > 0) chunkMax else 180
     val maxChars = maxCharsSetting
-    val truncatedText = remember(combinedText, maxChars) {
+    val truncatedText = remember(combinedText, maxChars, maxBytes) {
         // 1) 文字数制限と「続きあり」記号の付与
         val limitedText = if (combinedText.length > maxChars) {
             combinedText.take(maxChars - 1) + "＞"
@@ -61,12 +64,12 @@ fun NotificationDebugScreen(
         truncateUtf8(limitedText, maxBytes)
     }
 
-    val previewCommand = remember(appName, truncatedText) {
-        "NOTIFY:app=$appName\n$truncatedText"
+    val frames = remember(appName, truncatedText, chunkMax) {
+        NotificationSplitter.buildFrames(appName, truncatedText, chunkMax)
     }
 
-    val commandBytesSize = remember(previewCommand) {
-        previewCommand.toByteArray(Charsets.UTF_8).size
+    val commandBytesSize = remember(frames) {
+        frames.sumOf { it.toByteArray(Charsets.UTF_8).size }
     }
 
     // 接続状態
@@ -258,7 +261,7 @@ fun NotificationDebugScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = previewCommand,
+                        text = frames.joinToString("\n"),
                         style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -302,8 +305,10 @@ fun NotificationDebugScreen(
                         return@Button
                     }
                     try {
-                        mainViewModel.sendCommand(previewCommand)
-                        Toast.makeText(context, "通知コマンドを送信しました", Toast.LENGTH_SHORT).show()
+                        for (frame in frames) {
+                            mainViewModel.sendCommand(frame)
+                        }
+                        Toast.makeText(context, "通知コマンドを送信しました (${frames.size} frame)", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         Toast.makeText(context, "送信失敗: ${e.message}", Toast.LENGTH_SHORT).show()
                     }

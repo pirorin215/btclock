@@ -145,13 +145,19 @@ void logPrint(const char* tag, const char* format, ...) {
 }
 
 // --- FUNCキー処理(v0.3.9・専用GPIO=D2) ---
-// 50ms安定ではじめて変化を確定させ、解放エッジ(クリック確定)でモードを順送り。
+// 50ms安定ではじめて変化を確定させ、解放エッジ(クリック確定)で動作を決める。
 // 押下開始エッジでは何もしない。(v0.4.15からD0のソフト検出は廃止。
 // 振動センサーはSystem OFF復帰のDETECT専用)
 // D0(振動)と分離済みのため走行中の振動で誤発動しない。長押しは未使用
 // (bikeclockのメンテナンスメニューモードへの拡張余地)。
 // v0.4.1: D2もSystem OFFからのウェイクピンのため、FUNC押下で起床した直後の
 // releaseはモード切替としない(起こすための押下と切替操作を分離する)。
+// v0.4.20: 通知ビュー(モード2・時計への新着自動上書き)表示中はクリックを
+// ページ送りに割当てる。複数ページの間は次ページを送り、最終ページに達したら
+// 通常動作へ合流する:
+//   - モード2(手動)          → そのままモード順送り(→モード3)
+//   - 時計への自動上書き表示 → 通知を閉じて時計へ戻す(読了の合図)
+// 1ページに収まる通知はページ送りが働かず、従来どおりのモード順送りになる。
 static bool s_fkStable = HIGH;               // デバウス確定後の安定値(プルアップ・HIGH=未押下)
 static bool s_fkLastReading = HIGH;          // 前回の生読み取り値
 static unsigned long s_fkLastChangeMs = 0;   // 最後に読み取りが変化した時刻
@@ -174,6 +180,26 @@ void processFuncKey() {
         logPrint("FUNC", "Wake release ignored");
         return;
     }
+
+    // 通知ビュー表示中はクリック=ページ送り(v0.4.20)
+    const bool notifyView =
+        g_displayMode == DISPLAY_MODE_NOTIFICATION ||
+        (g_displayMode == DISPLAY_MODE_TIME && g_notificationActive);
+    if (notifyView) {
+        switch (notifyPageAdvance()) {
+            case NOTIFY_PAGE_ADVANCED:
+                return;   // 次ページの描画・タイマー延長はnotifyPageAdvance内で完了
+            case NOTIFY_PAGE_LAST:
+                if (g_displayMode == DISPLAY_MODE_TIME) {
+                    notifyDismiss();   // 読了: 自動上書きを閉じて時計へ
+                    return;
+                }
+                break;   // モード2: 下のモード順送りへ
+            case NOTIFY_PAGE_SINGLE:
+                break;   // 1ページ通知: 従来どおりモード順送りへ
+        }
+    }
+
     // 離した(クリック確定)でモードを順送り
     g_displayMode = (DisplayMode)((g_displayMode + 1) % DISPLAY_MODE_COUNT);
     g_lastModeChangeMillis = g_currentMillis;

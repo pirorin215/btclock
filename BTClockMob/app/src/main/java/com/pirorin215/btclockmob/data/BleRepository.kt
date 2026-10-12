@@ -93,6 +93,17 @@ class BleRepository(private val context: Context) {
     private val _deviceVersion = MutableStateFlow<String?>(null)
     val deviceVersion = _deviceVersion.asStateFlow()
 
+    /**
+     * 通知分割転送の受信バッファ上限(バイト)。0=非対応(旧ファーム)で
+     * 通知は従来どおり単一Write(180B上限)で送る。
+     * BleOrchestrator が接続毎の GET:features probe 結果を書き込む。
+     */
+    private val _notifyChunkMaxBytes = MutableStateFlow(0)
+    val notifyChunkMaxBytes = _notifyChunkMaxBytes.asStateFlow()
+    fun setNotifyChunkMax(bytes: Int) {
+        _notifyChunkMaxBytes.value = bytes
+    }
+
     // For write callback synchronization
     private var pendingWriteResult: kotlinx.coroutines.CompletableDeferred<Boolean>? = null
 

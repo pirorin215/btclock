@@ -54,6 +54,9 @@ class MainViewModel(
     val navigationEvent: SharedFlow<NavigationEvent> = bleOrchestrator.navigationEvent
     val currentForegroundLocation = locationMonitor.currentForegroundLocation
 
+    /** 通知分割転送の受信バッファ上限(0=非対応)・デバッグ画面の表示/送信に使用 */
+    val notifyChunkMaxBytes: StateFlow<Int> get() = bleOrchestrator.notifyChunkMaxBytes
+
     // --- Methods delegated to orchestrator and managers ---
     fun sendCommand(command: String) = bleOrchestrator.sendCommand(command)
     fun clearLogs() = logManager.clearLogs()

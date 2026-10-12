@@ -61,6 +61,10 @@ class BleOrchestrator(
     internal val _currentOperation = MutableStateFlow(BleOperation.IDLE)
     val currentOperation = _currentOperation.asStateFlow()
 
+    /** 通知分割転送の受信バッファ上限(0=非対応)。BleRepository の状態を中継する */
+    val notifyChunkMaxBytes: StateFlow<Int>
+        get() = repository.notifyChunkMaxBytes
+
     /**
      * Primary mutex for all BLE operations
      *
@@ -191,6 +195,10 @@ class BleOrchestrator(
 
             // 接続直後にバッテリー電圧を取得・記録（旧ファームはnullで無視）
             fetchAndStoreBattery()
+
+            // 通知分割転送の対応probe（非対応機は0=従来の単一Writeのまま）
+            val chunkMax = bleDeviceManager.getNotifyChunkMax(connectionStateFlow.value)
+            repository.setNotifyChunkMax(chunkMax ?: 0)
         }
     }
 
@@ -284,6 +292,9 @@ class BleOrchestrator(
                         bleDeviceManager.handleResponse(value, _currentOperation.value)
                     }
                     BleOperation.FETCHING_BATTERY -> {
+                        bleDeviceManager.handleResponse(value, _currentOperation.value)
+                    }
+                    BleOperation.FETCHING_FEATURES -> {
                         bleDeviceManager.handleResponse(value, _currentOperation.value)
                     }
                     else -> {

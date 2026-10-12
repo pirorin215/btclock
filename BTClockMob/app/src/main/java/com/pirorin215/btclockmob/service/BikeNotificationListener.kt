@@ -7,6 +7,7 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.BleRepository
+import com.pirorin215.btclockmob.data.NotificationSplitter
 import com.pirorin215.btclockmob.data.Settings
 import com.pirorin215.btclockmob.viewModel.LogManager
 import kotlinx.coroutines.CoroutineScope
@@ -25,8 +26,11 @@ import org.koin.core.component.inject
  * MainApplication.onCreate (startKoin) の後に起動する。Koin のシングルトン (BleRepository 等) を
  * ViewModel/Screen と同じプロセス・同じインスタンスで共有する。
  *
- * プロトコル: "NOTIFY:app=<アプリ名>\n<本文>"（UTF-8、上限200B、応答なし）。
- * マイコン側 (Phase 10) が受信して ePaper に30秒間表示する。
+ * プロトコル: "NOTIFY:app=<アプリ名>\n<本文>"（UTF-8、応答なし）。
+ * cycleclock v0.4.23+ とは GET:features probe が成立した場合のみ分割転送
+ * (NOTIFY:app=X/<総数> + NOTIFYADD:) を行い、長文をMTU制限越えで届ける。
+ * 非対応機(bikeclock/bikeclock_esp32/旧cycleclock)は従来の単一Write・180B上限。
+ * マイコン側が受信して ePaper に30秒間表示する。
  */
 class BikeNotificationListener : NotificationListenerService(), KoinComponent {
 
@@ -92,7 +96,11 @@ class BikeNotificationListener : NotificationListenerService(), KoinComponent {
                 }
 
                 // 2) バイト数制限での最終切り詰め
-                val truncated = truncateUtf8(limitedText, MAX_BODY_BYTES)
+                //    分割転送対応機(cycleclock v0.4.23+)はファームバッファ上限、
+                //    非対応機は従来の単一Write上限(MAX_BODY_BYTES=180B)
+                val chunkMax = bleRepository.notifyChunkMaxBytes.first()
+                val maxBytes = if (chunkMax > 0) chunkMax else MAX_BODY_BYTES
+                val truncated = truncateUtf8(limitedText, maxBytes)
 
                 // デバウンス: 同一通知で同一本文かつ窓内は送信しない
                 val key = sbn.key ?: sbn.packageName
@@ -107,9 +115,17 @@ class BikeNotificationListener : NotificationListenerService(), KoinComponent {
                     lastSentTime[key] = now
                 }
 
-                val command = "NOTIFY:app=${sbn.packageName}\n$truncated"
-                logManager.addDebugLog("通知転送: ${sbn.packageName} / ${truncated.take(40)}")
-                bleRepository.sendCommandSerial(command)
+                // 3) 送信(分割対応機はMTU単位にフレーム分割・非対応は単一フレーム)
+                val frames = NotificationSplitter.buildFrames(sbn.packageName, truncated, chunkMax)
+                logManager.addDebugLog(
+                    "通知転送: ${sbn.packageName} / ${frames.size} frame(s) / ${truncated.take(40)}"
+                )
+                for ((idx, frame) in frames.withIndex()) {
+                    if (!bleRepository.sendCommandSerial(frame)) {
+                        logManager.addDebugLog("通知転送失敗 (frame ${idx + 1}/${frames.size})")
+                        return@launch
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "onNotificationPosted error", e)

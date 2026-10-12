@@ -220,7 +220,7 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
             Slider(
                 value = selectedNotifMaxChars,
                 onValueChange = { selectedNotifMaxChars = it },
-                valueRange = 10f..100f,
+                valueRange = 10f..160f,
                 steps = 90,
                 enabled = notifFwdChecked
             )

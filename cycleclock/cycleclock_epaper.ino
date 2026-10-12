@@ -19,6 +19,16 @@
  * - v0.4.5: ePaper表示を180度回転(setRotation 3→1・取付向きに合わせる)
  * - v0.4.6: 日付数字をlogisoso38→46へ拡大。「日」は12pxに縮小し右端
  *   (縦線手前)・ベースライン下端に固定配置(2桁日でも数字と重ならない)
+ * - v0.4.20: 通知ビューのページ送り(FUNCクリック)。長文は自動折返しを行単位で
+ *   ページ分割し、複数ページ時は下端に「n/m」帯を確保して表示。複数ページの
+ *   間はFUNCで送り、最終ページで通常動作へ合流(モード2=モード順送り/時計への
+ *   自動上書き=通知を閉じる)。時計への自動上書きも新着受信(seq)で再描画
+ * - v0.4.21: 通知ビューへの再入(モード2再選択・時計上書きの再表示)では
+ *   前回の読書位置を捨てて先頭ページから描く
+ * - v0.4.22: v0.4.21の再入判定を ep_drawnMode から専用フラグ ep_notifyOnScreen へ
+ *   変更。ep_drawnMode は時計上書き表示中もTIMEモード入口で毎パス TIME に
+ *   戻されるため、自動上書き中のFUNCページ送りが毎回1ページ目に戻る regression
+ *   を修正(モード2では発生しないことを実機ログで確認済み)
  *
  * 表示レイアウト（250x122 横長, rotation=1）:
  *
@@ -57,16 +67,22 @@ static bool   ep_showingUnsynced = false;
 static bool   ep_showingNotification = false;
 static bool   ep_showingLowBatt = false;
 static int8_t ep_drawnMode = -1;        // 描画済みのDisplayMode(-1=未描画・MODE復帰判定用)
-static uint32_t ep_drawnNotifySeq = 0;  // 通知モードで描いた通知の受信連番
+static uint32_t ep_drawnNotifySeq = 0;  // 直近で描いた通知の受信連番(モード2/自動上書き共用)
+static uint8_t ep_notifyPage = 0;       // 通知ビューの現在ページ(0-based・描画時に範囲CLAMP)
+static uint8_t ep_notifyPageCount = 1;  // 直近描画の総ページ数(notifyPageAdvanceの判定用)
+static bool ep_notifyOnScreen = false;  // 通知ビューが現在画面に出ているか(再入判定用)
 
 // 「次の描画を強制する」ための画面キャッシュ無効化。ビュー遷移・通知タイムアウト・
 // 低電圧発報のいずれでも、直前の画面種別に関わらず再描画させる。
+// 通知ビューの「画面に出ている」状態もここで解除する(タイムアウト・読了は
+// いずれもこの関数経由で下位ビューへ遷移する)
 static void invalidateViewCache() {
     ep_lastHr = -1;
     ep_lastMin = -1;
     ep_lastDay = -1;
     ep_showingUnsynced = false;
     ep_showingLowBatt = false;
+    ep_notifyOnScreen = false;
 }
 
 // === 画面ジオメトリ（rotation=1 で 250x122 横長） ===
@@ -333,14 +349,22 @@ static int utf8CharCount(const char* text) {
     return count;
 }
 
-// 日本語自動折返し描画（通知表示用）。UTF-8 を1文字ずつ描画し、maxWidth を超えると改行。
-static void drawWrappedText(int16_t x, int16_t y, const char* text,
-                            const uint8_t* font, int16_t maxWidth) {
+// 日本語自動折返しのページ送り(v0.4.20)。長文通知は折返し後の行単位でページ分割し、
+// FUNCクリックで送る。複数ページ時は下端に「n/m」の帯を確保し、帯と本文の重なりを
+// 防ぐため帯分を行数計算から予約する(単一ページでは全高を使う=表示は旧実装と同一)。
+#define NOTIFY_MAX_LINES  32   // 行境界表の上限(200B全文の最長構成でも~20行のため余裕)
+static const int16_t NOTIFY_BADGE_H = 14;   // ページ番号帯の高さ(10pxフォント+上下余白)
+
+// UTF-8 テキストの自動折返しを行境界(各行の開始バイトオフセット)へ変換し行数を返す。
+// 折返し規則は旧drawWrappedTextと同一(1文字ずつ測定し、maxWidthを超えると改行)。
+// 不正バイトは読み飛ばし。NOTIFY_MAX_LINES を超えた行は頁分割対象外(描画もされない)。
+static int wrapTextLines(const char* text, const uint8_t* font, int16_t maxWidth,
+                         uint16_t* breaks, int maxLines) {
     setFont(font);
 
-    int16_t cursorX = x;
-    int16_t lineHeight = u8g2Fonts.getFontAscent() - u8g2Fonts.getFontDescent() + 6;
-    int16_t cursorY = y + u8g2Fonts.getFontAscent() + 4;
+    int lines = 1;
+    int16_t cursorX = 0;
+    breaks[0] = 0;
 
     const char* p = text;
     while (*p) {
@@ -351,15 +375,69 @@ static void drawWrappedText(int16_t x, int16_t y, const char* text,
         strncpy(buf, p, len);
         int16_t charWidth = u8g2Fonts.getUTF8Width(buf);
 
-        if (cursorX + charWidth > x + maxWidth) {
-            cursorX = x;
-            cursorY += lineHeight;
+        if (cursorX + charWidth > maxWidth) {
+            lines++;
+            if (lines > maxLines) return maxLines;   // 表あふれ(実運用では発生しない)
+            breaks[lines - 1] = (uint16_t)(p - text);
+            cursorX = 0;
         }
-        u8g2Fonts.setCursor(cursorX, cursorY);
-        u8g2Fonts.print(buf);
         cursorX += charWidth;
         p += len;
     }
+    return lines;
+}
+
+// 1ページに収まる行数。上端y=0・行間lineHで並べ、「ベースライン+ディセンダ」が
+// 表示範囲下端(reserveBadge=trueなら帯分を差引く)に収まる行を数える。行間・上端
+// マージンの式は旧drawWrappedText/下のdrawTextLinesと同一に保つ。
+static int notifyLinesPerPage(const uint8_t* font, int16_t scale, bool reserveBadge) {
+    setFont(font);
+    const int16_t ascent = u8g2Fonts.getFontAscent();
+    const int16_t descent = u8g2Fonts.getFontDescent();   // 負値
+    const int16_t lineH = ascent - descent + 6;
+    const int16_t y0 = ascent + 4;
+    const int16_t bottom = (EP_H - (reserveBadge ? NOTIFY_BADGE_H : 0)) / scale;
+
+    int n = 0;
+    for (int16_t y = y0; y - descent <= bottom; y += lineH) n++;
+    return n > 0 ? n : 1;
+}
+
+// wrapTextLines の行境界に従い [lineFrom, lineTo) の行を描画(原点x=0,y=0)。
+// u8g2の描画先は呼び出し側でバインド済み(scale>1はScaledGFX・座標は仮想座標)。
+static void drawTextLines(const char* text, const uint16_t* breaks, int totalLines,
+                          int lineFrom, int lineTo, const uint8_t* font) {
+    setFont(font);
+    const int16_t lineH = u8g2Fonts.getFontAscent() - u8g2Fonts.getFontDescent() + 6;
+    const int16_t y0 = u8g2Fonts.getFontAscent() + 4;
+
+    for (int i = lineFrom; i < lineTo; i++) {
+        const int16_t cursorY = y0 + (i - lineFrom) * lineH;
+        int16_t cursorX = 0;
+        const char* p = text + breaks[i];
+        const char* end = (i + 1 < totalLines) ? text + breaks[i + 1]
+                                               : text + strlen(text);
+        while (p < end) {
+            uint8_t len = utf8Len(p);
+            if (!len) { p++; continue; }
+            char buf[5] = {0};
+            strncpy(buf, p, len);
+            u8g2Fonts.setCursor(cursorX, cursorY);
+            u8g2Fonts.print(buf);
+            cursorX += u8g2Fonts.getUTF8Width(buf);
+            p += len;
+        }
+    }
+}
+
+// ページ番号(例 "2/3")を右下の帯に描く。複数ページ時のみ呼ぶ。
+static void drawNotifyBadge(int page, int pageCount) {
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d/%d", page, pageCount);
+    setFont(u8g2_font_b10_t_japanese2);
+    const int16_t w = u8g2Fonts.getUTF8Width(buf);
+    u8g2Fonts.setCursor(EP_W - w - 3, EP_H - 3);
+    u8g2Fonts.print(buf);
 }
 
 // バージョン番号 "ver major.minor.patch" を画面中央に描画。
@@ -503,16 +581,27 @@ static const NotifyFontSetting NOTIFY_FONT_SETTINGS[] = {
 };
 #define NUM_NOTIFY_FONT_SETTINGS (sizeof(NOTIFY_FONT_SETTINGS) / sizeof(NOTIFY_FONT_SETTINGS[0]))
 
-// 通知表示: 本文テキストを全画面に自動折返し描画。
-// 文字数に応じてフォントサイズを段階切替（NOTIFY_FONT_SETTINGS）。
+// 通知表示(v0.4.20: ページ送り対応)。本文テキストを自動折返しの行単位でページ分割し、
+// 現在ページ(ep_notifyPage)のみを描画。複数ページ時は右下に「n/m」帯を出す。
+// フォントの段階切替(NOTIFY_FONT_SETTINGS)は全文の文字数に対して行う。
 // アプリ名の常設先頭行は廃止(v0.4.11・本文エリア圧迫で4行目が切れるため)。
 // 本文が空の時だけアプリ名を代わりに表示し、両方空なら「通知なし」。
+// 新着受信(g_notificationSeq進行)時と、他ビューからの再入時は
+// 読書位置を先頭ページへ戻す。
 // ※ BLEコールバックとページループが競合しないよう、ページループ前にローカルコピーを
 //    取り、ループ内ではそのコピーを使う(paged update は各ページで再描画するため)。
 static void drawEpaperNotification(const char* text) {
     static char safeText[NOTIFY_TEXT_LEN];
     strncpy(safeText, text, NOTIFY_TEXT_LEN - 1);
     safeText[NOTIFY_TEXT_LEN - 1] = '\0';
+
+    if (ep_drawnNotifySeq != g_notificationSeq) {
+        ep_notifyPage = 0;   // 新着: 先頭ページから
+        ep_drawnNotifySeq = g_notificationSeq;
+    } else if (!ep_notifyOnScreen) {
+        ep_notifyPage = 0;   // 通知ビューへの再入: 前回の読書位置は引きずらない
+    }
+    ep_notifyOnScreen = true;
 
     const char* body = (safeText[0] != '\0') ? safeText : g_notificationApp;
 
@@ -528,17 +617,41 @@ static void drawEpaperNotification(const char* text) {
         }
     }
 
-    logPrint("NOTIFY", "Drawing: UTF8 chars=%d, scale=%dx", n, scale);
+    // 全文の折返しを行境界へ変換しページ数を確定。複数ページなら帯分を差引いた
+    // 行数で組み直す(帯と本文の重なり防止・単一ページは全高のまま)
+    uint16_t breaks[NOTIFY_MAX_LINES];
+    const int totalLines = wrapTextLines(body, font, EP_W / scale, breaks, NOTIFY_MAX_LINES);
+
+    int linesPerPage = notifyLinesPerPage(font, scale, false);
+    int pageCount = (totalLines + linesPerPage - 1) / linesPerPage;
+    if (pageCount > 1) {
+        linesPerPage = notifyLinesPerPage(font, scale, true);
+        pageCount = (totalLines + linesPerPage - 1) / linesPerPage;
+    }
+    if (ep_notifyPage >= pageCount) {
+        ep_notifyPage = pageCount - 1;   // 通知が短くなった等の範囲内CLAMP
+    }
+    ep_notifyPageCount = pageCount;
+
+    int lineFrom = ep_notifyPage * linesPerPage;
+    int lineTo = lineFrom + linesPerPage;
+    if (lineTo > totalLines) lineTo = totalLines;
+
+    logPrint("NOTIFY", "Drawing page %d/%d (UTF8 chars=%d, lines=%d in %d/page, scale=%dx)",
+             ep_notifyPage + 1, pageCount, n, totalLines, linesPerPage, scale);
 
     DRAW_PAGED({
         if (body[0] != '\0') {
             if (scale > 1) {
                 ScaledGFX scaledGfx(g_epaper, scale);
                 u8g2Fonts.begin(scaledGfx);
-                drawWrappedText(0, 0, body, font, EP_W / scale);
+                drawTextLines(body, breaks, totalLines, lineFrom, lineTo, font);
                 u8g2Fonts.begin(g_epaper);   // 描画先を元に戻す
             } else {
-                drawWrappedText(0, 0, body, font, EP_W);
+                drawTextLines(body, breaks, totalLines, lineFrom, lineTo, font);
+            }
+            if (pageCount > 1) {
+                drawNotifyBadge(ep_notifyPage + 1, pageCount);
             }
         } else {
             drawCenteredText("通知なし", 76, 2);
@@ -781,11 +894,36 @@ void epaperHibernate() {
     logPrint("EPAPER", "Panel deep sleep (hibernate)");
 }
 
+// --- 通知ビューのページ送り(v0.4.20・FUNCクリック=processFuncKeyから呼ぶ) ---
+// 表示中の通知が複数ページの間だけ次ページへ進める。進めた場合は再描画と表示
+// タイマーの延長(30秒通知ウィンドウ・モード2の10秒自動復帰)まで行い ADVANCED。
+// 単一ページ/最終ページでは何もせず SINGLE / LAST を返す(呼び出し側で通常動作へ合流)。
+// 呼び出しはloop文脈限定。描画はブロッキング(~2-3s)だがBLEはSoftDevice側で継続する。
+NotifyPageResult notifyPageAdvance() {
+    if (ep_notifyPageCount < 2) return NOTIFY_PAGE_SINGLE;
+    if (ep_notifyPage >= ep_notifyPageCount - 1) return NOTIFY_PAGE_LAST;
+
+    ep_notifyPage++;
+    drawEpaperNotification(g_notificationText);   // seq不変なのでページ位置は保持される
+    g_notificationEndTime = g_currentMillis + NOTIFICATION_DISPLAY_TIMEOUT_MS;  // 読書中に消えない
+    g_lastModeChangeMillis = g_currentMillis;     // モード2の10秒自動復帰も延長
+    return NOTIFY_PAGE_ADVANCED;
+}
+
+// 時計への通知自動上書きを閉じる(FUNCの読了操作・タイムアウト経由と同等だが即時)。
+// 下位ビュー(時計/低電圧/未同期)の強制再描画もタイムアウト経路と同じく行う。
+void notifyDismiss() {
+    g_notificationActive = false;
+    invalidateViewCache();
+    logPrint("NOTIFY", "Dismissed by FUNC key");
+}
+
 // loop から毎回呼ばれる。表示すべき内容が変わった時だけ描画。
 //   - 非TIMEモード → 通知(モード2)/詳細(モード3)/詳細大(モード4)
 //                    (FUNCキーで切替・10秒で自動復帰)
-//   - 通知活性中 → 通知ビューを1回だけ描画。分更新を抑制し、
-//                  タイムアウトで通知を終了して下位ビューへ強制復帰
+//   - 通知活性中 → 通知ビューを描画(表示中の新着はseq進行で再描画・ページ先頭へ)。
+//                  分更新を抑制し、タイムアウトで通知を終了して下位ビューへ強制復帰
+//                  (FUNCクリックのページ送り/読了は notifyPageAdvance/notifyDismiss)
 //   - 低電圧     → 「要充電」ビュー(通知の次を優先・3.6V以上で解除)
 //   - 未同期 → 「時刻未同期」+バージョン固定
 //   - 同期済 → 分/日が変わるか初回に時計を毎分フル更新
@@ -804,6 +942,8 @@ void updateEpaperDisplay() {
     // モード2(通知)は新着受信(g_notificationSeq)で内容を更新する。
     // モード3(詳細)/モード4(詳細大)はスナップショット1回描き。
     if (g_displayMode != DISPLAY_MODE_TIME) {
+        // 詳細/詳細大へ抜けた=通知ビューの「表示中」を解消(再入時の先頭ページ復帰用)
+        if (g_displayMode != DISPLAY_MODE_NOTIFICATION) ep_notifyOnScreen = false;
         const bool stale =
             ep_drawnMode != g_displayMode ||
             (g_displayMode == DISPLAY_MODE_NOTIFICATION &&
@@ -812,7 +952,6 @@ void updateEpaperDisplay() {
             switch (g_displayMode) {
                 case DISPLAY_MODE_NOTIFICATION:
                     drawEpaperNotification(g_notificationText);  // 空テキストは「通知なし」
-                    ep_drawnNotifySeq = g_notificationSeq;
                     logPrint("MODE", "Notification view drawn (seq %lu)",
                              (unsigned long)g_notificationSeq);
                     break;
@@ -844,7 +983,8 @@ void updateEpaperDisplay() {
     }
 
     if (g_notificationActive) {
-        if (!ep_showingNotification) {
+        // 初回 or 表示中への新着(seq進行)で描画。seq進行時は先頭ページへ戻る
+        if (!ep_showingNotification || ep_drawnNotifySeq != g_notificationSeq) {
             drawEpaperNotification(g_notificationText);
             ep_showingNotification = true;
         }

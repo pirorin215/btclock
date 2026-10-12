@@ -56,6 +56,13 @@ object BleConstants {
      */
     const val CMD_GET_BATTERY = "GET:battery"
 
+    /**
+     * デバイス機能probe（cycleclock v0.4.23以降）
+     * レスポンス: OK:features:notifychunk:<最大本文バイト数>
+     * 非対応ファームは ERROR を返す（通知は従来の単一Writeで送る）
+     */
+    const val CMD_GET_FEATURES = "GET:features"
+
     // --- レスポンス定数 ---
     /**
      * 成功レスポンスプレフィックス
@@ -76,6 +83,11 @@ object BleConstants {
      * バッテリー電圧成功レスポンスプレフィックス
      */
     const val RESPONSE_OK_BATTERY = "OK:battery:"
+
+    /**
+     * 機能probe成功レスポンスプレフィックス
+     */
+    const val RESPONSE_OK_FEATURES = "OK:features"
 
     // --- プロトコルフォーマット定数 ---
     /**
