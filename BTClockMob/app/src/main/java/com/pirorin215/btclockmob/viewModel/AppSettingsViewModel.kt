@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.pirorin215.btclockmob.data.AppSettingsRepository
 import com.pirorin215.btclockmob.data.Settings
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -83,6 +84,22 @@ class AppSettingsViewModel(
                 initialValue = Settings.DEFAULT_NOTIFICATION_MAX_CHARS
             )
 
+    /** 乗降ログの diary-loc 書き出し ON/OFF */
+    val rideLogEnabled: StateFlow<Boolean> = appSettingsRepository.getFlow(Settings.RIDE_LOG_ENABLED)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
+    /** 乗降ログの書き出し先 SAF ツリー URI */
+    val rideLogTreeUri: StateFlow<String> = appSettingsRepository.getFlow(Settings.RIDE_LOG_TREE_URI)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = ""
+        )
+
     fun saveThemeMode(themeMode: ThemeMode) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.THEME_MODE, themeMode)
@@ -139,5 +156,25 @@ class AppSettingsViewModel(
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.NOTIFICATION_MAX_CHARS, maxChars)
         }
+    }
+
+    fun saveRideLogEnabled(enable: Boolean) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.RIDE_LOG_ENABLED, enable)
+        }
+    }
+
+    fun saveRideLogTreeUri(uri: String) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.RIDE_LOG_TREE_URI, uri)
+        }
+    }
+
+    /** 乗降ログ: デバイス履歴(位置付き)を過去分として一括書き出す */
+    suspend fun exportRideHistory(): Int {
+        val repository = com.pirorin215.btclockmob.data.DeviceHistoryRepository(application)
+        val entries = repository.deviceHistoryFlow.first()
+        val exporter = com.pirorin215.btclockmob.data.RideLogExporter(application, appSettingsRepository)
+        return exporter.exportHistory(entries)
     }
 }

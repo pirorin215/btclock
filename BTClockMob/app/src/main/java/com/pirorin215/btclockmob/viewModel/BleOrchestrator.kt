@@ -32,6 +32,7 @@ import com.pirorin215.btclockmob.viewModel.LogManager
 import com.pirorin215.btclockmob.LocationTracker
 import com.pirorin215.btclockmob.data.DeviceHistoryRepository
 import com.pirorin215.btclockmob.data.BatteryLogRepository
+import com.pirorin215.btclockmob.data.RideLogExporter
 import com.pirorin215.btclockmob.data.BatteryLogEntry
 import com.pirorin215.btclockmob.bluetooth.constants.BleConstants
 import com.pirorin215.btclockmob.bluetooth.device.BleDeviceManager
@@ -49,7 +50,8 @@ class BleOrchestrator(
     private val disconnectSignal: SharedFlow<Unit>,
     private val locationTracker: LocationTracker,
     private val deviceHistoryRepository: DeviceHistoryRepository,
-    private val batteryLogRepository: BatteryLogRepository
+    private val batteryLogRepository: BatteryLogRepository,
+    private val rideLogExporter: RideLogExporter
 ) {
     companion object {
         const val TAG = "BleOrchestrator"
@@ -214,6 +216,7 @@ class BleOrchestrator(
 
         periodicTimeSyncJob = scope.launch {
             var batteryCounter = 0
+            var syncFailCount = 0
             while (coroutineContext[Job.Key]?.isActive == true) {
                 delay(TimeConstants.TIME_SYNC_INTERVAL_MS) // 1 minute
 
@@ -222,6 +225,7 @@ class BleOrchestrator(
                     addDebugLog("Starting periodic time sync")
                     val success = bleDeviceManager.syncTime(connectionStateFlow.value)
                     if (success) {
+                        syncFailCount = 0
                         // 通信成功＝生存確認。位置をキャッシュしておく
                         locationTracker.getCurrentLocation().onSuccess { data ->
                             lastActiveLocation = android.location.Location("").apply {
@@ -236,7 +240,16 @@ class BleOrchestrator(
                             fetchAndStoreBattery()
                         }
                     } else {
-                        addDebugLog("Periodic time sync failed")
+                        syncFailCount++
+                        addDebugLog("Periodic time sync failed (consecutive: $syncFailCount)")
+                        // 範囲外切断では GATT コールバックが飛ばされ、内部状態だけ
+                        // Connected のままゾンビ化する（disc ログも書かれない）。
+                        // 2回連続失敗(約2分)で実リンク切断と判定して強制切断する。
+                        if (syncFailCount >= TimeConstants.SYNC_FAIL_LIMIT) {
+                            addLog("通信が${TimeConstants.SYNC_FAIL_LIMIT}回連続失敗。リンク切断と判定して再接続します", LogLevel.ERROR)
+                            repository.forceDisconnect()
+                            syncFailCount = 0
+                        }
                     }
                 }
             }
@@ -423,6 +436,9 @@ class BleOrchestrator(
                 addDebugLog("saveConnectionHistory: Adding entry to repository...")
                 deviceHistoryRepository.addEntry(historyEntry)
                 addDebugLog("saveConnectionHistory: Entry added to repository successfully")
+
+                // 日記連携: 乗降イベントを diary-loc へ追記(無効・フォルダ未設定・失敗時は無視)
+                rideLogExporter.appendRide(historyEntry)
 
                 // 最後に保存した位置と時間を更新（定期記録の判定用）
                 if (lat != null && lon != null) {

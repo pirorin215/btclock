@@ -53,6 +53,10 @@ import android.provider.Settings
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,6 +77,9 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentTargetDeviceName by appSettingsViewModel.targetDeviceName.collectAsState()
     val currentNotifFwd by appSettingsViewModel.notificationForwardingEnabled.collectAsState()
     val currentNotifMaxChars by appSettingsViewModel.notificationMaxChars.collectAsState()
+    val currentRideLogEnabled by appSettingsViewModel.rideLogEnabled.collectAsState()
+    val currentRideLogTreeUri by appSettingsViewModel.rideLogTreeUri.collectAsState()
+    val coroutineScope = rememberCoroutineScope()
 
     // ペアリング済みのBikeClockデバイス候補（設定画面の選択リスト／自動選択で使用）
     val context = LocalContext.current
@@ -241,6 +248,78 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                 }
             }
             
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // 乗降ログ書き出し (Mac mini日記 / Syncthing共有フォルダ diary-loc)
+            val rideFolderLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocumentTree()
+            ) { uri ->
+                uri?.let {
+                    context.contentResolver.takePersistableUriPermission(
+                        it,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    )
+                    appSettingsViewModel.saveRideLogTreeUri(it.toString())
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("乗降ログ書き出し", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "乗降イベントをSyncthing共有フォルダに記録(Mac miniの日記へ)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = currentRideLogEnabled,
+                    onCheckedChange = { appSettingsViewModel.saveRideLogEnabled(it) },
+                    colors = SwitchDefaults.colors()
+                )
+            }
+            if (currentRideLogEnabled && currentRideLogTreeUri.isNotBlank()) {
+                Text(
+                    "書き出し先: " + android.net.Uri.decode(currentRideLogTreeUri).substringAfterLast(":", ""),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                var rideExportResult by remember { mutableStateOf<String?>(null) }
+                OutlinedButton(onClick = {
+                    coroutineScope.launch {
+                        rideExportResult = "書き出し中..."
+                        val n = appSettingsViewModel.exportRideHistory()
+                        rideExportResult = if (n > 0) "履歴${n}件を書き出した(Syncthing同期まで数分)"
+                        else "位置付きの履歴がありません"
+                    }
+                }) { Text("履歴を書き出す(過去約2週間分)") }
+                rideExportResult?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (currentRideLogEnabled) {
+                if (currentRideLogTreeUri.isBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "書き出し先フォルダ(Syncthingで共有する diary-loc)を選択してください",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                // 権限失効・フォルダ再作成後に再選択できるよう常時表示する
+                OutlinedButton(onClick = { rideFolderLauncher.launch(null) }) {
+                    Text(if (currentRideLogTreeUri.isBlank()) "フォルダを選択" else "フォルダを変更")
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
             HorizontalDivider()
             Spacer(modifier = Modifier.height(16.dp))

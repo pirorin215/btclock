@@ -109,6 +109,23 @@ object Settings {
         intPreferencesKey("notification_max_chars"),
         DEFAULT_NOTIFICATION_MAX_CHARS
     )
+
+    /**
+     * 乗降ログの diary-loc 書き出し ON/OFF。
+     * ON で乗降イベント(接続/切断/定期履歴)のたびに SAF ツリー
+     * (Syncthing 共有の diary-loc)直下 cycleclock/ride-YYYY-MM-DD.jsonl へ
+     * 1行追記する(Mac mini 日記向け)。デフォルト OFF で既存動作に影響させない。
+     */
+    val RIDE_LOG_ENABLED = SettingKey.Direct(
+        booleanPreferencesKey("ride_log_enabled"),
+        false
+    )
+
+    /** 乗降ログの書き出し先 SAF ツリー URI（空 = 未選択） */
+    val RIDE_LOG_TREE_URI = SettingKey.Direct(
+        stringPreferencesKey("ride_log_tree_uri"),
+        ""
+    )
 }
 
 class AppSettingsRepository(private val context: Context) {

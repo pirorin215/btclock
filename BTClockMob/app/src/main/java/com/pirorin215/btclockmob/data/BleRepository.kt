@@ -333,6 +333,27 @@ class BleRepository(private val context: Context) {
         bluetoothGatt?.disconnect()
     }
 
+    /**
+     * GATTリンク実死の強制切断。
+     * 範囲外切断などでは onConnectionStateChange のコールバックが到達せず、
+     * 内部状態だけ Connected のままゾンビ化する（2026-10-09 乗降ログ disc 欠落事件）。
+     * close() してから明示的に Error へ遷移させる。Error 扱いにするのは
+     * BleConnectionManager 側で Disconnected=ユーザー起因(再接続しない)・
+     * Error=異常(自動再接続する)と区別されるため。disconnectSignal も発火し、
+     * 乗降ログの disc 記録も走る。
+     */
+    fun forceDisconnect() {
+        Log.w(TAG, "Forcing disconnect: link appears dead")
+        try {
+            bluetoothGatt?.disconnect()
+        } catch (e: Exception) {
+            Log.w(TAG, "disconnect() on dead link failed: ${e.message}")
+        }
+        close()
+        _connectionState.value = ConnectionState.Error("Forced disconnect: link dead")
+        _gattConnectionState.value = GattConnectionState.Error("Forced disconnect: link dead")
+    }
+
     fun close() {
         Log.d(TAG, "Closing GATT connection")
         try {

@@ -13,8 +13,8 @@ android {
         applicationId = "com.pirorin215.btclockmob"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 4
+        versionName = "1.2.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -77,6 +77,9 @@ dependencies {
 
     // DataStore for persistent settings
     implementation(libs.androidx.datastore.preferences)
+
+    // SAF ツリー操作(乗降ログの diary-loc 書き出し)
+    implementation("androidx.documentfile:documentfile:1.0.1")
 
     // Koin for DI
     implementation(libs.koin.android)

@@ -59,7 +59,8 @@ val bleModule = module {
             disconnectSignal = get<MutableSharedFlow<Unit>>(named("disconnectSignal")).asSharedFlow(),
             locationTracker = get(),
             deviceHistoryRepository = get(),
-            batteryLogRepository = get()
+            batteryLogRepository = get(),
+            rideLogExporter = get()
         )
     }
 }

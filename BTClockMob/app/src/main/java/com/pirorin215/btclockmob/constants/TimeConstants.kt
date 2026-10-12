@@ -21,4 +21,9 @@ object TimeConstants {
 
     // 送信シリアライズ（Phase 11: Write Request 完了待ちのタイムアウト）
     const val SERIAL_WRITE_TIMEOUT_MS = 2000L // 2秒
+
+    // 死リンク検知: 時刻同期の連続失敗この回数でGATTリンク切断と判定する
+    // （範囲外切断では onConnectionStateChange が飛ばされ Connected のまま
+    //   ゾンビ化するため・2回=約2分）
+    const val SYNC_FAIL_LIMIT = 2
 }
