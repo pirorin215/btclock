@@ -26,9 +26,9 @@
 ### 書き込み
 
 **エージェント書込可**: ビルド成功後、エージェントが
-`sh upload.sh` を実行してよい。書き込み先は開発用ポート（親 `~/dev/Arduino/AGENTS.md`
-§8 の `212101`）に限る。禁止ポート（HIDEF1 / HIDPC1 / 212301）は親 §8 の保護ルールが
-そのまま適用される。初回は `cp setting.sh.example setting.sh` で
+`sh upload.sh` を実行してよい。書き込み先は開発用ボードのポート（常設開発ポートは
+2026-10-18 USB再編で廃止 — 接続時に明示）に限る。禁止ポート（HIDEF1 / 1401=medicine）は
+親 §8 の保護ルールがそのまま適用される。初回は `cp setting.sh.example setting.sh` で
 `CYCLECLOCK_PORT` を設定すること。
 
 ### コーディング上の注意

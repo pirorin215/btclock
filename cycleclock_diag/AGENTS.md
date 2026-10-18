@@ -55,7 +55,7 @@ D1 を INPUT(TPS22810 OFF)→ System OFF(ウェイクソースなし・RESET で
 
 ## ビルド・書込・ログ
 
-- `bash compile.sh` / `sh upload.sh`(ポート `setting.sh`・開発共用 212101)
+- `bash compile.sh` / `sh upload.sh`(ポート `setting.sh`・接続時の明示パス)
 - `./consolelog.sh`(起動ログは列挙待ち 2.5s 内に流れる)
 - 起動〜System OFF まで約 8 秒(2.5+2+表示+3)
 
@@ -104,7 +104,7 @@ AN8008 の µA レンジは VΩ 端子共用・赤プローブ差し替え要)�
 
 - `bash compile.sh`(hibernate の on/off は `cycleclock.h` の
   `DIAG_EPAPER_HIBERNATE` を書き換えて再ビルド)
-- `sh upload.sh`(ポート `setting.sh`・開発共用 `/dev/cu.usbmodem212101`)
+- `sh upload.sh`(ポート `setting.sh`・接続時の明示パス)
 - `./consolelog.sh`
 - 書込は起床 3 分窓(v0.4.9 書込の注意と同じ。diag 版は USB 接続で起動するので
   実質いつでも書ける=USB挿入で起動→3分以内に書込が完了すれば良い…が

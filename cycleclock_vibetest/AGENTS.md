@@ -63,8 +63,8 @@ GY-BMI160 : VCC→3V3, GND→GND, SDA→D3, SCL→D6, SDO→GND(I2C 0x68),
 ## ビルド・書込・ログ
 
 - ビルド: `bash compile.sh`(FQBN `Seeeduino:nrf52:xiaonRF52840`)
-- 書込: `sh upload.sh`(ポートは `setting.sh` の `CYCLECLOCK_PORT`・開発共用ポート
-  `/dev/cu.usbmodem212101`。親 `~/dev/Arduino/AGENTS.md` §8 の保護ルール適用)
+- 書込: `sh upload.sh`(ポートは `setting.sh` の `CYCLECLOCK_PORT`・接続時の明示パス。
+  親 `~/dev/Arduino/AGENTS.md` §8 の保護ルール適用)
 - ログ: `./consolelog.sh`
 - 調整パラメータは .ino 冒頭の define(`LED_HOLD_MS`・`BMI_THR_DEFAULT` 等)
 
