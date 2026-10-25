@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -80,6 +81,7 @@ fun MainScreen(
     val context = LocalContext.current
     val connectionState by mainViewModel.connectionState.collectAsState()
     val latestBattery by mainViewModel.latestBattery.collectAsState()
+    val rssi by mainViewModel.rssi.collectAsState()
     val targetDevicePref by appSettingsViewModel.targetDeviceName.collectAsState()
     val logs: List<String> by mainViewModel.logs.collectAsState()
 
@@ -225,9 +227,15 @@ fun MainScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.clickable(enabled = switchable) { showDeviceMenu = true }
                                         ) {
+                                            // デバイス名は可変幅+省略表示にする。weightなしの後続要素
+                                            // （バッテリー・RSSI・切替矢印）が幅を先に確保し、狭い幅でも
+                                            // 切り詰められずに表示される（v1.4.0: RSSI表示の幅不足対策）
                                             Text(
                                                 text = headerName.ifBlank { disconnectedText },
-                                                style = MaterialTheme.typography.bodyMedium
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
                                             // 最新のバッテリー電圧（cycleclockのみ・GET:battery非対応機は非表示）
                                             latestBattery?.let { batt ->
@@ -239,6 +247,20 @@ fun MainScreen(
                                                         MaterialTheme.colorScheme.error
                                                     } else {
                                                         MaterialTheme.colorScheme.onSurface
+                                                    }
+                                                )
+                                            }
+                                            // リンク品質RSSI（スキャン発見時/接続中の測定値・色分けはgardia_radar準拠）
+                                            rssi?.let { rssiValue ->
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = "${rssiValue}dBm",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = when {
+                                                        rssiValue >= -60 -> Color(0xFF00C853)  // 緑: 強い
+                                                        rssiValue >= -70 -> Color(0xFFFFD600)  // 黄: 普通
+                                                        rssiValue >= -80 -> Color(0xFFFF9100)  // オレンジ: 弱い
+                                                        else -> MaterialTheme.colorScheme.error // 赤: 非常に弱い
                                                     }
                                                 )
                                             }

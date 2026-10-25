@@ -51,4 +51,15 @@
     <!-- Key Injector Accessibility Service -->
     <string name="accessibility_service_description">BikeClockスイッチ操作機能。外部スイッチでメディア再生制御などが可能になります。</string>
 
+    <!-- RSSI link quality control（自転車レーダー gardia_radar と同一の仕組み） -->
+    <string name="rssi_settings_title">RSSI設定</string>
+    <string name="rssi_settings_description">通信品質に基づいて接続と切断を制御します</string>
+    <string name="rssi_disconnect_enabled">RSSI自動切断を有効にする</string>
+    <string name="rssi_connect_threshold">接続時のしきい値</string>
+    <string name="rssi_connect_threshold_hint">この値を下回る場合は接続しません（スキャン時の判定）</string>
+    <string name="rssi_disconnect_threshold">切断時のしきい値</string>
+    <string name="rssi_disconnect_threshold_hint">この値を下回った場合、切断カウントを増やします（接続後の監視）</string>
+    <string name="rssi_disconnect_count">切断判定回数</string>
+    <string name="rssi_disconnect_count_hint">切断時のしきい値を下回った回数がこの値に達した場合、切断します（5秒ごとにチェック）</string>
+
 </resources>

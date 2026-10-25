@@ -36,8 +36,9 @@ val bleModule = module {
         BleConnectionManager(
             get<Context>(),
             get<CoroutineScope>(),
-            get(),
-            get(),
+            get(),   // BleRepository
+            get(),   // AppSettingsRepository（RSSI接続/切断しきい値の読み取り用）
+            get(),   // LogManager
             get(named("connectionStateFlow")),
             get(named("onDeviceReadyEvent")),
             get(named("disconnectSignal"))

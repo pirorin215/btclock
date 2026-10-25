@@ -49,6 +49,17 @@ class BleScanService : Service() {
     // (bikeclock=バイク / cycleclock=自転車 の切り替えをアプリ操作なしで成立させる)
     private var acceptedNames: Set<String> = emptySet()
 
+    // --- スキャン開始のレート制限対策（自転車レーダー gardia_radar の RadarScanService と同一の防御） ---
+    // RSSI接続スキップ後の「1秒ごとの再スキャン」がAndroidのレート制限(30秒間5回の
+    // startScan)に当たると、startScanが沈黙失敗してスキャン停止のまま発見できなくなり、
+    // 「近づいても二度と再接続されない」状態になる(v1.4.1で発生)。これを防ぐため
+    // スキャン開始を6秒間隔に制限し、onScanFailed時は指数バックオフで再試行する。
+    private var scanRetryCount = 0
+    private var scanRetryJob: Job? = null
+    private val maxScanRetryDelay = 30_000L // 最大30秒
+    private var lastScanStartTime = 0L
+    private val MIN_SCAN_INTERVAL_MS = 6000L // Android制限(30秒間5回)に対する安全マージン
+
     // Bluetooth状態変化を監視するBroadcastReceiver
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -70,10 +81,12 @@ class BleScanService : Service() {
 
     private val scanSettings = ScanSettings.Builder()
         .setScanMode(ScanSettings.SCAN_MODE_LOW_POWER) // バッテリー消費を抑える
-        .setCallbackType(ScanSettings.CALLBACK_TYPE_FIRST_MATCH) // 最初の一致のみ報告（省電力）
+        // 全マッチ報告(自転車レーダー gardia_radar と同一)。
+        // FIRST_MATCH は「フィルタに最初にマッチした1回だけ報告」のため、RSSI接続フィルタで
+        // スキップし続けると以後の発見が報告されず「近づいても二度と再接続されない」状態になる(v1.4.2で発生)。
+        // ALL_MATCHES ならアドバタイズのたびに報告され、近づいたときのRSSI判定で再接続できる。
+        .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
         .setMatchMode(ScanSettings.MATCH_MODE_STICKY) // 不定期なアドバタイズも検出
-        .setNumOfMatches(ScanSettings.MATCH_NUM_ONE_ADVERTISEMENT) // 1つのアドバタイズで報告
-        .setReportDelay(1000L) // 1秒バッチ処理で報告（省電力）
         .build()
 
     /**
@@ -146,6 +159,7 @@ class BleScanService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "BleScanService onDestroy")
+        scanRetryJob?.cancel()
         stopBleScan()
         stopForeground(true)
         // BroadcastReceiverの登録解除
@@ -160,6 +174,11 @@ class BleScanService : Service() {
         return null // 今回はバインドサービスとして使用しない
     }
 
+    /**
+     * スキャン開始（スロットル付き・v1.4.2）。
+     * MIN_SCAN_INTERVAL_MS(6秒)以内の開始要求は待機してから実際に開始する。
+     * gardia_radar の RadarScanService と同一の方式。
+     */
     @SuppressLint("MissingPermission")
     private fun startBleScan() {
         if (bluetoothAdapter == null || !bluetoothAdapter!!.isEnabled) {
@@ -168,6 +187,27 @@ class BleScanService : Service() {
             return
         }
 
+        // スキャン開始間隔の制限（Androidの "scanning too frequently" を回避）
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastScanStartTime
+        if (elapsed < MIN_SCAN_INTERVAL_MS) {
+            val waitMs = MIN_SCAN_INTERVAL_MS - elapsed
+            Log.w(TAG, "Scan throttled - waiting ${waitMs}ms (min interval=${MIN_SCAN_INTERVAL_MS}ms)")
+            scanRetryJob?.cancel()
+            scanRetryJob = CoroutineScope(Dispatchers.IO).launch {
+                delay(waitMs)
+                doStartBleScan()
+            }
+            return
+        }
+
+        doStartBleScan()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun doStartBleScan() {
+        lastScanStartTime = System.currentTimeMillis()
+        scanRetryJob?.cancel()
         stopBleScan() // 既存のスキャンがあれば停止
 
         // 接続先を解決: ユーザー選択があればその1台、未選択ならペアリング済みの全BikeClockデバイス。
@@ -180,6 +220,7 @@ class BleScanService : Service() {
         acceptedNames = names.toSet()
         Log.d(TAG, "Starting BLE scan in service... (accepted names: $names)")
         bluetoothAdapter?.bluetoothLeScanner?.startScan(buildScanFilters(names), scanSettings, bleScanCallback)
+        scanRetryCount = 0
 
         // Removed scan timeout job for continuous scanning
     }
@@ -203,7 +244,7 @@ class BleScanService : Service() {
                 // The ViewModel will be responsible for restarting the scan later.
                 stopBleScan()
                 CoroutineScope(Dispatchers.IO).launch {
-                    BleScanServiceManager.emitDeviceFound(result.device)
+                    BleScanServiceManager.emitDeviceFound(result.device, result.rssi)
                 }
             } else {
                 Log.v(TAG, "Ignoring device: $deviceName")
@@ -220,10 +261,26 @@ class BleScanService : Service() {
                     Log.d(TAG, "Target device '$deviceName' found in batch! Signaling MainViewModel to connect.")
                     // Do NOT stop scan here; continue scanning for automatic re-detection
                     CoroutineScope(Dispatchers.IO).launch {
-                        BleScanServiceManager.emitDeviceFound(result.device)
+                        BleScanServiceManager.emitDeviceFound(result.device, result.rssi)
                     }
                     return // 1つ見つけたら処理を終了
                 }
+            }
+            }
+
+            override fun onScanFailed(errorCode: Int) {
+            super.onScanFailed(errorCode)
+            Log.e(TAG, "Scan failed with error code: $errorCode")
+
+            // スキャン停止のまま発見できなくなることを防ぐため、指数バックオフで再試行する
+            // （5s, 10s, 20s, 30s, 30s...・gardia_radar の RadarScanService と同一の方式）
+            val delayMs = minOf(5000L * (1L shl minOf(scanRetryCount, 2)), maxScanRetryDelay)
+            scanRetryCount++
+            Log.w(TAG, "Retrying scan in ${delayMs}ms (attempt $scanRetryCount)")
+            scanRetryJob?.cancel()
+            scanRetryJob = CoroutineScope(Dispatchers.IO).launch {
+                delay(delayMs)
+                startBleScan()
             }
             }
     } // Closing brace for bleScanCallback object.

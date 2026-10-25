@@ -59,6 +59,7 @@ sealed class BleEvent {
     data class Error(val message: String) : BleEvent()
     data class ImuChunk(val data: ByteArray) : BleEvent()   // Phase 14-B: IMUバイナリチャンク（0xAA55マジック）
     data class InferenceLog(val line: String) : BleEvent()  // 推論ログ行（INFER:...・精度チューニング用）
+    data class RssiChanged(val rssi: Int) : BleEvent()      // 接続中のリンクRSSI測定（RSSI自動切断の判定用）
 }
 
 @SuppressLint("MissingPermission")
@@ -94,6 +95,20 @@ class BleRepository(private val context: Context) {
     val deviceVersion = _deviceVersion.asStateFlow()
 
     /**
+     * リンク品質 RSSI (dBm)。スキャン発見時は [setRssi] でスキャン値、接続中は
+     * onReadRemoteRssi で接続リンクの測定値が入る（設定画面のしきい値調整・
+     * MainScreen の品質表示に使用）。
+     */
+    private val _rssi = MutableStateFlow<Int?>(null)
+    val rssi = _rssi.asStateFlow()
+    fun setRssi(rssi: Int) {
+        _rssi.value = rssi
+    }
+
+    // RSSI読み取りタイマー（接続中のみ・5秒ごとにreadRemoteRssiを発火）
+    private var rssiReadJob: kotlinx.coroutines.Job? = null
+
+    /**
      * 通知分割転送の受信バッファ上限(バイト)。0=非対応(旧ファーム)で
      * 通知は従来どおり単一Write(180B上限)で送る。
      * BleOrchestrator が接続毎の GET:features probe 結果を書き込む。
@@ -118,6 +133,7 @@ class BleRepository(private val context: Context) {
                     Log.d(TAG, "Successfully connected to $deviceAddress")
                     _connectionState.value = ConnectionState.Connected(gatt.device)
                     _gattConnectionState.value = GattConnectionState.Connected(gatt)
+                    startRssiReader() // 接続中のリンク品質監視を開始（RSSI自動切断用）
                     // MTU request should be initiated by the ViewModel after connection.
                     // For now, we discover services directly. A delay might be needed.
                     repositoryScope.launch {
@@ -130,12 +146,14 @@ class BleRepository(private val context: Context) {
                     }
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     Log.d(TAG, "Successfully disconnected from $deviceAddress")
+                    stopRssiReader()
                     close() // Close the GATT client.
                     _connectionState.value = ConnectionState.Disconnected
                     _gattConnectionState.value = GattConnectionState.Disconnected
                 }
             } else {
                 Log.e(TAG, "onConnectionStateChange error: status=$status for $deviceAddress")
+                stopRssiReader()
                 close()
                 _connectionState.value = ConnectionState.Error("GATT Error $status")
                 _gattConnectionState.value = GattConnectionState.Error("GATT Error $status")
@@ -261,6 +279,16 @@ class BleRepository(private val context: Context) {
                 pendingWriteResult = null
             }
         }
+
+        override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                Log.d(TAG, "onReadRemoteRssi: rssi=$rssi dBm")
+                _rssi.value = rssi
+                repositoryScope.launch { _events.emit(BleEvent.RssiChanged(rssi)) }
+            } else {
+                Log.w(TAG, "onReadRemoteRssi failed: status=$status")
+            }
+        }
     }
 
     private val bondStateReceiver = object : BroadcastReceiver() {
@@ -367,6 +395,7 @@ class BleRepository(private val context: Context) {
 
     fun close() {
         Log.d(TAG, "Closing GATT connection")
+        stopRssiReader()
         try {
             context.unregisterReceiver(bondStateReceiver)
         } catch (e: IllegalArgumentException) {
@@ -374,6 +403,37 @@ class BleRepository(private val context: Context) {
         }
         bluetoothGatt?.close()
         bluetoothGatt = null
+        _rssi.value = null
+    }
+
+    /**
+     * 接続中のリンクRSSI監視を開始する（自転車レーダー gardia_radar と同一の方式）。
+     * 5秒ごとに readRemoteRssi() を発火し、結果は onReadRemoteRssi →
+     * BleEvent.RssiChanged で BleConnectionManager 側のしきい値判定に流れる。
+     */
+    private fun startRssiReader() {
+        rssiReadJob?.cancel()
+        rssiReadJob = repositoryScope.launch {
+            try {
+                Log.d(TAG, "RSSI reader started")
+                while (bluetoothGatt != null) {
+                    delay(TimeConstants.RSSI_READ_INTERVAL_MS)
+                    bluetoothGatt?.let {
+                        if (!it.readRemoteRssi()) {
+                            Log.w(TAG, "Failed to request RSSI read")
+                        }
+                    }
+                }
+                Log.d(TAG, "GATT is null, stopping RSSI reader")
+            } catch (e: Exception) {
+                Log.e(TAG, "RSSI reader exception: ${e.message}", e)
+            }
+        }
+    }
+
+    private fun stopRssiReader() {
+        rssiReadJob?.cancel()
+        rssiReadJob = null
     }
 
     fun requestMtu(mtu: Int): Boolean {

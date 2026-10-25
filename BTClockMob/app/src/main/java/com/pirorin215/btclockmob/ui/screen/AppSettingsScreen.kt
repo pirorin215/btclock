@@ -79,6 +79,10 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentNotifMaxChars by appSettingsViewModel.notificationMaxChars.collectAsState()
     val currentRideLogEnabled by appSettingsViewModel.rideLogEnabled.collectAsState()
     val currentRideLogTreeUri by appSettingsViewModel.rideLogTreeUri.collectAsState()
+    val currentRssiDisconnectEnabled by appSettingsViewModel.rssiDisconnectEnabled.collectAsState()
+    val currentRssiConnectThreshold by appSettingsViewModel.rssiConnectThreshold.collectAsState()
+    val currentRssiDisconnectThreshold by appSettingsViewModel.rssiDisconnectThreshold.collectAsState()
+    val currentRssiDisconnectCount by appSettingsViewModel.rssiDisconnectCount.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
     // ペアリング済みのBikeClockデバイス候補（設定画面の選択リスト／自動選択で使用）
@@ -93,6 +97,10 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     var selectedRouteOffset by remember(currentRouteOffset) { mutableStateOf(currentRouteOffset) }
     var notifFwdChecked by remember(currentNotifFwd) { mutableStateOf(currentNotifFwd) }
     var selectedNotifMaxChars by remember(currentNotifMaxChars) { mutableStateOf(currentNotifMaxChars.toFloat()) }
+    var rssiDisconnectChecked by remember(currentRssiDisconnectEnabled) { mutableStateOf(currentRssiDisconnectEnabled) }
+    var selectedRssiConnectThreshold by remember(currentRssiConnectThreshold) { mutableStateOf(currentRssiConnectThreshold.toFloat()) }
+    var selectedRssiDisconnectThreshold by remember(currentRssiDisconnectThreshold) { mutableStateOf(currentRssiDisconnectThreshold.toFloat()) }
+    var selectedRssiDisconnectCount by remember(currentRssiDisconnectCount) { mutableStateOf(currentRssiDisconnectCount.toFloat()) }
     // 未選択(空)のときは先頭デバイスを事前選択（アプリが実際に接続しに行く対象と一致させる）
     var targetDeviceNameInput by remember(currentTargetDeviceName, pairedDevices) {
         mutableStateOf(currentTargetDeviceName.ifBlank { pairedDevices.firstOrNull() ?: "" })
@@ -120,6 +128,10 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
         appSettingsViewModel.saveTargetDeviceName(targetDeviceNameInput.trim())
         appSettingsViewModel.saveNotificationForwardingEnabled(notifFwdChecked)
         appSettingsViewModel.saveNotificationMaxChars(selectedNotifMaxChars.roundToInt())
+        appSettingsViewModel.saveRssiDisconnectEnabled(rssiDisconnectChecked)
+        appSettingsViewModel.saveRssiConnectThreshold(selectedRssiConnectThreshold.roundToInt())
+        appSettingsViewModel.saveRssiDisconnectThreshold(selectedRssiDisconnectThreshold.roundToInt())
+        appSettingsViewModel.saveRssiDisconnectCount(selectedRssiDisconnectCount.roundToInt())
         onBack()
     }
 
@@ -390,6 +402,92 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                         Text(themeMode.name, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // RSSI リンク品質管理（自転車レーダー gardia_radar と同一の仕組み）
+            Text(stringResource(R.string.rssi_settings_title), style = MaterialTheme.typography.bodyLarge)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.rssi_settings_description),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // RSSI自動切断の有効/無効
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(stringResource(R.string.rssi_disconnect_enabled), style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = rssiDisconnectChecked,
+                    onCheckedChange = { rssiDisconnectChecked = it }
+                )
+            }
+
+            if (rssiDisconnectChecked) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 接続時のしきい値（スキャン時の判定）
+                Text(
+                    text = "${stringResource(R.string.rssi_connect_threshold)}: ${selectedRssiConnectThreshold.roundToInt()} dBm",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Slider(
+                    value = selectedRssiConnectThreshold,
+                    onValueChange = { selectedRssiConnectThreshold = it },
+                    valueRange = -100f..-40f,
+                    steps = 59
+                )
+                Text(
+                    text = stringResource(R.string.rssi_connect_threshold_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 切断時のしきい値（接続後の監視）
+                Text(
+                    text = "${stringResource(R.string.rssi_disconnect_threshold)}: ${selectedRssiDisconnectThreshold.roundToInt()} dBm",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Slider(
+                    value = selectedRssiDisconnectThreshold,
+                    onValueChange = { selectedRssiDisconnectThreshold = it },
+                    valueRange = -100f..-40f,
+                    steps = 59
+                )
+                Text(
+                    text = stringResource(R.string.rssi_disconnect_threshold_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 切断判定回数
+                Text(
+                    text = "${stringResource(R.string.rssi_disconnect_count)}: ${selectedRssiDisconnectCount.roundToInt()}",
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Slider(
+                    value = selectedRssiDisconnectCount,
+                    onValueChange = { selectedRssiDisconnectCount = it },
+                    valueRange = 1f..10f,
+                    steps = 8
+                )
+                Text(
+                    text = stringResource(R.string.rssi_disconnect_count_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

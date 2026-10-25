@@ -126,6 +126,37 @@ object Settings {
         stringPreferencesKey("ride_log_tree_uri"),
         ""
     )
+
+    /**
+     * RSSI リンク品質管理（自転車レーダー gardia_radar と同一の仕組み）。
+     * 通信品質に基づいて BLE 接続と切断を制御する:
+     * - 接続時: スキャン発見時の RSSI が RSSI_CONNECT_THRESHOLD 未満なら接続をスキップ
+     *   （遠い位置からの接続で弱いリンクに張り付くのを防ぐ・再スキャンを継続）
+     * - 接続中: RSSI_READ_INTERVAL_MS ごとに readRemoteRssi() で測定し、
+     *   RSSI_DISCONNECT_THRESHOLD 未満が RSSI_DISCONNECT_COUNT 回連続したら切断
+     *   （スマホの置き忘れ死リンクでのバッテリー枯渇防止・切断後は自動再接続で待機）
+     * RSSI_DISCONNECT_ENABLED = false で接続中の監視のみ OFF
+     * （接続時フィルタはしきい値比較なので常時有効）
+     */
+    val RSSI_DISCONNECT_ENABLED = SettingKey.Direct(
+        booleanPreferencesKey("rssi_disconnect_enabled"),
+        false
+    )
+
+    val RSSI_DISCONNECT_THRESHOLD = SettingKey.Direct(
+        intPreferencesKey("rssi_disconnect_threshold"),
+        -90 // -90dBm
+    )
+
+    val RSSI_DISCONNECT_COUNT = SettingKey.Direct(
+        intPreferencesKey("rssi_disconnect_count"),
+        3 // 3回連続で切断（15秒）
+    )
+
+    val RSSI_CONNECT_THRESHOLD = SettingKey.Direct(
+        intPreferencesKey("rssi_connect_threshold"),
+        -80 // -80dBm（接続時のしきい値）
+    )
 }
 
 class AppSettingsRepository(private val context: Context) {

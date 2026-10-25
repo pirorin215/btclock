@@ -87,6 +87,28 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 - ACCESS_FINE_LOCATION
 - FOREGROUND_SERVICE_CONNECTED_DEVICE
 
+### 1b. RSSI リンク品質管理（v1.4.4・自転車レーダー gardia_radar と同一の仕組み・実機フルサイクル確認済み）
+
+通信品質（BLE RSSI）に基づいて接続と切断を制御する。設定「アプリ設定 > RSSI設定」で調整可。
+
+- **接続時フィルタ**: スキャン発見時の RSSI が「接続時のしきい値」（デフォルト -80dBm）未満なら
+  接続をスキップして再スキャンを継続する（遠い位置からの接続で弱いリンクに張り付くのを防止。
+  近づけば強い状態で自動接続される）
+- **接続中の自動切断**（「RSSI自動切断を有効にする」ON時・デフォルト OFF）: 接続中は5秒ごとに
+  `readRemoteRssi()` でリンク品質を測定し、「切断時のしきい値」（デフォルト -90dBm）未満が
+  「切断判定回数」（デフォルト 3回=15秒）連続したら強制切断する。スマホの置き忘れ死リンクでの
+  バッテリー枯渇を防ぐ。**切断後の再接続は bonded 直接接続をスキップしてスキャン経由で品質を
+  再判定する**（直接接続だとフィルタを通らず即復活するため。弱いままなら待機スキャンを継続し、
+  近づけば接続される）
+- **スキャン戦略**（gardia_radar と同一）: `CALLBACK_TYPE_ALL_MATCHES`（発見のたび報告・
+  FIRST_MATCH だとスキップ後の発見が二度と報告されない）・スキャン開始は6秒間隔にスロットル
+  （Android の startScan 制限 30秒間5回対策）・`onScanFailed` は指数バックオフ再試行。
+  しきい値はデバイス組み合わせ（BT電波性能）で最適値が変わるため、RSSI 表示の実測で調整する
+- **RSSI 表示**: MainScreen のヘッダーに現在のリンク品質を色分け表示（緑/黄/オレンジ/赤）
+- 実装: `BleConnectionManager`（しきい値判定・発見時は Disconnected/Error を接続許可）・
+  `BleRepository`（RSSI読み取り）・`BleScanServiceManager.deviceFoundFlow`（スキャンRSSIの受け渡し）
+- 既存の死リンク検知（時刻同期連続失敗→forceDisconnect・SYNC_FAIL_LIMIT）と独立して動作する
+
 ### 2. 時刻同期
 
 BikeClockデバイスにJST時刻（Unixタイムスタンプ）を送信します。

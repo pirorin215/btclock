@@ -50,6 +50,9 @@ class MainViewModel(
 
     // --- State exposed from orchestrator and managers ---
     val connectionState: StateFlow<ConnectionState> = bleConnectionManager.connectionState
+
+    /** リンク品質RSSI（スキャン発見時はスキャン値・接続中はリンク測定値・MainScreen表示用） */
+    val rssi: StateFlow<Int?> = bleConnectionManager.rssi
     val currentOperation: StateFlow<BleOperation> = bleOrchestrator.currentOperation
     val navigationEvent: SharedFlow<NavigationEvent> = bleOrchestrator.navigationEvent
     val currentForegroundLocation = locationMonitor.currentForegroundLocation

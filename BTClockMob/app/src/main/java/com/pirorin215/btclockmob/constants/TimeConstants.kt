@@ -26,4 +26,7 @@ object TimeConstants {
     // （範囲外切断では onConnectionStateChange が飛ばされ Connected のまま
     //   ゾンビ化するため・2回=約2分）
     const val SYNC_FAIL_LIMIT = 2
+
+    // RSSI リンク品質管理: 接続中のRSSI読み取り間隔（自転車レーダー gardia_radar と同じ5秒）
+    const val RSSI_READ_INTERVAL_MS = 5000L
 }

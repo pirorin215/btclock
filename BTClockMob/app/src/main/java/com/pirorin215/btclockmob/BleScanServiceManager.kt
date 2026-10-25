@@ -24,14 +24,19 @@ object BleScanServiceManager {
     @Volatile
     var targetDeviceName: String = ""
 
-    private val _deviceFoundFlow = MutableSharedFlow<BluetoothDevice>(extraBufferCapacity = 1)
-    val deviceFoundFlow: SharedFlow<BluetoothDevice> = _deviceFoundFlow.asSharedFlow()
+    /**
+     * 接続候補デバイスの発見通知。Pair の second はスキャン時の RSSI (dBm)。
+     * BleConnectionManager が RSSI 接続しきい値フィルタに使う
+     * （自転車レーダー gardia_radar と同一の仕組み）。
+     */
+    private val _deviceFoundFlow = MutableSharedFlow<Pair<BluetoothDevice, Int>>(extraBufferCapacity = 1)
+    val deviceFoundFlow: SharedFlow<Pair<BluetoothDevice, Int>> = _deviceFoundFlow.asSharedFlow()
 
     private val _restartScanFlow = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val restartScanFlow: SharedFlow<Unit> = _restartScanFlow.asSharedFlow()
 
-    suspend fun emitDeviceFound(device: BluetoothDevice) {
-        _deviceFoundFlow.emit(device)
+    suspend fun emitDeviceFound(device: BluetoothDevice, rssi: Int) {
+        _deviceFoundFlow.emit(Pair(device, rssi))
     }
 
     suspend fun emitRestartScan() {

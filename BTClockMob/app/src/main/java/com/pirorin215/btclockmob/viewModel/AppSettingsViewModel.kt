@@ -100,6 +100,40 @@ class AppSettingsViewModel(
             initialValue = ""
         )
 
+    // --- RSSI リンク品質管理（自転車レーダー gardia_radar と同一の仕組み）---
+
+    /** 接続中のRSSI自動切断 ON/OFF */
+    val rssiDisconnectEnabled: StateFlow<Boolean> = appSettingsRepository.getFlow(Settings.RSSI_DISCONNECT_ENABLED)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
+    /** 接続時のRSSIしきい値（スキャン時の判定・これ未満は接続しない） */
+    val rssiConnectThreshold: StateFlow<Int> = appSettingsRepository.getFlow(Settings.RSSI_CONNECT_THRESHOLD)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = -80
+        )
+
+    /** 切断時のRSSIしきい値（接続後の監視・これ未満で切断カウントを増やす） */
+    val rssiDisconnectThreshold: StateFlow<Int> = appSettingsRepository.getFlow(Settings.RSSI_DISCONNECT_THRESHOLD)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = -90
+        )
+
+    /** 切断判定回数（しきい値未満の連続回数・5秒ごとにチェック） */
+    val rssiDisconnectCount: StateFlow<Int> = appSettingsRepository.getFlow(Settings.RSSI_DISCONNECT_COUNT)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = 3
+        )
+
     fun saveThemeMode(themeMode: ThemeMode) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.THEME_MODE, themeMode)
@@ -167,6 +201,30 @@ class AppSettingsViewModel(
     fun saveRideLogTreeUri(uri: String) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.RIDE_LOG_TREE_URI, uri)
+        }
+    }
+
+    fun saveRssiDisconnectEnabled(enable: Boolean) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.RSSI_DISCONNECT_ENABLED, enable)
+        }
+    }
+
+    fun saveRssiConnectThreshold(threshold: Int) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.RSSI_CONNECT_THRESHOLD, threshold)
+        }
+    }
+
+    fun saveRssiDisconnectThreshold(threshold: Int) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.RSSI_DISCONNECT_THRESHOLD, threshold)
+        }
+    }
+
+    fun saveRssiDisconnectCount(count: Int) {
+        viewModelScope.launch {
+            appSettingsRepository.setValue(Settings.RSSI_DISCONNECT_COUNT, count)
         }
     }
 
