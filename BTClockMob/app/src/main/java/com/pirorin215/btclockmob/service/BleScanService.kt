@@ -274,7 +274,7 @@ class BleScanService : Service() {
 
             // スキャン停止のまま発見できなくなることを防ぐため、指数バックオフで再試行する
             // （5s, 10s, 20s, 30s, 30s...・gardia_radar の RadarScanService と同一の方式）
-            val delayMs = minOf(5000L * (1L shl minOf(scanRetryCount, 2)), maxScanRetryDelay)
+            val delayMs = minOf(5000L * (1L shl minOf(scanRetryCount, 3)), maxScanRetryDelay)
             scanRetryCount++
             Log.w(TAG, "Retrying scan in ${delayMs}ms (attempt $scanRetryCount)")
             scanRetryJob?.cancel()
