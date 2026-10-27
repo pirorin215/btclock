@@ -54,11 +54,15 @@ class BleScanService : Service() {
     // startScan)に当たると、startScanが沈黙失敗してスキャン停止のまま発見できなくなり、
     // 「近づいても二度と再接続されない」状態になる(v1.4.1で発生)。これを防ぐため
     // スキャン開始を6秒間隔に制限し、onScanFailed時は指数バックオフで再試行する。
-    private var scanRetryCount = 0
     private var scanRetryJob: Job? = null
-    private val maxScanRetryDelay = 30_000L // 最大30秒
+    private val SCAN_RETRY_INTERVAL_MS = 10_000L // スキャン失敗時の再試行間隔(定周期)
     private var lastScanStartTime = 0L
     private val MIN_SCAN_INTERVAL_MS = 6000L // Android制限(30秒間5回)に対する安全マージン
+    // startScanが受理されてスキャン中か。stopScanは「登録済みコールバック」に対してのみ
+    // 呼ぶ必要がある: 未登録状態でstopScanするとBluetoothスタックがアプリのスキャン登録を
+    // unregisterし("onError(): Unregistering the app")、以後のstartScanがすべて
+    // error 2(APPLICATION_REGISTRATION_FAILED)になる(Pixel 10で実測・v1.4.4/v1.4.5で発生)
+    private var isScanning = false
 
     // Bluetooth状態変化を監視するBroadcastReceiver
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
@@ -204,11 +208,15 @@ class BleScanService : Service() {
         doStartBleScan()
     }
 
+    /**
+     * スキャン開始本体。stopScanはstopBleScan内のガード(isScanning)により
+     * スキャン実行中のときしか呼ばれない。
+     */
     @SuppressLint("MissingPermission")
     private fun doStartBleScan() {
         lastScanStartTime = System.currentTimeMillis()
         scanRetryJob?.cancel()
-        stopBleScan() // 既存のスキャンがあれば停止
+        stopBleScan()
 
         // 接続先を解決: ユーザー選択があればその1台、未選択ならペアリング済みの全BikeClockデバイス。
         // スキャン開始時に解決することで、起動時の設定読み込みレースを回避する。
@@ -220,16 +228,18 @@ class BleScanService : Service() {
         acceptedNames = names.toSet()
         Log.d(TAG, "Starting BLE scan in service... (accepted names: $names)")
         bluetoothAdapter?.bluetoothLeScanner?.startScan(buildScanFilters(names), scanSettings, bleScanCallback)
-        scanRetryCount = 0
+        isScanning = true
 
         // Removed scan timeout job for continuous scanning
     }
 
     @SuppressLint("MissingPermission")
     private fun stopBleScan() {
+        // 未登録状態でのstopScanを禁止(stopBleScanの全呼び出し元はこのガードを通る)
+        if (!isScanning) return
         Log.d(TAG, "Stopping BLE scan in service.")
         bluetoothAdapter?.bluetoothLeScanner?.stopScan(bleScanCallback)
-        // Removed scanJob?.cancel() as scanJob is no longer used for timeout
+        isScanning = false
     }
 
     private val bleScanCallback = @SuppressLint("MissingPermission") object : ScanCallback() {
@@ -271,15 +281,12 @@ class BleScanService : Service() {
             override fun onScanFailed(errorCode: Int) {
             super.onScanFailed(errorCode)
             Log.e(TAG, "Scan failed with error code: $errorCode")
+            isScanning = false
 
-            // スキャン停止のまま発見できなくなることを防ぐため、指数バックオフで再試行する
-            // （5s, 10s, 20s, 30s, 30s...・gardia_radar の RadarScanService と同一の方式）
-            val delayMs = minOf(5000L * (1L shl minOf(scanRetryCount, 3)), maxScanRetryDelay)
-            scanRetryCount++
-            Log.w(TAG, "Retrying scan in ${delayMs}ms (attempt $scanRetryCount)")
+            // 定周期(10秒)で再試行(gardia_radar の RadarScanService と同一方式)
             scanRetryJob?.cancel()
             scanRetryJob = CoroutineScope(Dispatchers.IO).launch {
-                delay(delayMs)
+                delay(SCAN_RETRY_INTERVAL_MS)
                 startBleScan()
             }
             }
