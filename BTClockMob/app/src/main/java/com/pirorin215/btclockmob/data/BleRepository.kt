@@ -107,6 +107,8 @@ class BleRepository(private val context: Context) {
 
     // RSSI読み取りタイマー（接続中のみ・5秒ごとにreadRemoteRssiを発火）
     private var rssiReadJob: kotlinx.coroutines.Job? = null
+    // 最後にonReadRemoteRssiが成功した時刻（死リンク検知・v1.4.7）
+    private var lastRssiSuccessMs = 0L
 
     /**
      * 通知分割転送の受信バッファ上限(バイト)。0=非対応(旧ファーム)で
@@ -283,6 +285,7 @@ class BleRepository(private val context: Context) {
         override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.d(TAG, "onReadRemoteRssi: rssi=$rssi dBm")
+                lastRssiSuccessMs = System.currentTimeMillis()
                 _rssi.value = rssi
                 repositoryScope.launch { _events.emit(BleEvent.RssiChanged(rssi)) }
             } else {
@@ -410,18 +413,26 @@ class BleRepository(private val context: Context) {
      * 接続中のリンクRSSI監視を開始する（自転車レーダー gardia_radar と同一の方式）。
      * 5秒ごとに readRemoteRssi() を発火し、結果は onReadRemoteRssi →
      * BleEvent.RssiChanged で BleConnectionManager 側のしきい値判定に流れる。
+     * あわせて応答タイムアウト(RSSI_DEAD_LINK_TIMEOUT_MS)による死リンク検知も行う。
      */
     private fun startRssiReader() {
+        lastRssiSuccessMs = System.currentTimeMillis()
         rssiReadJob?.cancel()
         rssiReadJob = repositoryScope.launch {
             try {
                 Log.d(TAG, "RSSI reader started")
                 while (bluetoothGatt != null) {
                     delay(TimeConstants.RSSI_READ_INTERVAL_MS)
-                    bluetoothGatt?.let {
-                        if (!it.readRemoteRssi()) {
-                            Log.w(TAG, "Failed to request RSSI read")
-                        }
+                    val gatt = bluetoothGatt ?: break
+                    gatt.readRemoteRssi()
+                    // 応答が途絶えたままなら死リンク: 切断して自動再接続フローへ。
+                    // 範囲外切断ではonConnectionStateChangeが飛ばされConnectedのまま
+                    // ゾンビ化する(RSSI表示が最後の値で凍結)ための早期検知
+                    val silentMs = System.currentTimeMillis() - lastRssiSuccessMs
+                    if (silentMs > TimeConstants.RSSI_DEAD_LINK_TIMEOUT_MS) {
+                        Log.w(TAG, "No RSSI response for ${silentMs}ms - link appears dead")
+                        forceDisconnect()
+                        break
                     }
                 }
                 Log.d(TAG, "GATT is null, stopping RSSI reader")

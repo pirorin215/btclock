@@ -29,4 +29,9 @@ object TimeConstants {
 
     // RSSI リンク品質管理: 接続中のRSSI読み取り間隔（自転車レーダー gardia_radar と同じ5秒）
     const val RSSI_READ_INTERVAL_MS = 5000L
+
+    // RSSI 応答タイムアウト: 接続中のonReadRemoteRssi応答がこの時間途絶えたら死リンクと
+    // 判定して切断する(5秒周期×4回)。範囲外切断ではonConnectionStateChangeが飛ばされ
+    // Connectedのままゾンビ化するケース(v1.4.6実測・RSSI表示が最後の値で凍結)を早期検知する
+    const val RSSI_DEAD_LINK_TIMEOUT_MS = 20_000L
 }
