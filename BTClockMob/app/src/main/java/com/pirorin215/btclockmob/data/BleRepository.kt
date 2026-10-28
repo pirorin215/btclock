@@ -74,6 +74,8 @@ class BleRepository(private val context: Context) {
     private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    // binder コールバックと IO コルーチンの双方から読み書きされるため可視性を保証
+    @Volatile
     private var bluetoothGatt: BluetoothGatt? = null
 
     var commandCharacteristic: BluetoothGattCharacteristic? = null
@@ -108,6 +110,8 @@ class BleRepository(private val context: Context) {
     // RSSI読み取りタイマー（接続中のみ・5秒ごとにreadRemoteRssiを発火）
     private var rssiReadJob: kotlinx.coroutines.Job? = null
     // 最後にonReadRemoteRssiが成功した時刻（死リンク検知・v1.4.7）
+    // GATTコールバック(binder)が書き込み、RSSI reader(IO)が読むため可視性を保証
+    @Volatile
     private var lastRssiSuccessMs = 0L
 
     /**
@@ -129,6 +133,11 @@ class BleRepository(private val context: Context) {
 
     private val gattCallback: BluetoothGattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            // 既にclose()済みの古いGATTクライアントからのコールバックは無視する。
+            // forceDisconnect()はclose()後にError(=自動再接続契約)を設定するため、close前に
+            // キューに入った遅延DISCONNECTEDが後から到達してDisconnectedに上書きすると
+            // 自動再接続が消失する
+            if (gatt !== bluetoothGatt) return
             val deviceAddress = gatt.device.address
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
@@ -283,6 +292,9 @@ class BleRepository(private val context: Context) {
         }
 
         override fun onReadRemoteRssi(gatt: BluetoothGatt, rssi: Int, status: Int) {
+            // 失敗応答(status != SUCCESS)は応答があっても lastRssiSuccessMs を更新しない。
+            // 「GATT層は生きているが読み取りが失敗し続ける劣化リンク」も切断して
+            // 張り直す対象とするのが死リンク検知の意図(v1.4.7設計)
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 Log.d(TAG, "onReadRemoteRssi: rssi=$rssi dBm")
                 lastRssiSuccessMs = System.currentTimeMillis()
@@ -424,7 +436,12 @@ class BleRepository(private val context: Context) {
                 while (bluetoothGatt != null) {
                     delay(TimeConstants.RSSI_READ_INTERVAL_MS)
                     val gatt = bluetoothGatt ?: break
-                    gatt.readRemoteRssi()
+                    // 要求自体が受理されない場合(GATTビジー等)は応答が来ず、放置すると
+                    // 死リンクタイムアウトの原因が「無応答」か「要求失敗」か区別できなくなる。
+                    // 警告のみで継続(タイムアウト判定は silent 時間で行う)
+                    if (!gatt.readRemoteRssi()) {
+                        Log.w(TAG, "readRemoteRssi() request rejected (GATT busy?)")
+                    }
                     // 応答が途絶えたままなら死リンク: 切断して自動再接続フローへ。
                     // 範囲外切断ではonConnectionStateChangeが飛ばされConnectedのまま
                     // ゾンビ化する(RSSI表示が最後の値で凍結)ための早期検知

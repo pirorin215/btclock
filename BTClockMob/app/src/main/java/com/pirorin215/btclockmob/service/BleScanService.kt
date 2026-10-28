@@ -62,6 +62,8 @@ class BleScanService : Service() {
     // 呼ぶ必要がある: 未登録状態でstopScanするとBluetoothスタックがアプリのスキャン登録を
     // unregisterし("onError(): Unregistering the app")、以後のstartScanがすべて
     // error 2(APPLICATION_REGISTRATION_FAILED)になる(Pixel 10で実測・v1.4.4/v1.4.5で発生)
+    // binder コールバック(onScanFailed等)と IO コルーチン(リトライ)の双方から読み書きされるため可視性を保証
+    @Volatile
     private var isScanning = false
 
     // Bluetooth状態変化を監視するBroadcastReceiver
@@ -227,7 +229,14 @@ class BleScanService : Service() {
         }
         acceptedNames = names.toSet()
         Log.d(TAG, "Starting BLE scan in service... (accepted names: $names)")
-        bluetoothAdapter?.bluetoothLeScanner?.startScan(buildScanFilters(names), scanSettings, bleScanCallback)
+        // scanner の取得に失敗した場合(BTが直後にOFFになった等)は startScan を呼ばず
+        // isScanning も立てない(未開始のまま「スキャン中」扱いにすると後続の停止系が壊れる)
+        val scanner = bluetoothAdapter?.bluetoothLeScanner
+        if (scanner == null) {
+            Log.w(TAG, "BluetoothLeScanner unavailable - scan not started")
+            return
+        }
+        scanner.startScan(buildScanFilters(names), scanSettings, bleScanCallback)
         isScanning = true
 
         // Removed scan timeout job for continuous scanning
