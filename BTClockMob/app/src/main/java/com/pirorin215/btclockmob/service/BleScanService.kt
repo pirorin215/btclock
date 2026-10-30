@@ -44,8 +44,7 @@ class BleScanService : Service() {
     private lateinit var bluetoothManager: BluetoothManager
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var scanJob: Job? = null
-    // 接続を受け付けるデバイス名の集合。
-    // ユーザー選択あり → その1台のみ / 未選択 → ペアリング済みBikeClock全台
+    // 接続を受け付けるデバイス名の集合。常にペアリング済みBikeClock全台
     // (bikeclock=バイク / cycleclock=自転車 の切り替えをアプリ操作なしで成立させる)
     private var acceptedNames: Set<String> = emptySet()
 
@@ -107,14 +106,11 @@ class BleScanService : Service() {
 
     /**
      * 接続候補デバイス名を解決する。
-     * - ユーザー選択(preferred)があればその1台のみ(従来動作を維持)
-     * - 未選択ならペアリング済みの全 "BikeClock-" デバイス
-     *   (どれが広告していても接続=乗り物の切り替えが自動)
-     * - ペアリング済みが1台も無ければ空(呼び出し元でスキャン中止)
+     * 常にペアリング済みの全 "BikeClock-" デバイス（どれが広告していても接続=
+     * 乗り物の切り替えが自動）。
+     * ペアリング済みが1台も無ければ空(呼び出し元でスキャン中止)。
      */
-    private fun resolveAcceptedNames(preferred: String): List<String> {
-        val p = preferred.trim()
-        if (p.isNotBlank()) return listOf(p)
+    private fun resolveAcceptedNames(): List<String> {
         return bondedBikeClockDeviceNames(this)
     }
 
@@ -220,11 +216,15 @@ class BleScanService : Service() {
         scanRetryJob?.cancel()
         stopBleScan()
 
-        // 接続先を解決: ユーザー選択があればその1台、未選択ならペアリング済みの全BikeClockデバイス。
-        // スキャン開始時に解決することで、起動時の設定読み込みレースを回避する。
-        val names = resolveAcceptedNames(BleScanServiceManager.targetDeviceName)
+        // 接続先は常にペアリング済みの全BikeClockデバイス。スキャン開始時に解決することで、
+        // 起動時のペアリング読み込みレースを回避する。
+        val names = resolveAcceptedNames()
         if (names.isEmpty()) {
-            Log.w(TAG, "No target BikeClock device available (not paired / not selected). Skipping scan.")
+            Log.w(TAG, "No target BikeClock device available (not paired). Skipping scan.")
+            // bonded一覧はBTスタックの初期化タイミングで一時的に空になることがあり、
+            // v1.4.9以降は接続がスキャン発見経由のみのため、このまま放置すると
+            // 「スキャンなし・未接続」の恒久沈黙になる。定周期で解決を再試行する。
+            scheduleScanRetry()
             return
         }
         acceptedNames = names.toSet()
@@ -234,12 +234,23 @@ class BleScanService : Service() {
         val scanner = bluetoothAdapter?.bluetoothLeScanner
         if (scanner == null) {
             Log.w(TAG, "BluetoothLeScanner unavailable - scan not started")
+            BleScanServiceManager.isScanRunning = false
             return
         }
         scanner.startScan(buildScanFilters(names), scanSettings, bleScanCallback)
         isScanning = true
+        BleScanServiceManager.isScanRunning = true
 
         // Removed scan timeout job for continuous scanning
+    }
+
+    /** スキャン開始を定周期(10秒)後に再試行する(onScanFailed/bonded解決失敗の共通回復) */
+    private fun scheduleScanRetry() {
+        scanRetryJob?.cancel()
+        scanRetryJob = CoroutineScope(Dispatchers.IO).launch {
+            delay(SCAN_RETRY_INTERVAL_MS)
+            startBleScan()
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -249,6 +260,7 @@ class BleScanService : Service() {
         Log.d(TAG, "Stopping BLE scan in service.")
         bluetoothAdapter?.bluetoothLeScanner?.stopScan(bleScanCallback)
         isScanning = false
+        BleScanServiceManager.isScanRunning = false
     }
 
     private val bleScanCallback = @SuppressLint("MissingPermission") object : ScanCallback() {
@@ -291,13 +303,10 @@ class BleScanService : Service() {
             super.onScanFailed(errorCode)
             Log.e(TAG, "Scan failed with error code: $errorCode")
             isScanning = false
+            BleScanServiceManager.isScanRunning = false
 
             // 定周期(10秒)で再試行(gardia_radar の RadarScanService と同一方式)
-            scanRetryJob?.cancel()
-            scanRetryJob = CoroutineScope(Dispatchers.IO).launch {
-                delay(SCAN_RETRY_INTERVAL_MS)
-                startBleScan()
-            }
+            scheduleScanRetry()
             }
     } // Closing brace for bleScanCallback object.
 

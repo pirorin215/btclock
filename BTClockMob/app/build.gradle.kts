@@ -13,8 +13,8 @@ android {
         applicationId = "com.pirorin215.btclockmob"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "1.4.8"
+        versionCode = 16
+        versionName = "1.4.10"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

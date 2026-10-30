@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -55,20 +54,6 @@ class BleConnectionManager(
     // 接続中: RSSIが切断しきい値未満が連続回数続いたらforceDisconnect()で切断し、
     //         Error扱いの自動再接続フローへ（近づけば強い状態で再接続される）
     private var consecutivePoorRssiCount = 0 // RSSIがしきい値を下回った連続回数
-
-    // RSSI切断直後フラグ。立てられている間は bonded 直接接続をせず、スキャン発見時の
-    // RSSIで品質を再判定してから接続する（直後の再接続で即復活するのを防ぐ）
-    @Volatile
-    private var rssiDisconnectPending = false
-
-    // 直近のスキャンRSSI。restartScan の bonded 直接接続分岐はスキャンを経由しないため
-    // RSSIフィルタを通せない。直近スキャン値がしきい値未満のときはスキャン経由へ
-    // フォールバックさせて品質を再判定する。
-    @Volatile
-    private var lastScanRssi: Int? = null
-
-    private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
 
     // Bluetooth状態変化を監視するBroadcastReceiver
     private val bluetoothStateReceiver = object : BroadcastReceiver() {
@@ -140,7 +125,6 @@ class BleConnectionManager(
                     logManager.addLog("Connected to device")
                     userInitiatedDisconnect = false // Reset flag on successful connection
                     consecutivePoorRssiCount = 0    // 新しいリンクで判定カウントをリセット
-                    lastScanRssi = null             // 直近スキャン値の役目は終了
                     repository.requestMtu(517) // Request larger MTU for faster transfers
                 }
                 is ConnectionState.Disconnected -> {
@@ -203,7 +187,6 @@ class BleConnectionManager(
             BleScanServiceManager.deviceFoundFlow.collectLatest { (device, rssi) ->
                 logManager.addLog("Device found: ${device.name} (RSSI: ${rssi}dBm)")
                 repository.setRssi(rssi)
-                lastScanRssi = rssi
                 // 接続を受け付けられる状態: Disconnected(通常)または Error(死リンク検知/RSSI切断後の
                 // 自動再接続待ち)。forceDisconnect()はErrorのまま残すため、Errorを除外すると
                 // 発見を「Already connected」と誤判定して捨て、再接続できなくなる(v1.4.3で発生)
@@ -221,7 +204,6 @@ class BleConnectionManager(
                     }
 
                     logManager.addDebugLog("RSSI acceptable for connection: ${rssi}dBm (threshold: ${connectThreshold}dBm)")
-                    rssiDisconnectPending = false
                     connect(device)
                 } else {
                     logManager.addDebugLog("Already connected. Skipping.")
@@ -259,53 +241,14 @@ class BleConnectionManager(
             return
         }
 
-        val preferred = BleScanServiceManager.targetDeviceName.trim()
-
-        if (preferred.isBlank()) {
-            // 未選択: ペアリング済みのBikeClock複数台のどれが広告していても接続する。
-            // 単一デバイスへの直接接続ショートカットは使わない(電源の入っていない
-            // デバイスへの接続試行で最大30秒待たされるのを避ける)。
-            logManager.addDebugLog("No preferred device - scanning for any bonded BikeClock")
-            scope.launch {
-                BleScanServiceManager.emitRestartScan()
-            }
-            return
-        }
-
-        // 選択済み: 従来どおりbondedデバイスへの直接接続を優先する
-        val bondedDevices = bluetoothAdapter?.bondedDevices
-        val bondedBTDevice = bondedDevices?.find { it.name.equals(preferred, ignoreCase = true) }
-
-        if (bondedBTDevice != null) {
-            // RSSI切断直後は bonded 直接接続をせずスキャン経由で品質を再判定する
-            // （直接接続だとRSSI接続フィルタを通らず即復活してしまう）
-            if (rssiDisconnectPending) {
-                logManager.addLog("After RSSI disconnect - skipping bonded direct connect, re-evaluating quality via scan")
-                scope.launch {
-                    BleScanServiceManager.emitRestartScan()
-                }
-                return
-            }
-            // 直近のスキャンで品質不足だった場合はスキャン経由で再判定する。
-            // bonded直接接続はスキャンを経由しないためRSSI接続フィルタが効かず、
-            // ここを素通りすると「弱いリンクで接続→RSSI切断」のループになる
-            scope.launch {
-                val lastRssi = lastScanRssi
-                val threshold = appSettingsRepository.getFlow(Settings.RSSI_CONNECT_THRESHOLD).first()
-                if (lastRssi != null && lastRssi < threshold) {
-                    logManager.addLog("Last scan RSSI ${lastRssi}dBm below threshold ${threshold}dBm - using scan to re-evaluate quality")
-                    BleScanServiceManager.emitRestartScan()
-                } else {
-                    logManager.addDebugLog("Attempting bonded device connection")
-                    connect(bondedBTDevice)
-                }
-            }
-        } else {
-            // If no bonded device is found, start a new scan via the service
-            logManager.addDebugLog("Requesting new scan")
-            scope.launch {
-                BleScanServiceManager.emitRestartScan()
-            }
+        // 接続は常にスキャン発見経由（ペアリング済みの全BikeClockを待ち受け、
+        // 広告しているデバイスのRSSIを判定してから接続する）。
+        // bonded直接接続ショートカットは使わない: 電源の入っていないデバイスへの
+        // 接続試行で最大30秒待たされる問題と、スキャンを経由しないためRSSI接続
+        // フィルタを素通りする問題を避ける。
+        logManager.addDebugLog("Requesting scan for any bonded BikeClock")
+        scope.launch {
+            BleScanServiceManager.emitRestartScan()
         }
     }
 
@@ -345,10 +288,6 @@ class BleConnectionManager(
                 if (consecutivePoorRssiCount >= requiredCount) {
                     logManager.addLog("RSSI too poor for ${requiredCount} consecutive reads - disconnecting")
                     consecutivePoorRssiCount = 0
-                    // 切断後の自動再接続がbonded直接接続で即復活しないよう、次の接続は
-                    // スキャン発見時のRSSIで品質を再判定してから行う
-                    rssiDisconnectPending = true
-                    lastScanRssi = null
                     repository.forceDisconnect()
                 }
             } else {
@@ -409,7 +348,18 @@ class BleConnectionManager(
                 }
                 logManager.addDebugLog("BleScanService restart command sent")
             } else {
-                logManager.addDebugLog("Service health check: BleScanService is running")
+                // v1.4.10: サービスが生きていてもスキャンだけ停止したまま放置されると、
+                // 接続はスキャン発見経由のみ(v1.4.9)なので再接続できなくなる。
+                // 未接続(Disconnected/Error)かつスキャン停止なら再開を要求する。
+                val state = _connectionStateFlow.value
+                if (!BleScanServiceManager.isScanRunning &&
+                    (state is ConnectionState.Disconnected || state is ConnectionState.Error)
+                ) {
+                    logManager.addLog("Scan stopped while disconnected - requesting scan restart")
+                    restartScan(forceScan = true)
+                } else {
+                    logManager.addDebugLog("Service health check: BleScanService is running")
+                }
             }
         } catch (e: SecurityException) {
             logManager.addDebugLog("Service check failed: Permission denied (may be normal on some Android versions)")

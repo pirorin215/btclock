@@ -39,7 +39,6 @@ import androidx.compose.material3.SwitchDefaults
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.platform.LocalContext
-import com.pirorin215.btclockmob.bondedBikeClockDeviceNames
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -74,7 +73,6 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentInterval by appSettingsViewModel.historyIntervalMin.collectAsState()
     val currentDistance by appSettingsViewModel.historyDistanceM.collectAsState()
     val currentRouteOffset by appSettingsViewModel.routeCenterOffset.collectAsState()
-    val currentTargetDeviceName by appSettingsViewModel.targetDeviceName.collectAsState()
     val currentNotifFwd by appSettingsViewModel.notificationForwardingEnabled.collectAsState()
     val currentNotifMaxChars by appSettingsViewModel.notificationMaxChars.collectAsState()
     val currentRideLogEnabled by appSettingsViewModel.rideLogEnabled.collectAsState()
@@ -85,9 +83,8 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     val currentRssiDisconnectCount by appSettingsViewModel.rssiDisconnectCount.collectAsState()
     val coroutineScope = rememberCoroutineScope()
 
-    // ペアリング済みのBikeClockデバイス候補（設定画面の選択リスト／自動選択で使用）
+    // 通知アクセス許可状態。ユーザーがシステム設定から戻った時に ON_RESUME で再評価する。
     val context = LocalContext.current
-    val pairedDevices = remember { bondedBikeClockDeviceNames(context) }
 
     // 状態を管理
     var selectedThemeMode by remember(currentThemeMode) { mutableStateOf(currentThemeMode) }
@@ -101,10 +98,6 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
     var selectedRssiConnectThreshold by remember(currentRssiConnectThreshold) { mutableStateOf(currentRssiConnectThreshold.toFloat()) }
     var selectedRssiDisconnectThreshold by remember(currentRssiDisconnectThreshold) { mutableStateOf(currentRssiDisconnectThreshold.toFloat()) }
     var selectedRssiDisconnectCount by remember(currentRssiDisconnectCount) { mutableStateOf(currentRssiDisconnectCount.toFloat()) }
-    // 未選択(空)のときは先頭デバイスを事前選択（アプリが実際に接続しに行く対象と一致させる）
-    var targetDeviceNameInput by remember(currentTargetDeviceName, pairedDevices) {
-        mutableStateOf(currentTargetDeviceName.ifBlank { pairedDevices.firstOrNull() ?: "" })
-    }
 
     // 通知アクセス許可状態。ユーザーがシステム設定から戻った時に ON_RESUME で再評価する。
     var listenerEnabled by remember { mutableStateOf(isNotificationListenerEnabled(context)) }
@@ -125,7 +118,6 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
         appSettingsViewModel.saveHistoryIntervalMin(selectedInterval.roundToInt())
         appSettingsViewModel.saveHistoryDistanceM(selectedDistance.roundToInt())
         appSettingsViewModel.saveRouteCenterOffset(selectedRouteOffset)
-        appSettingsViewModel.saveTargetDeviceName(targetDeviceNameInput.trim())
         appSettingsViewModel.saveNotificationForwardingEnabled(notifFwdChecked)
         appSettingsViewModel.saveNotificationMaxChars(selectedNotifMaxChars.roundToInt())
         appSettingsViewModel.saveRssiDisconnectEnabled(rssiDisconnectChecked)
@@ -158,38 +150,6 @@ fun AppSettingsScreen(appSettingsViewModel: AppSettingsViewModel, onBack: () -> 
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Target BLE device name (multi-device switching)
-            Text(
-                text = stringResource(R.string.target_device_name),
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (pairedDevices.isEmpty()) {
-                Text(
-                    text = stringResource(R.string.target_device_name_no_paired),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                pairedDevices.forEach { name ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        RadioButton(
-                            selected = name == targetDeviceNameInput,
-                            onClick = { targetDeviceNameInput = name }
-                        )
-                        Text(name, style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            HorizontalDivider()
-            Spacer(modifier = Modifier.height(16.dp))
-
             // New: Auto-start on boot setting
             Row(
                 modifier = Modifier.fillMaxWidth(),

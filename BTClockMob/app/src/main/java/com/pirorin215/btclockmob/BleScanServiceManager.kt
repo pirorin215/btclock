@@ -16,13 +16,12 @@ object BleScanServiceManager {
     const val DEVICE_NAME_PREFIX = "BikeClock-"
 
     /**
-     * ユーザーが設定で選んだ接続先デバイス名（preferred）。
-     * 空 = 未選択で、実行時にペアリング済みの全 "BikeClock-" デバイスが接続候補となる
-     * （実際に広告しているデバイスへ接続=バイク/自転車の切り替えが自動・BleScanService参照）。
-     * MainApplication が AppSettingsRepository の値をここへ同期する。
+     * BLEスキャンが実行中か(BleScanService が更新・health check が参照)。
+     * 「サービスは生きているがスキャンだけ停止」の沈黙を未接続時に検知して
+     * 再開要求する(v1.4.9以降は接続がスキャン発見経由のみのため重要)。
      */
     @Volatile
-    var targetDeviceName: String = ""
+    var isScanRunning: Boolean = false
 
     /**
      * 接続候補デバイスの発見通知。Pair の second はスキャン時の RSSI (dBm)。
@@ -57,17 +56,4 @@ fun bondedBikeClockDeviceNames(context: Context): List<String> {
             ?.sorted()
             ?: emptyList()
     }.getOrDefault(emptyList())
-}
-
-/**
- * 接続先デバイス名を解決する。
- * - preferred(ユーザー選択)が空でなければそれを使用
- * - 空なら ペアリング済みの先頭 "BikeClock-" デバイスを自動使用
- * - 該当が無ければ空文字（呼び出し元でスキャン中止など）
- */
-@SuppressLint("MissingPermission")
-fun resolveTargetDeviceName(preferred: String, context: Context): String {
-    val p = preferred.trim()
-    if (p.isNotBlank()) return p
-    return bondedBikeClockDeviceNames(context).firstOrNull() ?: ""
 }

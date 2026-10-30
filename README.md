@@ -41,7 +41,7 @@ BTClockはバッテリー非搭載の時計デバイスです。スマホアプ�
 
 #### BTClockMobアプリ
 
-- ✅ **BLE自動接続**: 近接するBikeClockデバイスの自動検出
+- ✅ **BLE自動接続**: OSペアリング済みの全 `BikeClock-` デバイスを常時待ち受け、広告しているデバイスへ自動接続（バイク/自転車の切り替え操作は不要。接続時はスキャン発見のRSSIで品質判定し、弱い状態では接続を待つ）
 - ✅ **時刻同期**: BLE経由でのUnixタイムスタンプ送信
 - ✅ **接続履歴**: イグニッションON/OFF（BLE接続/切断）に連動した位置情報の自動記録
 - ✅ **バックグラウンド実行**: 常駐サービスによるシームレスな体験
@@ -75,7 +75,9 @@ btclock/
 
 | 項目 | 値 |
 |------|-----|
-| デバイス名 | `BikeClock-0001` |
+| デバイス名の接頭辞 | `BikeClock-`（BTClockMob はこの接頭辞でOSペアリング済みデバイスを接続候補に判定） |
+| bikeclock（バイク）のデバイス名 | `BikeClock-0001` |
+| cycleclock（自転車）のデバイス名 | `BikeClock-Cycle` |
 | メーカー | pirorin215 |
 | モデル | BikeClock Dual |
 
@@ -252,9 +254,9 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ### 3. ペアリング設定
 
 1. **AndroidのBluetooth設定**を開く
-2. 「BikeClock」デバイスを探してペアリング
+2. 使用するBikeClockデバイスをペアリング（複数台ペアリング可・接続候補はペアリング済みの `BikeClock-` 接頭辞デバイス）
 3. **BTClockMobアプリ**を起動
-4. アプリが自動的にBikeClock-0001を検出・接続
+4. アプリが広告中のBikeClockデバイスへ自動接続（接続先の選択操作は不要）
 
 ## 使用方法
 

@@ -78,17 +78,6 @@ object Settings {
     )
 
     /**
-     * 接続先BLEデバイス名（ユーザー選択）。
-     * 空 = 未選択。実行時にOSペアリング済みの全 "BikeClock-" デバイスが接続候補となり、
-     * 実際に広告しているデバイスへ自動接続する（バイク/自転車の切り替えがアプリ操作不要）。
-     * デバイス名はハードコードせず、接頭辞 "BikeClock-" のルールのみで運用する。
-     */
-    val TARGET_DEVICE_NAME = SettingKey.Direct(
-        stringPreferencesKey("target_device_name"),
-        ""
-    )
-
-    /**
      * スマホ通知のBikeClock転送 ON/OFF（Phase 11）。
      * NotificationListenerService が onNotificationPosted でこの設定を参照する。
      * default = true（許可されていれば転送する）。

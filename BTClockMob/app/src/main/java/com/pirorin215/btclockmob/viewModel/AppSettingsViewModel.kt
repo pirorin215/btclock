@@ -59,14 +59,6 @@ class AppSettingsViewModel(
             initialValue = 18f
         )
 
-    /** 接続先BLEデバイス名（空 = 未選択＝自動でペアリング済み先頭デバイスを使用） */
-    val targetDeviceName: StateFlow<String> = appSettingsRepository.getFlow(Settings.TARGET_DEVICE_NAME)
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = ""
-        )
-
     /** スマホ通知のBikeClock転送 ON/OFF（Phase 11） */
     val notificationForwardingEnabled: StateFlow<Boolean> =
         appSettingsRepository.getFlow(Settings.NOTIFICATION_FORWARDING_ENABLED)
@@ -167,16 +159,6 @@ class AppSettingsViewModel(
     fun saveRouteLabelFontSize(size: Float) {
         viewModelScope.launch {
             appSettingsRepository.setValue(Settings.ROUTE_LABEL_FONT_SIZE, size)
-        }
-    }
-
-    /**
-     * 接続先BLEデバイス名を保存する。
-     * 値の伝播・再接続は MainApplication のオブザーバが行う（設定フロー経由）。
-     */
-    fun saveTargetDeviceName(name: String) {
-        viewModelScope.launch {
-            appSettingsRepository.setValue(Settings.TARGET_DEVICE_NAME, name)
         }
     }
 
